@@ -19,6 +19,7 @@ guarda todo con timestamps y califica BUENO / MALO.
 - `07-admin.md` — ventana administrador
 - `08-logging-debug.md` — logs de debug y trazabilidad (app_logs, ui_state_log)
 - `09-impresora-zebra.md` — Zebra ZT231, ZPL, editor de etiquetas, reimpresión
+- `10-auto-update.md` — instalador NSIS, GitHub Releases, auto-update, changelog
 
 ## 3. Fuentes en carpeta local (no subir a GitHub, ver .gitignore)
 - `Hypot_Manual.pdf` — App. D Remote BUS RS-232, sec. Remote I/O y PLC Control

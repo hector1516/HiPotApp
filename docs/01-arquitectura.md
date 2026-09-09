@@ -91,7 +91,24 @@
 | **Roles** | operator (prueba) / admin (config) |
 | **Auditoría** | Log de cada escaneo y ejecución |
 
-## 5. Requisitos del Sistema
+## 5. Auto-Update y Distribución
+
+| Componente | Tecnología | Función |
+|------------|-----------|---------|
+| **Instalador** | NSIS (.exe) | Instalador ligero, incluido en Tauri |
+| **Build auto** | GitHub Actions | Compilar en cada tag `v*` |
+| **Distribución** | GitHub Releases | Almacenar .exe + firmas |
+| **Updater** | Tauri Updater Plugin | Detectar + descargar + instalar |
+| **Changelog** | RELEASE_NOTES.md | Notas por versión |
+| **Seguridad** | Firma digital (.sig) | Verificar integridad |
+
+```
+Desarrollador → git tag v1.0.1 → GitHub Actions → Release → Panel PC detecta → Actualiza
+```
+
+Documentación completa: `docs/10-auto-update.md`
+
+## 6. Requisitos del Sistema
 
 ### **PC Local (Panel 10.1")**
 - Windows 11 Pro
