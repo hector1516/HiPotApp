@@ -1,0 +1,54 @@
+[build]
+  before = ["build"]
+  args = ["--remote-settings=off"]
+
+[package]
+  productName = "HiPod"
+  version = "1.0.0"
+  installerToken = ""
+  longDescription = ""
+  copyright = ""
+  debrisRemoval = true
+  mac = {
+    exemptionArchitectures = ["INTEL64", "ARM64"]
+  }
+
+[tauri]
+  active = true
+  category = "dev tools"
+  api = ""
+  bundleIdentifier = "com.hipot.app"
+  productName = "HiPod"
+  version = "1.0.0"
+  copyright = ""
+  platinum = ""
+  requiredFeatures = []
+  msix = { "targetPlatforms = [] }
+  after = null
+  skipSigning = false
+
+  [tauri.window]
+    shadow = false
+    transparent = false
+    alwaysOnTop = false
+    visible = true
+    skipTaskbar = false
+    focus = true
+    fullscreen = false
+    resizable = true
+    minimizable = true
+    maximizable = true
+    minimizable = true
+    closable = true
+    frame = true
+    position = "center"
+    size = [1200, 800]
+    min-size = [800, 600]
+    max-size = [2560, 1600]
+    position = "center"
+   [[tauri.window]]
+      name = "admin"
+      title = "HiPod - Admin Panel"
+      size = [1000, 700]
+      min-size = [800, 600]
+      max-size = [2000, 1500]

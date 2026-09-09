@@ -1,0 +1,44 @@
+# Secretos y credenciales - NUNCA commitear tokens
+*.token
+*.key
+.env
+.env.*
+credentials.*
+**/secrets.*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Tauri / Node
+tauri/node_modules/
+tauri/src-tauri/target/
+**/node_modules/
+dist-ssr/
+*.log
+
+# DB local
+*.db
+*.sqlite
+*.sqlite3
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Manuales e instaladores grandes (ya están en local, no subir a GitHub)
+*.msi
+Hypot_Manual.pdf
+H4_IVI_Driver_Getting_Started_Guide.pdf
+Gemini_Generated_Image_*.jpg
+
+# Temporales de extracción
+extracted.txt
+relevant.txt
+manual_content.txt
+extract.ps1
