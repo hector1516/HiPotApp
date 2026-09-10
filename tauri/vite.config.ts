@@ -9,7 +9,12 @@ const root = dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   plugins: [react()],
   clearScreen: false,
-  server: { port: 1420, strictPort: true, proxy: { '/api': 'http://localhost:8000' } },
+  server: {
+    port: 1420,
+    strictPort: true,
+    proxy: { '/api': 'http://localhost:8000' },
+    watch: { ignored: ['**/src-tauri/target/**'] }
+  },
   build: {
     target: 'esnext',
     rollupOptions: {
