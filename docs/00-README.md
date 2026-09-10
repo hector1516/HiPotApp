@@ -1,7 +1,7 @@
 # HiPotApp — Documento maestro
 
 Repo: https://github.com/hector1516/HiPotApp
-Estado: fase de plan / diseño. Aún no hay implementación final.
+Estado: Implementación base completada (Backend FastAPI + Frontend React Tauri v2). Ver [OPENCODE_HANDOFF.md](../OPENCODE_HANDOFF.md) para el estado actual de sincronización.
 
 ## 1. Qué es
 App de escritorio para estación de pruebas:
