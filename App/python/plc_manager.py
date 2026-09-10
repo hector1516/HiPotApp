@@ -48,10 +48,19 @@ class PLCManager:
                 pass
         self.connected = False
 
+    def update_config(self, ip: str, rack: int = 0, slot: int = 1, simulate: bool = True):
+        self.ip = ip
+        self.rack = int(rack)
+        self.slot = int(slot)
+        self.simulate = simulate or not HAS_SNAP7
+        if self.connected:
+            self.disconnect()
+        self.connect()
+
     # --- primitivas ---
     def read_word(self, db: int, start: int) -> int:
         if self.simulate:
-            return int(self._sim.get((db, start, "W"), 1))
+            return int(self._sim.get((db, start, "W"), 0))
         data = self.client.db_read(db, start, 2)
         return int.from_bytes(data, "big", signed=False)
 
@@ -60,6 +69,25 @@ class PLCManager:
             self._sim[(db, start, "W")] = int(value) & 0xFFFF
             return
         self.client.db_write(db, start, int(value).to_bytes(2, "big"))
+
+    def read_tag(self, db: int, start: int, data_type: str = "REAL", bit: int = 0):
+        dt = (data_type or "REAL").upper()
+        if dt == "BOOL":
+            return self.read_bool(db, start, bit)
+        elif dt in ("WORD", "INT"):
+            return self.read_word(db, start)
+        else:
+            return self.read_real(db, start)
+
+    def write_tag(self, db: int, start: int, data_type: str, value, bit: int = 0):
+        dt = (data_type or "REAL").upper()
+        if dt == "BOOL":
+            val = bool(value) if isinstance(value, bool) else str(value).lower() in ("true", "1", "yes", "on")
+            self.write_bool(db, start, val, bit)
+        elif dt in ("WORD", "INT"):
+            self.write_word(db, start, int(value))
+        else:
+            self.write_real(db, start, float(value))
 
     def set_mode(self, mode: int) -> bool:
         """1=auto, 2=manual. DB1.DBW110."""

@@ -715,14 +715,71 @@ def import_export_log(limit: int = 20):
         s.close()
 
 
-# ---------- plc tags ----------
+# ---------- plc config & tags ----------
+@router.get("/admin/plc-config")
+def get_plc_config():
+    from ..models import Configuration
+    s = _sf()()
+    try:
+        ip = s.query(Configuration).filter_by(config_key="plc_ip").first()
+        rack = s.query(Configuration).filter_by(config_key="plc_rack").first()
+        slot = s.query(Configuration).filter_by(config_key="plc_slot").first()
+        sim = s.query(Configuration).filter_by(config_key="plc_simulate").first()
+        return {
+            "ip": ip.config_value if ip else "192.168.1.10",
+            "rack": int(rack.config_value) if rack else 0,
+            "slot": int(slot.config_value) if slot else 1,
+            "simulate": (sim.config_value.lower() == "true") if sim else True,
+        }
+    finally:
+        s.close()
+
+
+@router.post("/admin/plc-config")
+def set_plc_config(body: dict):
+    from ..models import Configuration
+    s = _sf()()
+    try:
+        keys = {
+            "plc_ip": str(body.get("ip", "192.168.1.10")),
+            "plc_rack": str(body.get("rack", 0)),
+            "plc_slot": str(body.get("slot", 1)),
+            "plc_simulate": str(body.get("simulate", True)),
+        }
+        for k, v in keys.items():
+            ex = s.query(Configuration).filter_by(config_key=k).first()
+            if ex:
+                ex.config_value = v
+            else:
+                s.add(Configuration(config_key=k, config_value=v))
+        s.commit()
+        p = _plc()
+        p.update_config(ip=keys["plc_ip"], rack=int(keys["plc_rack"]),
+                         slot=int(keys["plc_slot"]), simulate=(keys["plc_simulate"].lower() == "true"))
+        return {"status": "saved", "config": get_plc_config()}
+    finally:
+        s.close()
+
+
 @router.get("/admin/plc-tags")
 def list_plc_tags():
     from ..models import PlcTag
     s = _sf()()
     try:
-        return [{"id": t.id, "name": t.name, "db": t.db_number, "offset": t.offset,
-                 "type": t.data_type, "bit": t.bit} for t in s.query(PlcTag).all()]
+        tags = s.query(PlcTag).all()
+        plc = _plc()
+        out = []
+        for t in tags:
+            try:
+                val = plc.read_tag(t.db_number, t.offset, t.data_type, t.bit)
+            except Exception:
+                val = None
+            out.append({
+                "id": t.id, "name": t.name, "db": t.db_number, "offset": t.offset,
+                "type": t.data_type, "bit": t.bit, "value": val,
+                "description": t.description, "unit": t.unit
+            })
+        return out
     finally:
         s.close()
 
@@ -732,9 +789,12 @@ def create_plc_tag(body: dict):
     from ..models import PlcTag
     s = _sf()()
     try:
-        t = PlcTag(name=body.get("name", ""), db_number=body.get("db", 1),
-                   offset=body.get("offset", 0), data_type=body.get("type", "REAL"),
-                   bit=body.get("bit", 0), description=body.get("description"),
+        t = PlcTag(name=body.get("name", "").strip().upper(),
+                   db_number=int(body.get("db", 1)),
+                   offset=int(body.get("offset", 0)),
+                   data_type=body.get("type", "REAL").strip().upper(),
+                   bit=int(body.get("bit", 0)),
+                   description=body.get("description"),
                    unit=body.get("unit"))
         s.add(t); s.commit()
         return {"status": "created", "id": t.id}
@@ -742,16 +802,28 @@ def create_plc_tag(body: dict):
         s.close()
 
 
-# ---------- modo manual ----------
+@router.delete("/admin/plc-tags/{tid}")
+def delete_plc_tag(tid: int):
+    from ..models import PlcTag
+    s = _sf()()
+    try:
+        t = s.query(PlcTag).get(tid)
+        if not t:
+            raise HTTPException(404, "Tag no encontrado")
+        s.delete(t); s.commit()
+        return {"status": "deleted"}
+    finally:
+        s.close()
+
+
 @router.post("/admin/plc-read")
 def plc_read(body: dict):
-    from ..plc_manager import PLCManager
-    plc = PLCManager(simulate=True)
-    plc.connect()
+    plc = _plc()
     db, off = int(body.get("db", 1)), int(body.get("offset", 0))
     typ = body.get("type", "REAL")
+    bit = int(body.get("bit", 0))
     try:
-        val = plc.read_real(db, off) if typ == "REAL" else plc.read_bool(db, off)
+        val = plc.read_tag(db, off, typ, bit)
         return {"value": val}
     except Exception as e:
         raise HTTPException(500, str(e))
@@ -759,17 +831,29 @@ def plc_read(body: dict):
 
 @router.post("/admin/plc-write")
 def plc_write(body: dict):
-    from ..plc_manager import PLCManager
-    plc = PLCManager(simulate=True)
-    plc.connect()
+    plc = _plc()
+    tag_id = body.get("tag_id")
+    if tag_id:
+        from ..models import PlcTag
+        s = _sf()()
+        try:
+            tag = s.query(PlcTag).get(tag_id)
+            if not tag:
+                raise HTTPException(404, "Tag no encontrado")
+            db, off, typ, bit = tag.db_number, tag.offset, tag.data_type, tag.bit
+        finally:
+            s.close()
+    else:
+        db = int(body.get("db", 1))
+        off = int(body.get("offset", 0))
+        typ = body.get("type", "REAL")
+        bit = int(body.get("bit", 0))
+    val = body.get("value")
+    if val is None:
+        raise HTTPException(400, "value es requerido")
     try:
-        if body.get("type", "REAL") == "REAL":
-            plc.write_real(int(body.get("db", 1)), int(body.get("offset", 0)),
-                           float(body.get("value", 0)))
-        else:
-            plc.write_bool(int(body.get("db", 1)), int(body.get("offset", 0)),
-                           bool(body.get("value", False)))
-        return {"status": "written"}
+        plc.write_tag(db, off, typ, val, bit)
+        return {"status": "written", "value": val}
     except Exception as e:
         raise HTTPException(500, str(e))
 

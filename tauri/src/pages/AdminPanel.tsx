@@ -276,32 +276,200 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
 
 function PlcTab() {
   const [st, setSt] = useState<any>(null);
+  const [cfg, setCfg] = useState<{ ip: string; rack: number; slot: number; simulate: boolean }>({
+    ip: '192.168.1.10',
+    rack: 0,
+    slot: 1,
+    simulate: true,
+  });
   const [tags, setTags] = useState<any[]>([]);
-  useEffect(() => { api.get('/admin/plc-tags').then(setTags).catch(() => setTags([])); }, []);
+  const [writeVals, setWriteVals] = useState<Record<number, string>>({});
+  const [msg, setMsg] = useState('');
+
+  const loadConfig = () => {
+    api.get('/admin/plc-config')
+      .then((res: any) => { if (res) setCfg(res); })
+      .catch(() => {});
+  };
+
+  const loadTags = () => {
+    api.get('/admin/plc-tags')
+      .then(setTags)
+      .catch(() => setTags([]));
+  };
+
+  useEffect(() => {
+    loadConfig();
+    loadTags();
+    const interval = setInterval(loadTags, 2500);
+    return () => clearInterval(interval);
+  }, []);
+
+  const saveConfig = async () => {
+    try {
+      await api.post('/admin/plc-config', cfg);
+      setMsg('Configuración de PLC guardada correctamente');
+      api.get('/status/plc').then(setSt);
+    } catch (e: any) {
+      setMsg(`Error al guardar red: ${String(e?.message ?? e)}`);
+    }
+  };
+
+  const doWrite = async (tag: any) => {
+    const valStr = writeVals[tag.id];
+    if (valStr === undefined || valStr === '') {
+      setMsg(`Ingrese un valor para escribir en ${tag.name}`);
+      return;
+    }
+    try {
+      await api.post('/admin/plc-write', { tag_id: tag.id, value: valStr });
+      setMsg(`Escrito exitosamente en ${tag.name}: ${valStr}`);
+      setWriteVals({ ...writeVals, [tag.id]: '' });
+      loadTags();
+    } catch (e: any) {
+      setMsg(`Error al escribir en ${tag.name}: ${String(e?.message ?? e)}`);
+    }
+  };
+
+  const doDeleteTag = async (tag: any) => {
+    if (!confirm(`¿Eliminar variable ${tag.name}?`)) return;
+    try {
+      await api.del(`/admin/plc-tags/${tag.id}`);
+      setMsg(`Variable ${tag.name} eliminada`);
+      loadTags();
+    } catch (e: any) {
+      setMsg(`Error al eliminar: ${String(e?.message ?? e)}`);
+    }
+  };
+
   return (
     <div style={{ minWidth: 0 }}>
-      <h2 style={{ margin: '0 0 10px 0', fontSize: 16 }}>PLC S7-1200 — DB1.DBW110 modo 1/2</h2>
-      <div className="card" style={{ marginBottom: 10 }}>
-        <button className="btn" onClick={() => api.get('/status/plc').then(setSt)}>Probar conexión</button>
+      <h2 style={{ margin: '0 0 10px 0', fontSize: 16 }}>PLC Siemens S7-1200 — Red, Lectura en Vivo y Escritura</h2>
+      {msg && (
+        <div className="toast-err" style={{ background: msg.startsWith('Configuración') || msg.startsWith('Escrito') || msg.startsWith('Variable') ? '#e6f4ea' : undefined, borderColor: msg.startsWith('Configuración') || msg.startsWith('Escrito') ? '#a8d0b4' : undefined, color: msg.startsWith('Configuración') || msg.startsWith('Escrito') ? '#166534' : undefined }}>
+          {msg}
+        </div>
+      )}
+
+      {/* Configuración de Red PLC */}
+      <div className="card" style={{ marginBottom: 12 }}>
+        <h3 style={{ margin: '0 0 10px 0', fontSize: 14 }}>Parámetros de Conexión de Red</h3>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <label style={{ fontSize: 11, fontWeight: 700, color: '#475569' }}>IP del PLC</label>
+            <input className="input" placeholder="192.168.1.10" value={cfg.ip} onChange={e => setCfg({ ...cfg, ip: e.target.value })} style={{ width: 140 }} />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <label style={{ fontSize: 11, fontWeight: 700, color: '#475569' }}>Rack</label>
+            <input className="input" type="number" value={cfg.rack} onChange={e => setCfg({ ...cfg, rack: parseInt(e.target.value) || 0 })} style={{ width: 64 }} />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <label style={{ fontSize: 11, fontWeight: 700, color: '#475569' }}>Slot</label>
+            <input className="input" type="number" value={cfg.slot} onChange={e => setCfg({ ...cfg, slot: parseInt(e.target.value) || 1 })} style={{ width: 64 }} />
+          </div>
+          <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, marginTop: 16 }}>
+            <input type="checkbox" checked={cfg.simulate} onChange={e => setCfg({ ...cfg, simulate: e.target.checked })} style={{ width: 16, height: 16 }} /> Modo Simulación
+          </label>
+          <div style={{ display: 'flex', gap: 6, marginTop: 16 }}>
+            <button className="btn primary" onClick={saveConfig}>Guardar Red PLC</button>
+            <button className="btn" onClick={() => api.get('/status/plc').then(setSt)}>Probar Conexión</button>
+          </div>
+        </div>
         {st && <pre style={{ marginTop: 8, fontSize: 12, background: '#f1f5f9', padding: 8, borderRadius: 6, overflow: 'auto' }}>{JSON.stringify(st, null, 2)}</pre>}
       </div>
+
+      {/* Tabla de Variables PLC */}
       <div className="card" style={{ overflow: 'auto' }}>
-        <h3>Tags</h3>
-        <table className="grid"><thead><tr><th>Nombre</th><th>DB</th><th>Offset</th><th>Tipo</th></tr></thead>
-          <tbody>{tags.map((t: any) => <tr key={t.id}><td>{t.name}</td><td>{t.db}</td><td>{t.offset}</td><td>{t.type}</td></tr>)}</tbody>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <h3 style={{ margin: 0, fontSize: 14 }}>Variables Configuradas (Lectura y Escritura por Renglón)</h3>
+          <button className="btn sm" onClick={loadTags}>🔄 Actualizar Valores</button>
+        </div>
+
+        <table className="grid">
+          <thead>
+            <tr>
+              <th>Nombre</th>
+              <th>DB</th>
+              <th>Offset</th>
+              <th>Tipo</th>
+              <th>Valor Leído (En vivo)</th>
+              <th style={{ minWidth: 200 }}>Escribir Valor</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tags.map((t: any) => (
+              <tr key={t.id}>
+                <td><b>{t.name}</b></td>
+                <td>DB{t.db}</td>
+                <td>{t.offset}</td>
+                <td><span className="pill" style={{ fontSize: 11 }}>{t.type}</span></td>
+                <td>
+                  <span style={{ fontWeight: 800, color: '#0f172a', background: '#e2e8f0', padding: '4px 8px', borderRadius: 4, fontFamily: 'monospace' }}>
+                    {t.value !== null && t.value !== undefined ? String(t.value) : '—'}
+                  </span>
+                </td>
+                <td>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <input
+                      className="input sm"
+                      placeholder="Nuevo valor"
+                      value={writeVals[t.id] ?? ''}
+                      onChange={e => setWriteVals({ ...writeVals, [t.id]: e.target.value })}
+                      style={{ flex: 1, minWidth: 80 }}
+                    />
+                    <button className="btn sm primary" onClick={() => doWrite(t)}>Escribir</button>
+                  </div>
+                </td>
+                <td>
+                  <button className="btn sm danger" onClick={() => doDeleteTag(t)}>Borrar</button>
+                </td>
+              </tr>
+            ))}
+            {!tags.length && (
+              <tr>
+                <td colSpan={7} style={{ textAlign: 'center', color: '#64748b' }}>
+                  No hay variables de PLC configuradas. Agregue una abajo.
+                </td>
+              </tr>
+            )}
+          </tbody>
         </table>
-        <TagForm onDone={() => api.get('/admin/plc-tags').then(setTags).catch(() => {})} />
+
+        <TagForm onDone={loadTags} />
       </div>
     </div>
   );
 }
+
 function TagForm({ onDone }: { onDone: () => void }) {
-  const [f, setF] = useState({ name: '', offset: '0' });
+  const [f, setF] = useState({ name: '', db: '1', offset: '0', type: 'REAL', bit: '0' });
+  const submit = async () => {
+    if (!f.name.trim()) return;
+    await api.post('/admin/plc-tags', {
+      name: f.name.toUpperCase().trim(),
+      db: parseInt(f.db) || 1,
+      offset: parseInt(f.offset) || 0,
+      type: f.type,
+      bit: parseInt(f.bit) || 0,
+    });
+    setF({ name: '', db: '1', offset: '0', type: 'REAL', bit: '0' });
+    onDone();
+  };
   return (
-    <div style={{ display: 'flex', gap: 8, marginTop: 8, minWidth: 0 }}>
-      <input className="input" placeholder="Nombre" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
-      <input className="input" placeholder="Offset" value={f.offset} onChange={e => setF({ ...f, offset: e.target.value })} style={{ maxWidth: 110, flexShrink: 0 }} />
-      <button className="btn primary" style={{ flexShrink: 0 }} onClick={() => api.post('/admin/plc-tags', { name: f.name.toUpperCase(), db: 1, offset: +f.offset, type: 'REAL' }).then(onDone)}>Agregar</button>
+    <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #e2e8f0' }}>
+      <h4 style={{ margin: '0 0 8px 0', fontSize: 13 }}>+ Agregar Nueva Variable</h4>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
+        <input className="input" placeholder="Nombre (ej. MODO_PRUEBA)" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} style={{ flex: '2 1 140px' }} />
+        <input className="input" placeholder="DB (ej. 1)" value={f.db} onChange={e => setF({ ...f, db: e.target.value })} style={{ flex: '1 1 60px' }} />
+        <input className="input" placeholder="Offset" value={f.offset} onChange={e => setF({ ...f, offset: e.target.value })} style={{ flex: '1 1 70px' }} />
+        <select className="input" value={f.type} onChange={e => setF({ ...f, type: e.target.value })} style={{ flex: '1 1 90px' }}>
+          <option value="REAL">REAL (Float)</option>
+          <option value="WORD">WORD / INT</option>
+          <option value="BOOL">BOOL</option>
+        </select>
+        <button className="btn primary" onClick={submit}>Agregar Variable</button>
+      </div>
     </div>
   );
 }
