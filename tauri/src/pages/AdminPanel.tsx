@@ -125,7 +125,7 @@ function UsersTab(){
 }
 
 const VOLTS = [120,208,220,240];
-const COMPS = ['FAN','DOOR','FRAME','DRAIN','DEFROST','LIGHT'];
+const COMPS = ['FAN','DOOR','FRAME','DRAIN','DEFROST','LENGTH'];
 
 function matrixFromDetail(detail:any){
   const m: Record<string, Record<string,{min:string,max:string,enabled:boolean}>> = {};
