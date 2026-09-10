@@ -18,6 +18,8 @@ build/
 # Tauri / Node
 tauri/node_modules/
 tauri/src-tauri/target/
+tauri/binaries/
+tauri/dist/
 **/node_modules/
 dist-ssr/
 *.log
