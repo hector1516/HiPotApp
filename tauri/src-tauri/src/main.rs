@@ -6,41 +6,177 @@ use std::process::{Child, Command};
 use std::sync::Mutex;
 use tauri::{Manager, State, WindowEvent};
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 const BACKEND_BIN: &str = "hipot-backend-x86_64-pc-windows-msvc.exe";
 
-struct Backend(Mutex<Option<Child>>);
+#[cfg(target_os = "windows")]
+mod job_object {
+    use std::ffi::c_void;
+    use std::os::windows::io::RawHandle;
+
+    type HANDLE = *mut c_void;
+    type BOOL = i32;
+
+    #[repr(C)]
+    #[allow(non_snake_case)]
+    struct JOBOBJECT_BASIC_LIMIT_INFORMATION {
+        per_process_user_time_limit: i64,
+        per_job_user_time_limit: i64,
+        limit_flags: u32,
+        minimum_working_set_size: usize,
+        maximum_working_set_size: usize,
+        active_process_limit: u32,
+        affinity: usize,
+        priority_class: u32,
+        scheduling_class: u32,
+    }
+
+    #[repr(C)]
+    #[allow(non_snake_case)]
+    struct IO_COUNTERS {
+        read_operation_count: u64,
+        write_operation_count: u64,
+        other_operation_count: u64,
+        read_transfer_count: u64,
+        write_transfer_count: u64,
+        other_transfer_count: u64,
+    }
+
+    #[repr(C)]
+    #[allow(non_snake_case)]
+    struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
+        basic_limit_information: JOBOBJECT_BASIC_LIMIT_INFORMATION,
+        io_info: IO_COUNTERS,
+        process_memory_limit: usize,
+        job_memory_limit: usize,
+        peak_process_memory_used: usize,
+        peak_job_memory_used: usize,
+    }
+
+    const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x2000;
+    const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS: i32 = 9;
+
+    extern "system" {
+        fn CreateJobObjectW(lpJobAttributes: *mut c_void, lpName: *const u16) -> HANDLE;
+        fn SetInformationJobObject(
+            hJob: HANDLE,
+            JobObjectInformationClass: i32,
+            lpJobObjectInformation: *const c_void,
+            cbJobObjectInformationLength: u32,
+        ) -> BOOL;
+        fn AssignProcessToJobObject(hJob: HANDLE, hProcess: HANDLE) -> BOOL;
+        fn CloseHandle(hObject: HANDLE) -> BOOL;
+    }
+
+    pub struct Job(HANDLE);
+
+    unsafe impl Send for Job {}
+    unsafe impl Sync for Job {}
+
+    impl Job {
+        pub fn create() -> Option<Self> {
+            unsafe {
+                let handle = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
+                if handle.is_null() {
+                    return None;
+                }
+                let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+                info.basic_limit_information.limit_flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+
+                let res = SetInformationJobObject(
+                    handle,
+                    JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS,
+                    &info as *const _ as *const c_void,
+                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                );
+
+                if res == 0 {
+                    CloseHandle(handle);
+                    return None;
+                }
+                Some(Job(handle))
+            }
+        }
+
+        pub fn assign_process(&self, process_handle: RawHandle) -> bool {
+            unsafe { AssignProcessToJobObject(self.0, process_handle as HANDLE) != 0 }
+        }
+    }
+
+    impl Drop for Job {
+        fn drop(&mut self) {
+            unsafe {
+                if !self.0.is_null() {
+                    CloseHandle(self.0);
+                }
+            }
+        }
+    }
+}
+
+struct BackendChild {
+    child: Child,
+    #[cfg(target_os = "windows")]
+    _job: Option<job_object::Job>,
+}
+
+struct Backend(Mutex<Option<BackendChild>>);
 
 fn backend_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
     use tauri::path::BaseDirectory;
-    // 1. Directorio de recursos (app instalada / bundle)
-    if let Ok(p) = app
-        .path()
-        .resolve(format!("binaries/{BACKEND_BIN}"), BaseDirectory::Resource)
-    {
-        if p.exists() {
-            return Some(p);
+
+    // 1. Resolve relative to Resource dir
+    for path_str in &[
+        format!("binaries/{BACKEND_BIN}"),
+        BACKEND_BIN.to_string(),
+        format!("resources/binaries/{BACKEND_BIN}"),
+        format!("_up_/binaries/{BACKEND_BIN}"),
+    ] {
+        if let Ok(p) = app.path().resolve(path_str, BaseDirectory::Resource) {
+            if p.exists() {
+                return Some(p);
+            }
         }
     }
-    // 2. Junto al .exe o subiendo hasta 4 niveles (cubre target/release → tauri/binaries)
+
+    // 2. Relative to current_exe() directory going up 6 parent levels
     if let Ok(exe) = std::env::current_exe() {
         let mut dir = exe.parent().map(|p| p.to_path_buf());
-        for _ in 0..5 {
+        for _ in 0..6 {
             if let Some(d) = dir.clone() {
-                let p = d.join(BACKEND_BIN);
-                if p.exists() { return Some(p); }
-                let p = d.join(format!("binaries/{BACKEND_BIN}"));
-                if p.exists() { return Some(p); }
+                let candidates = [
+                    d.join(BACKEND_BIN),
+                    d.join(format!("binaries/{BACKEND_BIN}")),
+                    d.join(format!("resources/{BACKEND_BIN}")),
+                    d.join(format!("resources/binaries/{BACKEND_BIN}")),
+                ];
+                for cand in candidates {
+                    if cand.exists() {
+                        return Some(cand);
+                    }
+                }
                 dir = d.parent().map(|p| p.to_path_buf());
             }
         }
     }
-    // 3. Fallback dev: cwd
+
+    // 3. Fallback cwd
     if let Ok(cwd) = std::env::current_dir() {
-        let p = cwd.join(format!("../binaries/{BACKEND_BIN}"));
-        if p.exists() { return Some(p); }
-        let p = cwd.join(format!("binaries/{BACKEND_BIN}"));
-        if p.exists() { return Some(p); }
+        let candidates = [
+            cwd.join(BACKEND_BIN),
+            cwd.join(format!("binaries/{BACKEND_BIN}")),
+            cwd.join(format!("../binaries/{BACKEND_BIN}")),
+            cwd.join(format!("../../binaries/{BACKEND_BIN}")),
+        ];
+        for cand in candidates {
+            if cand.exists() {
+                return Some(cand);
+            }
+        }
     }
+
     None
 }
 
@@ -49,47 +185,115 @@ fn kill_backend(state: &State<Backend>) {
         Ok(g) => g,
         Err(_) => return,
     };
-    if let Some(mut child) = guard.take() {
-        let _ = child.kill();
-        let _ = child.wait();
+    if let Some(mut backend) = guard.take() {
+        let pid = backend.child.id();
+        eprintln!("[hipot] matando backend y procesos hijos (PID: {pid})...");
+        #[cfg(target_os = "windows")]
+        {
+            let _ = Command::new("taskkill")
+                .args(["/F", "/T", "/PID", &pid.to_string()])
+                .creation_flags(0x08000000)
+                .status();
+        }
+        let _ = backend.child.kill();
+        let _ = backend.child.wait();
     }
 }
 
 fn main() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .manage(Backend(Mutex::new(None)))
         .setup(|app| {
-            match backend_path(app.handle()) {
-                Some(path) => match Command::new(&path).spawn() {
+            // Limpiar backend huérfano previo si existiera
+            #[cfg(target_os = "windows")]
+            {
+                let _ = Command::new("taskkill")
+                    .args(["/F", "/IM", BACKEND_BIN])
+                    .creation_flags(0x08000000)
+                    .status();
+            }
+
+            if let Some(path) = backend_path(app.handle()) {
+                let mut cmd = Command::new(&path);
+                #[cfg(target_os = "windows")]
+                cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+                match cmd.spawn() {
                     Ok(child) => {
-                        *app.state::<Backend>().0.lock().unwrap() = Some(child);
+                        #[cfg(target_os = "windows")]
+                        let job = {
+                            use std::os::windows::io::AsRawHandle;
+                            if let Some(job) = job_object::Job::create() {
+                                job.assign_process(child.as_raw_handle());
+                                Some(job)
+                            } else {
+                                None
+                            }
+                        };
+
+                        *app.state::<Backend>().0.lock().unwrap() = Some(BackendChild {
+                            child,
+                            #[cfg(target_os = "windows")]
+                            _job: job,
+                        });
                         eprintln!("[hipot] backend iniciado: {}", path.display());
                     }
                     Err(e) => eprintln!("[hipot] no se pudo arrancar el backend: {e}"),
-                },
-                None => eprintln!(
+                }
+            } else {
+                eprintln!(
                     "[hipot] backend no encontrado; arráncalo manual: uvicorn App.python.main:app"
-                ),
+                );
             }
-            // Splash -> main: temporizado en Rust para que nunca se atore.
-            let handle = app.handle().clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(2600));
-                if let Some(main) = handle.get_webview_window("main") {
-                    let _ = main.show();
-                    let _ = main.set_focus();
+
+            // Garantizar visibilidad de la ventana principal
+            match app.get_webview_window("main") {
+                Some(window) => {
+                    eprintln!("[hipot] ventana 'main' encontrada en config, mostrando...");
+                    if let Err(e) = window.show() {
+                        eprintln!("[hipot] error al mostrar ventana: {e}");
+                    }
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
                 }
-                if let Some(splash) = handle.get_webview_window("splash") {
-                    let _ = splash.close();
+                None => {
+                    eprintln!("[hipot] ventana 'main' no encontrada en config, creando manualmente...");
+                    match tauri::WebviewWindowBuilder::new(
+                        app,
+                        "main",
+                        tauri::WebviewUrl::App("index.html".into()),
+                    )
+                    .title("HiPot - Estación de Pruebas")
+                    .inner_size(1280.0, 800.0)
+                    .center()
+                    .visible(true)
+                    .build()
+                    {
+                        Ok(w) => {
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                            eprintln!("[hipot] ventana creada exitosamente");
+                        }
+                        Err(e) => eprintln!("[hipot] error crítico creando ventana: {e}"),
+                    }
                 }
-            });
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| {
-            if matches!(event, WindowEvent::Destroyed) {
+            if window.label() == "main" && matches!(event, WindowEvent::Destroyed) {
                 kill_backend(&window.state::<Backend>());
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running HiPotApp");
+        .build(tauri::generate_context!())
+        .expect("error while building HiPotApp");
+
+    app.run(|app_handle, event| match event {
+        tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
+            kill_backend(&app_handle.state::<Backend>());
+        }
+        _ => {}
+    });
 }
+
+

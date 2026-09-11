@@ -34,6 +34,15 @@ async def lifespan(app: FastAPI):
         s.rollback()
     finally:
         s.close()
+
+    # Auto-conectar PLC en el arranque con IP/datos guardados en BD
+    try:
+        from .routes.api import _plc
+        p = _plc()
+        print(f"[plc-startup] Conectado al PLC ({p.ip}): {p.connected}")
+    except Exception as e:
+        print(f"[plc-startup-err] {e}")
+
     logger.info("SYSTEM", "startup", "HiPotApp backend iniciado")
     yield
 

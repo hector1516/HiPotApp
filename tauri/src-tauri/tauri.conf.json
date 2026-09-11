@@ -14,26 +14,12 @@
       {
         "label": "main",
         "title": "HiPot - Estación de Pruebas",
+        "url": "index.html",
         "width": 1280,
         "height": 800,
         "minWidth": 800,
         "minHeight": 600,
         "center": true,
-        "visible": false
-      },
-      {
-        "label": "splash",
-        "url": "splash.html",
-        "title": "HiPotApp",
-        "width": 520,
-        "height": 560,
-        "center": true,
-        "decorations": false,
-        "transparent": true,
-        "shadow": false,
-        "alwaysOnTop": true,
-        "skipTaskbar": true,
-        "resizable": false,
         "visible": true
       }
     ],
@@ -61,11 +47,7 @@
   },
   "plugins": {
     "updater": {
-      "active": true,
-      "endpoints": [
-        "https://github.com/hector1516/HiPotApp/releases/latest/download/latest.json"
-      ],
-      "pubkey": "PEGAR_AQUI_LA_CLAVE_PUBLICA_DEL_UPDATER"
+      "active": false
     }
   }
 }

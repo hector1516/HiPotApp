@@ -138,33 +138,39 @@ export default function App() {
   });
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+    <div style={{ height: '100vh', width: '100vw', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
       <Backdrop phase={phase} />
       <img src="logo.png" alt="" aria-hidden
         style={{ position: 'fixed', right: 16, bottom: 12, width: 320,
                  opacity: 0.06, zIndex: 0, pointerEvents: 'none' }} />
       <UpdateNotification />
-      <header style={{ height: 64, display: 'flex', alignItems: 'center', gap: 10, padding: '0 12px',
+      <header style={{ height: 56, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '0 12px',
                        background: '#141b26', color: '#fff',
                        position: 'relative', zIndex: 1, borderBottom: '3px solid #b7790f' }}>
-        <img src="logo.png" alt="HiPot Tester" style={{ height: 42, objectFit: 'contain' }} />
+        <img src="logo.png" alt="HiPot Tester" style={{ height: 38, objectFit: 'contain' }} />
         <b style={{ fontSize: 18, letterSpacing: '-.02em' }}>HiPot<span style={{ color: '#d9a441', fontWeight: 800 }}>App</span></b>
         <span className="pill" style={{ background: '#1e2a3a', borderColor: '#2a3a52', color: '#cbd5e1' }}>PASO {Math.min(step, 6)}/6</span>
         {recipe && <span className="pill" style={{ background: '#1e2a3a', borderColor: '#2a3a52', color: '#e2e8f0' }}>{recipe.model}</span>}
         <span style={{ marginLeft: 'auto', fontSize: 13, color: '#cbd5e1', fontVariantNumeric: 'tabular-nums' }}>{clock}</span>
-        <button className="btn" style={{ background: '#fff', color: '#141b26', borderColor: '#d8e0ea' }}
+        <button className="btn sm" style={{ background: '#fff', color: '#141b26', borderColor: '#d8e0ea' }}
           onClick={() => setShowHistory(true)}>📊 HISTORIAL</button>
-        <button className="btn" style={{ background: '#fff', color: '#141b26', borderColor: '#d8e0ea' }}
+        <button className="btn sm" style={{ background: '#fff', color: '#141b26', borderColor: '#d8e0ea' }}
           onClick={() => setShowReprint(true)}>🖨️ REIMPRIMIR</button>
-        <button className="btn" style={{ background: '#fff', color: '#141b26', borderColor: '#d8e0ea' }}
+        <button className="btn sm" style={{ background: '#fff', color: '#141b26', borderColor: '#d8e0ea' }}
           onClick={() => setShowLog(true)}>📋 LOG</button>
-        <button className="btn" style={{ background: '#b7790f', color: '#fff', borderColor: '#b7790f' }}
+        <button className="btn sm" style={{ background: '#b7790f', color: '#fff', borderColor: '#b7790f' }}
           onClick={() => setView('manual')}>🧪 MANUAL</button>
-        <button className="btn ghost" style={{ background: '#1e2a3a', color: '#fff', borderColor: '#334155' }}
+        <button className="btn sm ghost" style={{ background: '#1e2a3a', color: '#fff', borderColor: '#334155' }}
           onClick={() => setShowConfigGate(true)} title="Escanea gafete o Ctrl+Shift+K">CONFIG</button>
       </header>
 
-      <main style={{ flex: 1, position: 'relative', zIndex: 1 }}>
+      <main style={{
+        flex: 1,
+        position: 'relative',
+        zIndex: 1,
+        height: 'calc(100vh - 92px)',
+        overflow: view === 'admin' || view === 'manual' ? 'auto' : 'hidden',
+      }} className="no-scrollbar">
         <AnimatePresence mode="wait">
           <motion.div
             key={view + phase}
@@ -172,6 +178,7 @@ export default function App() {
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -60 }}
             transition={{ duration: 0.25 }}
+            style={{ height: '100%', width: '100%' }}
           >
         {view === 'home' && (
           <HomeScreen step={step} recipe={recipe} serial={serial} batch={batch} error={error}
@@ -198,13 +205,13 @@ export default function App() {
         </AnimatePresence>
       </main>
 
-      <footer style={{ minHeight: 48, display: 'flex', alignItems: 'center', gap: 10,
-                       padding: '6px 14px', background: '#141b26', color: '#94a3b8',
-                       position: 'relative', zIndex: 1, borderTop: '1px solid #2a3a52', fontSize: 13 }}>
-        <span className={`pill ${phase.startsWith('COMPLETE_GOOD') ? 'on' : phase.startsWith('COMPLETE_BAD') ? 'off' : ''}`} style={{ fontSize: 12 }}>
+      <footer style={{ height: 36, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10,
+                       padding: '0 14px', background: '#141b26', color: '#94a3b8',
+                       position: 'relative', zIndex: 1, borderTop: '1px solid #2a3a52', fontSize: 12 }}>
+        <span className={`pill ${phase.startsWith('COMPLETE_GOOD') ? 'on' : phase.startsWith('COMPLETE_BAD') ? 'off' : ''}`} style={{ fontSize: 11, padding: '2px 8px' }}>
           {phase.replace(/_/g, ' ')}
         </span>
-        <span style={{ marginLeft: 'auto' }}>Offline-first · Windows 11 · v1.0.0 · Ctrl+Shift+K → GodMode</span>
+        <span style={{ marginLeft: 'auto' }}>1280x800 Touch · Windows 11 · v1.0.0 · Ctrl+Shift+K → GodMode</span>
       </footer>
 
       <ReprintPopup open={showReprint} onClose={() => setShowReprint(false)} />

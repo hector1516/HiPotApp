@@ -219,6 +219,7 @@ class PlcTag(Base):
     offset = Column(Integer, default=0)
     data_type = Column(Unicode(10), default="REAL")  # REAL, BOOL, WORD
     bit = Column(Integer, default=0)
+    app_variable = Column(Unicode(50), nullable=True, default="CUSTOM")
     description = Column(Unicode(200), nullable=True)
     unit = Column(Unicode(10), nullable=True)
 
@@ -245,9 +246,10 @@ Index("idx_app_logs_level", AppLog.level)
 Index("idx_app_logs_execution", AppLog.execution_id)
 
 DEFAULT_CONFIGS = [
-    ("plc_ip", "192.168.1.10"),
+    ("plc_ip", "10.188.141.10"),
     ("plc_rack", "0"),
     ("plc_slot", "1"),
+    ("plc_simulate", "False"),
     ("hipot_port", "COM3"),
     ("hipot_baud", "9600"),
     ("hipot_parity", "None"),

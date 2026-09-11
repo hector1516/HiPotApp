@@ -476,17 +476,8 @@ def list_executions(limit: int = 50):
 # ---------- hardware ----------
 @router.get("/status/plc")
 def plc_status():
-    from ..plc_manager import PLCManager
-    from ..models import Configuration
-    s = _sf()()
-    try:
-        ip = (s.query(Configuration).filter_by(config_key="plc_ip").first().config_value
-              if s.query(Configuration).filter_by(config_key="plc_ip").first() else "192.168.1.10")
-    finally:
-        s.close()
-    plc = PLCManager(ip=ip, simulate=True)
-    plc.connect()
-    return {"connected": plc.connected, "ip": ip, "simulate": plc.simulate}
+    p = _plc()
+    return {"connected": p.connected, "ip": p.ip, "rack": p.rack, "slot": p.slot, "simulate": p.simulate}
 
 
 @router.get("/status/hipot")
@@ -503,6 +494,64 @@ def health():
     return {"status": "healthy",
             "services": {"database": "connected" if local_db.test_connection() else "disconnected",
                          "plc": "ready", "hipot": "ready"}}
+
+
+# ---------- manual mode endpoints ----------
+@router.get("/manual/live-mapped")
+def get_manual_live_mapped():
+    from ..models import PlcTag
+    s = _sf()()
+    try:
+        tags = s.query(PlcTag).filter(PlcTag.app_variable != None, PlcTag.app_variable != "CUSTOM").all()
+        plc = _plc()
+        return plc.read_mapped_tags(tags)
+    finally:
+        s.close()
+
+
+@router.post("/manual/mode")
+def set_manual_mode(body: dict):
+    mode = int(body.get("mode", 1))
+    plc = _plc()
+    ok = plc.set_mode(mode)
+    return {"status": "ok" if ok else "error", "mode": mode}
+
+
+@router.post("/manual/plc-test")
+def manual_plc_test(body: dict):
+    comp = str(body.get("component", "")).strip().upper()
+    volt = float(body.get("voltage", 120.0))
+    plc = _plc()
+    ok = plc.test_single_component(comp, volt)
+    val = 0.0
+    try:
+        res = plc.read_results()
+        val = res.get(comp, 0.0)
+    except Exception:
+        pass
+    return {"status": "ok" if ok else "error", "component": comp, "value": val}
+
+
+@router.post("/manual/hipot")
+def manual_hipot(body: dict):
+    from ..hipot_manager import HipotManager
+    action = str(body.get("action", "STATUS")).upper()
+    h = HipotManager(simulate=True)
+    h.connect()
+    resp = ""
+    parsed = {}
+    if action == "START":
+        resp = h.start_test()
+    elif action == "STOP":
+        resp = h.stop_test()
+    else:
+        resp = h.get_status()
+    try:
+        parsed = h.parse_response(resp)
+    except Exception:
+        pass
+    return {"status": "ok", "action": action, "response": resp, "parsed": parsed}
+
 
 
 # ---------- admin: config / sync / logs / print ----------
@@ -726,10 +775,10 @@ def get_plc_config():
         slot = s.query(Configuration).filter_by(config_key="plc_slot").first()
         sim = s.query(Configuration).filter_by(config_key="plc_simulate").first()
         return {
-            "ip": ip.config_value if ip else "192.168.1.10",
+            "ip": ip.config_value if (ip and ip.config_value) else "10.188.141.10",
             "rack": int(rack.config_value) if rack else 0,
             "slot": int(slot.config_value) if slot else 1,
-            "simulate": (sim.config_value.lower() == "true") if sim else True,
+            "simulate": (sim.config_value.lower() == "true") if sim else False,
         }
     finally:
         s.close()
@@ -741,10 +790,10 @@ def set_plc_config(body: dict):
     s = _sf()()
     try:
         keys = {
-            "plc_ip": str(body.get("ip", "192.168.1.10")),
+            "plc_ip": str(body.get("ip", "10.188.141.10")),
             "plc_rack": str(body.get("rack", 0)),
             "plc_slot": str(body.get("slot", 1)),
-            "plc_simulate": str(body.get("simulate", True)),
+            "plc_simulate": str(body.get("simulate", False)),
         }
         for k, v in keys.items():
             ex = s.query(Configuration).filter_by(config_key=k).first()
@@ -759,6 +808,36 @@ def set_plc_config(body: dict):
         return {"status": "saved", "config": get_plc_config()}
     finally:
         s.close()
+
+
+APP_VARIABLES = [
+    {"key": "CUSTOM", "label": "Libre / Sin Enlazar", "category": "General"},
+    {"key": "VOLTAGE_READING", "label": "Voltaje Medido (V)", "category": "Medición"},
+    {"key": "RES_TOTAL", "label": "Resistencia Total (mΩ)", "category": "Medición"},
+    {"key": "RES_FAN", "label": "Resistencia Evaporador/Fan (mΩ)", "category": "Medición"},
+    {"key": "RES_DOOR", "label": "Resistencia Puerta (mΩ)", "category": "Medición"},
+    {"key": "RES_FRAME", "label": "Resistencia Marco (mΩ)", "category": "Medición"},
+    {"key": "RES_DRAIN", "label": "Resistencia Dren (mΩ)", "category": "Medición"},
+    {"key": "RES_DEFROST", "label": "Resistencia Deshielo (mΩ)", "category": "Medición"},
+    {"key": "RES_LIGHT", "label": "Resistencia Luz (mΩ)", "category": "Medición"},
+    {"key": "ENABLE_FAN", "label": "Habilitar Fan (0/1)", "category": "Control"},
+    {"key": "ENABLE_DOOR", "label": "Habilitar Puerta (0/1)", "category": "Control"},
+    {"key": "ENABLE_FRAME", "label": "Habilitar Marco (0/1)", "category": "Control"},
+    {"key": "ENABLE_DRAIN", "label": "Habilitar Dren (0/1)", "category": "Control"},
+    {"key": "ENABLE_DEFROST", "label": "Habilitar Deshielo (0/1)", "category": "Control"},
+    {"key": "ENABLE_LIGHT", "label": "Habilitar Luz (0/1)", "category": "Control"},
+    {"key": "CMD_START", "label": "Comando Iniciar Prueba (Start)", "category": "Secuencia"},
+    {"key": "CMD_STOP", "label": "Comando Parar Prueba (Stop)", "category": "Secuencia"},
+    {"key": "STATUS_RUNNING", "label": "Estado Prueba en Ejecución", "category": "Secuencia"},
+    {"key": "STATUS_COMPLETE", "label": "Estado Prueba Completada", "category": "Secuencia"},
+    {"key": "STATUS_PASS", "label": "Estado Resultado Prueba Pass", "category": "Secuencia"},
+    {"key": "SELECT_MODE", "label": "Modo Operación (1=Auto, 2=Manual)", "category": "Secuencia"},
+]
+
+
+@router.get("/admin/plc-app-variables")
+def list_app_variables():
+    return APP_VARIABLES
 
 
 @router.get("/admin/plc-tags")
@@ -777,6 +856,7 @@ def list_plc_tags():
             out.append({
                 "id": t.id, "name": t.name, "db": t.db_number, "offset": t.offset,
                 "type": t.data_type, "bit": t.bit, "value": val,
+                "app_variable": t.app_variable or "CUSTOM",
                 "description": t.description, "unit": t.unit
             })
         return out
@@ -789,15 +869,49 @@ def create_plc_tag(body: dict):
     from ..models import PlcTag
     s = _sf()()
     try:
+        app_var = body.get("app_variable", "CUSTOM").strip().upper()
+        if app_var and app_var != "CUSTOM":
+            ex = s.query(PlcTag).filter_by(app_variable=app_var).first()
+            if ex:
+                raise HTTPException(400, f"La función '{app_var}' ya está enlazada al tag '{ex.name}' (DB{ex.db_number} @ {ex.offset}). Debe desenlazarla antes de reasignarla.")
         t = PlcTag(name=body.get("name", "").strip().upper(),
                    db_number=int(body.get("db", 1)),
                    offset=int(body.get("offset", 0)),
                    data_type=body.get("type", "REAL").strip().upper(),
                    bit=int(body.get("bit", 0)),
+                   app_variable=app_var,
                    description=body.get("description"),
                    unit=body.get("unit"))
         s.add(t); s.commit()
         return {"status": "created", "id": t.id}
+    finally:
+        s.close()
+
+
+@router.put("/admin/plc-tags/{tid}")
+def update_plc_tag(tid: int, body: dict):
+    from ..models import PlcTag
+    s = _sf()()
+    try:
+        t = s.query(PlcTag).get(tid)
+        if not t:
+            raise HTTPException(404, "Tag no encontrado")
+        if "app_variable" in body:
+            app_var = body["app_variable"].strip().upper()
+            if app_var and app_var != "CUSTOM":
+                ex = s.query(PlcTag).filter(PlcTag.app_variable == app_var, PlcTag.id != tid).first()
+                if ex:
+                    raise HTTPException(400, f"La función '{app_var}' ya está enlazada al tag '{ex.name}' (DB{ex.db_number} @ {ex.offset}). Debe desenlazarla antes de reasignarla.")
+            t.app_variable = app_var
+        if "name" in body: t.name = body["name"].strip().upper()
+        if "db" in body: t.db_number = int(body["db"])
+        if "offset" in body: t.offset = int(body["offset"])
+        if "type" in body: t.data_type = body["type"].strip().upper()
+        if "bit" in body: t.bit = int(body["bit"])
+        if "description" in body: t.description = body["description"]
+        if "unit" in body: t.unit = body["unit"]
+        s.commit()
+        return {"status": "updated", "id": t.id}
     finally:
         s.close()
 
@@ -932,10 +1046,33 @@ _shared_plc = None
 
 def _plc():
     global _shared_plc
+    from ..models import Configuration
+    s = _sf()()
+    try:
+        ip = s.query(Configuration).filter_by(config_key="plc_ip").first()
+        rack = s.query(Configuration).filter_by(config_key="plc_rack").first()
+        slot = s.query(Configuration).filter_by(config_key="plc_slot").first()
+        sim = s.query(Configuration).filter_by(config_key="plc_simulate").first()
+        plc_ip = ip.config_value if (ip and ip.config_value) else "10.188.141.10"
+        plc_rack = int(rack.config_value) if (rack and rack.config_value) else 0
+        plc_slot = int(slot.config_value) if (slot and slot.config_value) else 1
+        plc_sim = (sim.config_value.lower() == "true") if (sim and sim.config_value) else False
+    except Exception:
+        plc_ip, plc_rack, plc_slot, plc_sim = "10.188.141.10", 0, 1, False
+    finally:
+        s.close()
+
     if _shared_plc is None:
         from ..plc_manager import PLCManager
-        _shared_plc = PLCManager(simulate=True)
+        _shared_plc = PLCManager(ip=plc_ip, rack=plc_rack, slot=plc_slot, simulate=plc_sim)
         _shared_plc.connect()
+    else:
+        # Si cambiaron parámetros en la base de datos o si perdió conexión, actualizar / reconectar
+        if _shared_plc.ip != plc_ip or _shared_plc.rack != plc_rack or _shared_plc.slot != plc_slot or _shared_plc.simulate != plc_sim:
+            _shared_plc.update_config(ip=plc_ip, rack=plc_rack, slot=plc_slot, simulate=plc_sim)
+        elif not _shared_plc.connected and not _shared_plc.simulate:
+            _shared_plc.connect()
+
     return _shared_plc
 
 
@@ -966,23 +1103,43 @@ def manual_mode_get():
     return {"mode": _plc().get_mode()}
 
 
+@router.get("/manual/live-mapped")
+def manual_live_mapped():
+    from ..models import PlcTag
+    s = _sf()()
+    try:
+        tags = s.query(PlcTag).filter(PlcTag.app_variable != None, PlcTag.app_variable != "CUSTOM").all()
+        plc = _plc()
+        return plc.read_mapped_tags(tags)
+    finally:
+        s.close()
+
+
 @router.post("/manual/plc-test")
 def manual_plc_test(body: dict):
     """Prueba 1 componente (hardware solo 1 a la vez). No guarda en BD."""
     comp = (body.get("component") or "").strip().upper()
     if not comp:
         raise HTTPException(400, "component requerido")
-    _plc().set_mode(2)
-    if not _plc().test_single_component(comp, float(body.get("voltage", 120))):
+    plc = _plc()
+    plc.set_mode(2)
+    if not plc.test_single_component(comp, float(body.get("voltage", 120))):
         raise HTTPException(500, "No se pudo disparar el test")
     import time
     time.sleep(0.6)
     try:
-        vals = _plc().read_results()
-    except Exception as e:
-        raise HTTPException(500, str(e))
-    v = vals.get(comp, 0.0)
-    return {"component": comp, "value": v, "all": vals}
+        from ..models import PlcTag
+        s = _sf()()
+        tag = s.query(PlcTag).filter_by(app_variable=f"RES_{comp}").first()
+        s.close()
+        if tag:
+            v = plc.read_tag(tag.db_number, tag.offset, tag.data_type, tag.bit)
+        else:
+            vals = plc.read_results()
+            v = vals.get(comp, 0.0)
+    except Exception:
+        v = 0.0
+    return {"component": comp, "value": v}
 
 
 @router.post("/manual/hipot")

@@ -7,10 +7,11 @@ from .models import Base, DEFAULT_CONFIGS, Configuration
 
 
 def _writable_base() -> str:
-    """Junto al .exe cuando va congelado (PyInstaller), si no junto al código."""
-    if getattr(sys, "frozen", False):
-        return os.path.dirname(os.path.abspath(sys.executable))
-    return os.path.dirname(os.path.abspath(__file__))
+    """Retorna un directorio persistente en AppData para el usuario en Windows."""
+    appdata = os.getenv("APPDATA") or os.path.expanduser("~")
+    base_dir = os.path.join(appdata, "HiPotApp")
+    os.makedirs(base_dir, exist_ok=True)
+    return base_dir
 
 
 def _build_mssql_url(server: str, db: str, user: str = "", password: str = "") -> str:
@@ -58,7 +59,7 @@ class DatabaseManager:
 
     def create_tables(self) -> dict:
         Base.metadata.create_all(self.engine)
-        # Migración suave para modified_by si la BD ya existía
+        # Migraciones suaves para esquemas existentes
         try:
             with self.engine.connect() as c:
                 if self.url.startswith("sqlite"):
@@ -67,8 +68,14 @@ class DatabaseManager:
                     if "modified_by" not in cols:
                         c.execute(text("ALTER TABLE recipes ADD COLUMN modified_by NVARCHAR(50)"))
                         c.commit()
+                    res_tags = c.execute(text("PRAGMA table_info(plc_tags)"))
+                    cols_tags = [r[1] for r in res_tags]
+                    if "app_variable" not in cols_tags:
+                        c.execute(text("ALTER TABLE plc_tags ADD COLUMN app_variable NVARCHAR(50)"))
+                        c.commit()
                 else:
                     c.execute(text("IF COL_LENGTH('recipes','modified_by') IS NULL ALTER TABLE recipes ADD modified_by NVARCHAR(50)"))
+                    c.execute(text("IF COL_LENGTH('plc_tags','app_variable') IS NULL ALTER TABLE plc_tags ADD app_variable NVARCHAR(50)"))
                     c.commit()
         except Exception:
             pass

@@ -48,34 +48,34 @@ export function HomeScreen({ step, recipe, serial, batch, error, onScanModel, on
   const handler = step === 1 ? onScanModel : step === 2 ? onScanSerial : onScanBatch;
 
   return (
-    <div style={{ display: 'flex', gap: 12, padding: 12, alignItems: 'flex-start', position: 'relative', zIndex: 1, minWidth: 0 }}>
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div className="card">
+    <div style={{ display: 'flex', gap: 12, padding: 12, height: '100%', alignItems: 'stretch', position: 'relative', zIndex: 1, minWidth: 0 }}>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div className="card" style={{ padding: 14 }}>
           <Stepper step={step} />
           {error && <div className="toast-err">{error}</div>}
           {step <= 3 ? (
             <>
-              <div className="hero-title">{PROMPTS[step]}</div>
-              <div className="scan-zone" style={{ marginTop: 6 }}>
-                <BarcodeInput label="" onScan={handler} autoFocus />
+              <div className="hero-title" style={{ fontSize: 20, marginBottom: 8 }}>{PROMPTS[step]}</div>
+              <div className="scan-zone" style={{ marginTop: 4 }}>
+                <BarcodeInput onScan={handler} autoFocus />
               </div>
             </>
           ) : (
-            <div style={{ background: '#fffbeb', border: '1px solid #fde68a', padding: 16, borderRadius: 8, textAlign: 'center' }}>
+            <div style={{ background: '#fffbeb', border: '1px solid #fde68a', padding: 14, borderRadius: 8, textAlign: 'center' }}>
               <div style={{ fontSize: 18, fontWeight: 800, color: '#92400e' }}>Iniciando prueba…</div>
             </div>
           )}
         </div>
 
         {recipe && (
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="card" style={{ overflow: 'hidden' }}>
-            <h3>Receta · {recipe.model}</h3>
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <h3 style={{ fontSize: 15, margin: '0 0 6px 0' }}>Receta Cargada · {recipe.model}</h3>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
               <span className="pill" style={{ background: '#1e293b', color: '#fff', borderColor: '#1e293b' }}>{recipe.model}</span>
               {serial && <span className="pill">Serie: {serial}</span>}
               {batch && <span className="pill accent">Batch: {batch}</span>}
             </div>
-            <div style={{ overflowX: 'auto' }}>
+            <div style={{ flex: 1, overflowY: 'auto' }} className="no-scrollbar">
               <table className="grid">
                 <thead><tr><th>Componente</th><th>Voltaje</th><th>Mín</th><th>Máx</th><th>En prueba</th></tr></thead>
                 <tbody>
@@ -93,20 +93,23 @@ export function HomeScreen({ step, recipe, serial, batch, error, onScanModel, on
         )}
       </div>
 
-      <div style={{ width: 280, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
+      <div style={{ width: 280, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
         <div className="card">
-          <h3>Equipos</h3>
+          <h3 style={{ fontSize: 15 }}>Estado de Equipos</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <ConnRow label="PLC S7-1200" on={plc.connected} detail={plc.detail} />
             <ConnRow label="Hipot 3865" on={hipot.connected} />
             <ConnRow label="Receta" on={recipe ? true : null} />
           </div>
         </div>
-        <div className="card" style={{ fontSize: 13, color: '#475569', lineHeight: 1.5 }}>
-          <b style={{ color: '#1e293b' }}>Secuencia</b>
-          <div>1. Modelo → busca receta</div>
-          <div>2. Serie → valida unidad</div>
-          <div>3. Batch → arranca automáticamente</div>
+        <div className="card" style={{ fontSize: 13, color: '#475569', lineHeight: 1.4, flex: 1 }}>
+          <b style={{ color: '#1e293b', fontSize: 14 }}>Flujo de Operación</b>
+          <div style={{ marginTop: 6 }}>1. <b>Escanee Modelo</b> → carga límites</div>
+          <div style={{ marginTop: 4 }}>2. <b>Escanee Serie</b> → registra unidad</div>
+          <div style={{ marginTop: 4 }}>3. <b>Escanee Batch</b> → inicia prueba</div>
+          <div style={{ marginTop: 12, padding: 8, background: '#f8fafc', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 12 }}>
+            💡 <i>El foco del escáner se mantiene automáticamente en pantalla. No requiere tocar el monitor.</i>
+          </div>
         </div>
       </div>
     </div>

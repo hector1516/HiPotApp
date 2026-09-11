@@ -2,13 +2,24 @@
 
 **Última actualización:** 10 de Septiembre, 2026  
 **Rama principal:** `main`  
-**Último commit:** `01cf8da` — `feat: implementacion completa backend FastAPI y frontend React Tauri v2`
+**Últimos commits:**  
+- `ac554a1` — `feat: implementacion soporte plc siemens s7-1200 red y lectura/escritura por renglon`  
+- `9f1d4b9` — `feat: update recipe table layout and remove manual plc and print reprint tabs`
 
 ---
 
 ## 📌 Resumen del Estado del Proyecto
 
-El proyecto **HiPotApp** ha pasado de la fase de diseño a la **fase de implementación completa**. Tanto el backend en Python FastAPI como el frontend en React con Tauri v2 están construidos, probados y verificados.
+El proyecto **HiPotApp** cuenta con:
+1. **Frontend React + Tauri v2:** 
+   - Matriz de recetas actualizada (primera columna es voltaje entero; min/max y checkbox activado para fan, door, frame, drain, defrost, length, total; fecha/hora y usuario de guardado/modificación).
+   - Pestaña PLC en Configuración con IP/Rack/Slot del PLC, lectura en tiempo real y **escritura interactiva por renglón con campo de valor y botón "Escribir"**.
+2. **Backend Python FastAPI:** 
+   - Soporte completo para Siemens S7-1200 a través de Snap7 (lectura/escritura `REAL`, `WORD`/`INT`, `BOOL`).
+   - Liberación automática de puerto 8000 en inicio para prevenir errores `[Errno 10048]`.
+   - Empaquetado como ejecutable único (`hipot-backend-x86_64-pc-windows-msvc.exe`) integrado como sidecar en Tauri.
+3. **Ejecutable Único:**
+   - La aplicación compila a un archivo `hipotapp.exe` en `tauri/src-tauri/target/release/` que al ejecutarse inicia automáticamente la ventana Tauri y su backend Python sidecar.
 
 ---
 
@@ -18,33 +29,17 @@ El proyecto **HiPotApp** ha pasado de la fase de diseño a la **fase de implemen
 * **Entry point para PyInstaller:** `backend_entry.py` (puerto 8000)
 * **Entry point app:** `App/python/main.py` (lifespan, CORS, inicialización de semillas en BD)
 * **Modelos ORM (SQLAlchemy):** `App/python/models.py` (17 tablas según `docs/04-base-datos.md`)
-* **Base de Datos Dual:** `App/python/database.py` (SQLite/SQL Express local + conexión remota SQL Server)
-* **Gestión de PLC:** `App/python/plc_manager.py` (Snap7 para Siemens S7-1200)
-* **Gestión de Hipot:** `App/python/hipot_manager.py` (pyserial RS-232 para Hipot 3865 con modo simulación integrado)
-* **Scanner / Barcode:** `App/python/barcode_manager.py` (Lector USB HID con normalización en mayúsculas)
-* **Impresión Zebra:** `App/python/label_generator.py` y `label_printer.py` (ZPL II)
-* **Configuración:** `App/python/config_manager.py` (Import/Export JSON con contraseñas cifradas)
-* **Autenticación:** `App/python/auth.py` (Bcrypt)
-* **Logging:** `App/python/logger.py` (Persistencia en `AppLogs` y consola)
-* **Sincronización:** `App/python/sync_manager.py` (Local -> Remoto)
-* **Rutas API:** `App/python/routes/api.py`
+* **Gestión de PLC Siemens:** `App/python/plc_manager.py` (Snap7 para Siemens S7-1200 con `read_tag`, `write_tag` y `update_config`)
+* **Rutas API PLC:** `App/python/routes/api.py` (`/admin/plc-config`, `/admin/plc-tags`, `/admin/plc-write`)
 
 ### 2. Frontend React + Tauri v2 (`tauri/`)
-* **Tauri Config:** `tauri/src-tauri/tauri.conf.json` (Ventana principal 1280x800, Splash Screen 520x560, NSIS Bundle, Updater)
-* **Router principal:** `tauri/src/App.tsx`
-* **Vistas principales (`tauri/src/pages/`):**
-  * `HomeScreen.tsx`: Pantalla principal del operador
-  * `TestScreen.tsx`: Monitoreo en vivo de prueba Hipot/PLC
-  * `ResultScreen.tsx`: Pantalla de resultado BUENO / MALO
-  * `AdminPanel.tsx`: Panel de administración (8 pestañas + import/export)
-  * `ManualScreen.tsx`: Operación manual / diagnósticos
-* **Componentes clave (`tauri/src/components/`):**
-  * `LabelEditor.tsx`: Editor drag & drop ZPL (react-konva)
-  * `Gauge.tsx`, `CountUp.tsx`, `BarcodeInput.tsx`, etc.
-* **Hooks de comunicación:** `usePLC.ts`, `useHipot.ts`, `useUpdater.ts`
-
-### 3. Pruebas Unitarias (`App/tests/`)
-* `test_backend.py`: Cubre normalización de barcode, procesamiento de escaneo, sustitución e impresión ZPL, hashing/verificación bcrypt, simulación Hipot y exportación/importación de configuración.
+* **Pestaña PLC (`AdminPanel.tsx`):**
+  * Configuración de Red (IP, Rack, Slot).
+  * Tabla de variables en tiempo real con refresco automático (2.5s).
+  * Entrada de valor y botón **"Escribir"** en cada fila.
+* **Recetas (`AdminPanel.tsx`):**
+  * Matriz de pruebas completa con límites min/max y checkboxes de activación.
+  * Audit trail con fecha, hora y usuario que modificó la receta.
 
 ---
 
@@ -53,20 +48,17 @@ El proyecto **HiPotApp** ha pasado de la fase de diseño a la **fase de implemen
 | Acción | Comando | Notas |
 |---|---|---|
 | **Ejecutar Tests Backend** | `python -m pytest App/tests` | Debe pasar 6/6 tests sin errores. |
-| **Iniciar Backend Dev** | `python backend_entry.py` | Corre servidor FastAPI en `http://127.0.0.1:8000/`. |
-| **Verificar Health API** | `curl http://127.0.0.1:8000/` | Retorna `{"message":"HiPotApp API running","version":"1.0.0"}`. |
-| **Compilar Frontend React** | `cd tauri && npm run build` | Ejecuta `tsc --noEmit && vite build`. |
-| **Modo Dev Tauri** | `cd tauri && npm run tauri dev` | Inicia la app Tauri de escritorio. |
+| **Compilar Backend `.exe`** | `python -m PyInstaller --onefile --noconfirm --name hipot-backend-x86_64-pc-windows-msvc backend_entry.py` | Genera binario sidecar en `dist/`. |
+| **Copiar Sidecar a Tauri** | `Copy-Item 'dist/hipot-backend-x86_64-pc-windows-msvc.exe' 'tauri/binaries/hipot-backend-x86_64-pc-windows-msvc.exe'` | Requerido antes de `cargo build`. |
+| **Compilar Aplicación Release** | `cd tauri && npm run build && cargo build --manifest-path src-tauri/Cargo.toml --release` | Genera `hipotapp.exe` independiente. |
+| **Lanzar Aplicación** | `cmd.exe /c start "" "D:\Antigravity\HiPot\tauri\src-tauri\target\release\hipotapp.exe"` | Inicia el frontend y backend juntos. |
 
 ---
 
 ## 📋 Tareas Pendientes / Roadmap Futuro
 
-1. **Pruebas en Hardware Real:**
-   * Probar comunicación Snap7 con PLC Siemens S7-1200 en red IP real.
-   * Probar comunicación RS-232 con Hipot 3865 real vía puerto COM.
-   * Probar impresión en impresora Zebra ZT231 por USB.
-2. **Auto-Updater Clave Pública:**
-   * Generar par de llaves Tauri (`tauri signer generate`) y colocar la clave pública en `tauri/src-tauri/tauri.conf.json` -> `plugins.updater.pubkey`.
-3. **Build de Producción NSIS:**
-   * Ejecutar `npm run tauri build` para generar el instalador `.exe` en `tauri/src-tauri/target/release/bundle/nsis/`.
+1. **Pruebas en Hardware Real Siemens S7-1200:**
+   - Asegurar que en TIA Portal esté activado **"Permitir acceso vía PUT/GET"** en las propiedades de la CPU.
+   - Asegurar que el Bloque de Datos (DB) no tenga **"Optimized Block Access"** activado.
+2. **Build de Instalador NSIS (Cuando el usuario lo solicite):**
+   - Ejecutar `npm run tauri build` para empaquetar el instalador `.exe` final.

@@ -274,13 +274,37 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
   );
 }
 
+const APP_VAR_OPTIONS = [
+  { key: 'CUSTOM', label: '— Libre / Sin Enlazar —' },
+  { key: 'VOLTAGE_READING', label: '⚡ Voltaje Medido (V)' },
+  { key: 'RES_TOTAL', label: '📊 Resistencia Total (mΩ)' },
+  { key: 'RES_FAN', label: '🌀 Resistencia Evaporador/Fan' },
+  { key: 'RES_DOOR', label: '🚪 Resistencia Puerta' },
+  { key: 'RES_FRAME', label: '🖼️ Resistencia Marco' },
+  { key: 'RES_DRAIN', label: '💧 Resistencia Dren' },
+  { key: 'RES_DEFROST', label: '❄️ Resistencia Deshielo' },
+  { key: 'RES_LIGHT', label: '💡 Resistencia Luz' },
+  { key: 'ENABLE_FAN', label: '⚙️ Enable Fan (0/1)' },
+  { key: 'ENABLE_DOOR', label: '⚙️ Enable Puerta (0/1)' },
+  { key: 'ENABLE_FRAME', label: '⚙️ Enable Marco (0/1)' },
+  { key: 'ENABLE_DRAIN', label: '⚙️ Enable Dren (0/1)' },
+  { key: 'ENABLE_DEFROST', label: '⚙️ Enable Deshielo (0/1)' },
+  { key: 'ENABLE_LIGHT', label: '⚙️ Enable Luz (0/1)' },
+  { key: 'CMD_START', label: '▶️ Comando Iniciar Prueba' },
+  { key: 'CMD_STOP', label: '⏹️ Comando Parar Prueba' },
+  { key: 'STATUS_RUNNING', label: '🔄 Estado Prueba en Ejecución' },
+  { key: 'STATUS_COMPLETE', label: '✅ Estado Prueba Completada' },
+  { key: 'STATUS_PASS', label: '🏆 Estado Resultado Pass' },
+  { key: 'SELECT_MODE', label: '🔀 Modo (1=Auto, 2=Manual)' },
+];
+
 function PlcTab() {
   const [st, setSt] = useState<any>(null);
   const [cfg, setCfg] = useState<{ ip: string; rack: number; slot: number; simulate: boolean }>({
-    ip: '192.168.1.10',
+    ip: '10.188.141.10',
     rack: 0,
     slot: 1,
-    simulate: true,
+    simulate: false,
   });
   const [tags, setTags] = useState<any[]>([]);
   const [writeVals, setWriteVals] = useState<Record<number, string>>({});
@@ -304,6 +328,14 @@ function PlcTab() {
     const interval = setInterval(loadTags, 2500);
     return () => clearInterval(interval);
   }, []);
+
+  // Mapeo de variables en uso para prevenir conflictos
+  const usedAppVars: Record<string, string> = {};
+  tags.forEach((t: any) => {
+    if (t.app_variable && t.app_variable !== 'CUSTOM') {
+      usedAppVars[t.app_variable] = t.name;
+    }
+  });
 
   const saveConfig = async () => {
     try {
@@ -331,6 +363,16 @@ function PlcTab() {
     }
   };
 
+  const doChangeAppVariable = async (tag: any, newAppVar: string) => {
+    try {
+      await api.put(`/admin/plc-tags/${tag.id}`, { app_variable: newAppVar });
+      setMsg(`Variable ${tag.name} enlazada exitosamente a ${newAppVar}`);
+      loadTags();
+    } catch (e: any) {
+      setMsg(`⚠️ Error al enlazar variable: ${String(e?.message ?? e)}`);
+    }
+  };
+
   const doDeleteTag = async (tag: any) => {
     if (!confirm(`¿Eliminar variable ${tag.name}?`)) return;
     try {
@@ -344,7 +386,7 @@ function PlcTab() {
 
   return (
     <div style={{ minWidth: 0 }}>
-      <h2 style={{ margin: '0 0 10px 0', fontSize: 16 }}>PLC Siemens S7-1200 — Red, Lectura en Vivo y Escritura</h2>
+      <h2 style={{ margin: '0 0 10px 0', fontSize: 16 }}>PLC Siemens S7-1200 — Red, Lectura en Vivo y Mapeo Único de Variables</h2>
       {msg && (
         <div className="toast-err" style={{ background: msg.startsWith('Configuración') || msg.startsWith('Escrito') || msg.startsWith('Variable') ? '#e6f4ea' : undefined, borderColor: msg.startsWith('Configuración') || msg.startsWith('Escrito') ? '#a8d0b4' : undefined, color: msg.startsWith('Configuración') || msg.startsWith('Escrito') ? '#166534' : undefined }}>
           {msg}
@@ -357,7 +399,7 @@ function PlcTab() {
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <label style={{ fontSize: 11, fontWeight: 700, color: '#475569' }}>IP del PLC</label>
-            <input className="input" placeholder="192.168.1.10" value={cfg.ip} onChange={e => setCfg({ ...cfg, ip: e.target.value })} style={{ width: 140 }} />
+            <input className="input" placeholder="10.188.141.10" value={cfg.ip} onChange={e => setCfg({ ...cfg, ip: e.target.value })} style={{ width: 140 }} />
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <label style={{ fontSize: 11, fontWeight: 700, color: '#475569' }}>Rack</label>
@@ -381,19 +423,19 @@ function PlcTab() {
       {/* Tabla de Variables PLC */}
       <div className="card" style={{ overflow: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-          <h3 style={{ margin: 0, fontSize: 14 }}>Variables Configuradas (Lectura y Escritura por Renglón)</h3>
+          <h3 style={{ margin: 0, fontSize: 14 }}>Variables Configuradas (Mapeo Único y Lectura en Vivo)</h3>
           <button className="btn sm" onClick={loadTags}>🔄 Actualizar Valores</button>
         </div>
 
         <table className="grid">
           <thead>
             <tr>
-              <th>Nombre</th>
-              <th>DB</th>
-              <th>Offset</th>
+              <th>Nombre PLC</th>
+              <th>Dirección</th>
               <th>Tipo</th>
               <th>Valor Leído (En vivo)</th>
-              <th style={{ minWidth: 200 }}>Escribir Valor</th>
+              <th style={{ minWidth: 210 }}>Variable Enlazada en App</th>
+              <th style={{ minWidth: 180 }}>Escribir Valor</th>
               <th>Acciones</th>
             </tr>
           </thead>
@@ -401,13 +443,29 @@ function PlcTab() {
             {tags.map((t: any) => (
               <tr key={t.id}>
                 <td><b>{t.name}</b></td>
-                <td>DB{t.db}</td>
-                <td>{t.offset}</td>
+                <td>DB{t.db} @ {t.offset}{t.type === 'BOOL' ? `.${t.bit}` : ''}</td>
                 <td><span className="pill" style={{ fontSize: 11 }}>{t.type}</span></td>
                 <td>
                   <span style={{ fontWeight: 800, color: '#0f172a', background: '#e2e8f0', padding: '4px 8px', borderRadius: 4, fontFamily: 'monospace' }}>
                     {t.value !== null && t.value !== undefined ? String(t.value) : '—'}
                   </span>
+                </td>
+                <td>
+                  <select
+                    className="input sm"
+                    value={t.app_variable || 'CUSTOM'}
+                    onChange={e => doChangeAppVariable(t, e.target.value)}
+                    style={{ fontWeight: 600, color: t.app_variable && t.app_variable !== 'CUSTOM' ? '#1e40af' : '#475569', background: t.app_variable && t.app_variable !== 'CUSTOM' ? '#eff6ff' : '#fff' }}
+                  >
+                    {APP_VAR_OPTIONS.map(opt => {
+                      const isTaken = !!(opt.key !== 'CUSTOM' && usedAppVars[opt.key] && usedAppVars[opt.key] !== t.name);
+                      return (
+                        <option key={opt.key} value={opt.key} disabled={isTaken}>
+                          {opt.label}{isTaken ? ` (⚠️ En uso por ${usedAppVars[opt.key]})` : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
                 </td>
                 <td>
                   <div style={{ display: 'flex', gap: 6 }}>
@@ -436,37 +494,56 @@ function PlcTab() {
           </tbody>
         </table>
 
-        <TagForm onDone={loadTags} />
+        <TagForm onDone={loadTags} usedAppVars={usedAppVars} setMsg={setMsg} />
       </div>
     </div>
   );
 }
 
-function TagForm({ onDone }: { onDone: () => void }) {
-  const [f, setF] = useState({ name: '', db: '1', offset: '0', type: 'REAL', bit: '0' });
+function TagForm({ onDone, usedAppVars, setMsg }: { onDone: () => void; usedAppVars: Record<string, string>; setMsg: (m: string) => void }) {
+  const [f, setF] = useState({ name: '', db: '1001', offset: '0', type: 'REAL', bit: '0', app_variable: 'CUSTOM' });
   const submit = async () => {
     if (!f.name.trim()) return;
-    await api.post('/admin/plc-tags', {
-      name: f.name.toUpperCase().trim(),
-      db: parseInt(f.db) || 1,
-      offset: parseInt(f.offset) || 0,
-      type: f.type,
-      bit: parseInt(f.bit) || 0,
-    });
-    setF({ name: '', db: '1', offset: '0', type: 'REAL', bit: '0' });
-    onDone();
+    try {
+      await api.post('/admin/plc-tags', {
+        name: f.name.toUpperCase().trim(),
+        db: parseInt(f.db) || 1,
+        offset: parseInt(f.offset) || 0,
+        type: f.type,
+        bit: parseInt(f.bit) || 0,
+        app_variable: f.app_variable,
+      });
+      setF({ name: '', db: '1001', offset: '0', type: 'REAL', bit: '0', app_variable: 'CUSTOM' });
+      setMsg(`Variable de PLC ${f.name.toUpperCase().trim()} agregada exitosamente.`);
+      onDone();
+    } catch (e: any) {
+      setMsg(`⚠️ Error al agregar variable: ${String(e?.message ?? e)}`);
+    }
   };
   return (
     <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #e2e8f0' }}>
-      <h4 style={{ margin: '0 0 8px 0', fontSize: 13 }}>+ Agregar Nueva Variable</h4>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
-        <input className="input" placeholder="Nombre (ej. MODO_PRUEBA)" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} style={{ flex: '2 1 140px' }} />
-        <input className="input" placeholder="DB (ej. 1)" value={f.db} onChange={e => setF({ ...f, db: e.target.value })} style={{ flex: '1 1 60px' }} />
-        <input className="input" placeholder="Offset" value={f.offset} onChange={e => setF({ ...f, offset: e.target.value })} style={{ flex: '1 1 70px' }} />
-        <select className="input" value={f.type} onChange={e => setF({ ...f, type: e.target.value })} style={{ flex: '1 1 90px' }}>
+      <h4 style={{ margin: '0 0 8px 0', fontSize: 13 }}>+ Agregar Nueva Variable de PLC con Enlace Único a la App</h4>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', minWidth: 0, alignItems: 'center' }}>
+        <input className="input" placeholder="Nombre (ej. 0000_EXT)" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} style={{ flex: '2 1 130px' }} />
+        <input className="input" placeholder="DB (ej. 1001)" value={f.db} onChange={e => setF({ ...f, db: e.target.value })} style={{ flex: '1 1 65px' }} title="Número de DB" />
+        <input className="input" placeholder="Offset (ej. 2)" value={f.offset} onChange={e => setF({ ...f, offset: e.target.value })} style={{ flex: '1 1 65px' }} title="Offset de Byte" />
+        <select className="input" value={f.type} onChange={e => setF({ ...f, type: e.target.value })} style={{ flex: '1 1 100px' }}>
           <option value="REAL">REAL (Float)</option>
           <option value="WORD">WORD / INT</option>
           <option value="BOOL">BOOL</option>
+        </select>
+        {f.type === 'BOOL' && (
+          <input className="input" placeholder="Bit (0-7)" value={f.bit} onChange={e => setF({ ...f, bit: e.target.value })} style={{ width: 60 }} title="Número de Bit (0 a 7)" />
+        )}
+        <select className="input" value={f.app_variable} onChange={e => setF({ ...f, app_variable: e.target.value })} style={{ flex: '2 1 180px', fontWeight: 600, color: '#1e40af' }} title="Función / Variable enlazada en la App">
+          {APP_VAR_OPTIONS.map(opt => {
+            const isTaken = !!(opt.key !== 'CUSTOM' && usedAppVars[opt.key]);
+            return (
+              <option key={opt.key} value={opt.key} disabled={isTaken}>
+                {opt.label}{isTaken ? ` (⚠️ En uso por ${usedAppVars[opt.key]})` : ''}
+              </option>
+            );
+          })}
         </select>
         <button className="btn primary" onClick={submit}>Agregar Variable</button>
       </div>
