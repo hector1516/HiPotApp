@@ -57,4 +57,5 @@ jobs:
             Ver RELEASE_NOTES.md para detalles completos.
           releaseDraft: false
           prerelease: false
+          updaterJsonPreferNsis: true
           args: --target x86_64-pc-windows-msvc
