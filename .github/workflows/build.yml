@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 jobs:
   build:
@@ -41,29 +42,23 @@ jobs:
         run: npm install
         working-directory: tauri
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
+        working-directory: tauri
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
-        with:
-          projectPath: tauri
-          tagName: ${{ github.ref_name }}
-          releaseName: "HiPotApp ${{ github.ref_name }}"
-          releaseBody: |
-            ## Cambios
+        run: npm run tauri build -- --target x86_64-pc-windows-msvc
 
-            Ver RELEASE_NOTES.md para detalles completos.
-          releaseDraft: false
-          prerelease: false
-          updaterJsonPreferNsis: true
-          args: --target x86_64-pc-windows-msvc
-
-      - name: Upload updater signature and latest.json
+      - name: Ensure updater signature exists
         shell: pwsh
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: |
           $tag = "${{ github.ref_name }}"
           $version = $tag.TrimStart('v')
@@ -72,12 +67,22 @@ jobs:
             Write-Host "No signature found, signing manually..."
             $exeFile = Get-ChildItem -Path "tauri/src-tauri/target" -Recurse -Filter "HiPotApp_${version}_x64-setup.exe" | Select-Object -First 1
             if (-not $exeFile) { throw "Installer not found for version $version" }
-            npx tauri signer sign $exeFile.FullName
+            $cli = "tauri/node_modules/.bin/tauri.cmd"
+            if (-not (Test-Path $cli)) { throw "Tauri CLI not found at $cli" }
+            & $cli signer sign $exeFile.FullName
             $sigFile = Get-ChildItem -Path "tauri/src-tauri/target" -Recurse -Filter "HiPotApp_${version}_x64-setup.exe.sig" | Select-Object -First 1
           }
           if (-not $sigFile) { throw "Signature not found for version $version" }
-          $sigPath = $sigFile.FullName
-          $signature = (Get-Content $sigPath -Raw).Trim()
+          Write-Host "Signature: $($sigFile.FullName)"
+
+      - name: Generate latest.json
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = $tag.TrimStart('v')
+          $sigFile = Get-ChildItem -Path "tauri/src-tauri/target" -Recurse -Filter "HiPotApp_${version}_x64-setup.exe.sig" | Select-Object -First 1
+          if (-not $sigFile) { throw "Signature not found for version $version" }
+          $signature = (Get-Content $sigFile.FullName -Raw).Trim()
           $url = "https://github.com/hector1516/HiPotApp/releases/download/$tag/HiPotApp_${version}_x64-setup.exe"
           $latest = @{
             version = $version
@@ -90,6 +95,23 @@ jobs:
               }
             }
           } | ConvertTo-Json -Depth 6
-          $latestPath = "latest.json"
-          $latest | Set-Content -Path $latestPath -Encoding UTF8
-          gh release upload $tag $sigPath $latestPath --clobber --repo hector1516/HiPotApp
+          $latest | Set-Content -Path "latest.json" -Encoding UTF8
+
+      - name: Create or update GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = $tag.TrimStart('v')
+          $exeFile = Get-ChildItem -Path "tauri/src-tauri/target" -Recurse -Filter "HiPotApp_${version}_x64-setup.exe" | Select-Object -First 1
+          $sigFile = Get-ChildItem -Path "tauri/src-tauri/target" -Recurse -Filter "HiPotApp_${version}_x64-setup.exe.sig" | Select-Object -First 1
+          if (-not $exeFile) { throw "Installer not found" }
+          if (-not $sigFile) { throw "Signature not found" }
+          $releaseExists = $false
+          try { gh release view $tag --repo hector1516/HiPotApp | Out-Null; $releaseExists = $true } catch {}
+          if (-not $releaseExists) {
+            gh release create $tag $exeFile.FullName $sigFile.FullName latest.json --title "HiPotApp $tag" --notes "Release $tag" --repo hector1516/HiPotApp
+          } else {
+            gh release upload $tag $exeFile.FullName $sigFile.FullName latest.json --clobber --repo hector1516/HiPotApp
+          }
