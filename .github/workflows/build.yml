@@ -8,20 +8,32 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install backend dependencies
+        run: pip install -r App/python/requirements.txt pyinstaller
+
+      - name: Build backend executable
+        run: python -m PyInstaller --onefile --noconfirm --name hipot-backend-x86_64-pc-windows-msvc backend_entry.py
+
+      - name: Copy backend sidecar
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path tauri/binaries | Out-Null
+          Copy-Item dist/hipot-backend-x86_64-pc-windows-msvc.exe tauri/binaries/hipot-backend-x86_64-pc-windows-msvc.exe
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install Python backend deps (smoke test)
-        run: pip install -r App/python/requirements.txt
 
       - name: Install frontend dependencies
         run: npm install
@@ -34,6 +46,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
+          projectPath: tauri
           tagName: ${{ github.ref_name }}
           releaseName: "HiPotApp ${{ github.ref_name }}"
           releaseBody: |

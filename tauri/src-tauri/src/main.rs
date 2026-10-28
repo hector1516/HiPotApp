@@ -202,6 +202,8 @@ fn kill_backend(state: &State<Backend>) {
 
 fn main() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(Backend(Mutex::new(None)))
         .setup(|app| {
             // Limpiar backend huérfano previo si existiera
