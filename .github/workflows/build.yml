@@ -68,6 +68,13 @@ jobs:
           $tag = "${{ github.ref_name }}"
           $version = $tag.TrimStart('v')
           $sigFile = Get-ChildItem -Path "tauri/src-tauri/target" -Recurse -Filter "HiPotApp_${version}_x64-setup.exe.sig" | Select-Object -First 1
+          if (-not $sigFile) {
+            Write-Host "No signature found, signing manually..."
+            $exeFile = Get-ChildItem -Path "tauri/src-tauri/target" -Recurse -Filter "HiPotApp_${version}_x64-setup.exe" | Select-Object -First 1
+            if (-not $exeFile) { throw "Installer not found for version $version" }
+            npx tauri signer sign $exeFile.FullName
+            $sigFile = Get-ChildItem -Path "tauri/src-tauri/target" -Recurse -Filter "HiPotApp_${version}_x64-setup.exe.sig" | Select-Object -First 1
+          }
           if (-not $sigFile) { throw "Signature not found for version $version" }
           $sigPath = $sigFile.FullName
           $signature = (Get-Content $sigPath -Raw).Trim()
