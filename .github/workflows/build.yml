@@ -109,7 +109,8 @@ jobs:
           if (-not $exeFile) { throw "Installer not found" }
           if (-not $sigFile) { throw "Signature not found" }
           $releaseExists = $false
-          try { gh release view $tag --repo hector1516/HiPotApp | Out-Null; $releaseExists = $true } catch {}
+          gh release view $tag --repo hector1516/HiPotApp *> $null
+          if ($LASTEXITCODE -eq 0) { $releaseExists = $true }
           if (-not $releaseExists) {
             gh release create $tag $exeFile.FullName $sigFile.FullName latest.json --title "HiPotApp $tag" --notes "Release $tag" --repo hector1516/HiPotApp
           } else {
