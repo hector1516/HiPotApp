@@ -59,3 +59,29 @@ jobs:
           prerelease: false
           updaterJsonPreferNsis: true
           args: --target x86_64-pc-windows-msvc
+
+      - name: Upload updater signature and latest.json
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = $tag.TrimStart('v')
+          $sigPath = "tauri/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/HiPotApp_${version}_x64-setup.exe.sig"
+          if (-not (Test-Path $sigPath)) { throw "Signature not found: $sigPath" }
+          $signature = (Get-Content $sigPath -Raw).Trim()
+          $url = "https://github.com/hector1516/HiPotApp/releases/download/$tag/HiPotApp_${version}_x64-setup.exe"
+          $latest = @{
+            version = $version
+            notes = "Release $tag"
+            pub_date = (Get-Date).ToUniversalTime().ToString("o")
+            platforms = @{
+              "windows-x86_64" = @{
+                signature = $signature
+                url = $url
+              }
+            }
+          } | ConvertTo-Json -Depth 6
+          $latestPath = "latest.json"
+          $latest | Set-Content -Path $latestPath -Encoding UTF8
+          gh release upload $tag $sigPath $latestPath --clobber --repo hector1516/HiPotApp
