@@ -67,8 +67,9 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           $version = $tag.TrimStart('v')
-          $sigPath = "tauri/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/HiPotApp_${version}_x64-setup.exe.sig"
-          if (-not (Test-Path $sigPath)) { throw "Signature not found: $sigPath" }
+          $sigFile = Get-ChildItem -Path "tauri/src-tauri/target" -Recurse -Filter "HiPotApp_${version}_x64-setup.exe.sig" | Select-Object -First 1
+          if (-not $sigFile) { throw "Signature not found for version $version" }
+          $sigPath = $sigFile.FullName
           $signature = (Get-Content $sigPath -Raw).Trim()
           $url = "https://github.com/hector1516/HiPotApp/releases/download/$tag/HiPotApp_${version}_x64-setup.exe"
           $latest = @{
