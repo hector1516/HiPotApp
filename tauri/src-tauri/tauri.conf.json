@@ -42,7 +42,7 @@
         "installMode": "both",
         "languages": ["Spanish", "English"],
         "displayLanguageSelector": true,
-        "installerHooks": "../installer-hooks.nsh"
+        "installerHooks": "installer-hooks.nsh"
       }
     }
   },
