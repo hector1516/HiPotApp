@@ -1168,3 +1168,49 @@ def manual_abort():
         pass
     _plc().set_mode(1)
     return {"status": "aborted"}
+
+
+# ---------- auto-start (Windows) ----------
+import winreg
+
+
+@router.get("/admin/autostart")
+def get_autostart():
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_READ)
+        try:
+            val, _ = winreg.QueryValueEx(key, "HiPotApp")
+            enabled = bool(val)
+        except FileNotFoundError:
+            enabled = False
+        finally:
+            winreg.CloseKey(key)
+    except FileNotFoundError:
+        enabled = False
+    return {"enabled": enabled}
+
+
+class AutostartIn(BaseModel):
+    enabled: bool
+
+
+@router.post("/admin/autostart")
+def set_autostart(body: AutostartIn):
+    key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_SET_VALUE)
+    try:
+        if body.enabled:
+            import os, sys
+            exe = os.path.join(os.path.dirname(sys.executable), "hipotapp.exe")
+            # Prefer installed path if exists
+            installed = r"C:\Program Files\HiPotApp\hipotapp.exe"
+            if os.path.exists(installed):
+                exe = installed
+            winreg.SetValueEx(key, "HiPotApp", 0, winreg.REG_SZ, exe)
+        else:
+            try:
+                winreg.DeleteValue(key, "HiPotApp")
+            except FileNotFoundError:
+                pass
+    finally:
+        winreg.CloseKey(key)
+    return {"enabled": body.enabled}
