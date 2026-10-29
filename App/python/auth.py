@@ -3,7 +3,16 @@ import bcrypt
 from datetime import datetime, timedelta
 from jose import jwt
 
-SECRET = "hipot-dev-secret-change-me"
+import os
+
+SECRET = os.getenv("JWT_SECRET", "hipot-dev-secret-change-me")
+if SECRET == "hipot-dev-secret-change-me":
+    import warnings
+    warnings.warn(
+        "JWT_SECRET no está definido. Se usa una clave por defecto insegura. "
+        "Define JWT_SECRET en producción.",
+        stacklevel=2,
+    )
 ALGO = "HS256"
 
 

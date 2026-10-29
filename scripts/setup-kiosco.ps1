@@ -4,7 +4,8 @@
 
 param(
     [string]$UserName = "hipot",
-    [string]$AppPath = "C:\Program Files\HiPotApp\hipotapp.exe"
+    [string]$AppPath = "C:\Program Files\HiPotApp\hipotapp.exe",
+    [string]$Password = "Kiosco123!"
 )
 
 Write-Host "=== Configurando kiosco para usuario '$UserName' ===" -ForegroundColor Cyan
@@ -12,7 +13,7 @@ Write-Host "=== Configurando kiosco para usuario '$UserName' ===" -ForegroundCol
 # 1. Crear usuario si no existe
 if (-not (Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue)) {
     Write-Host "Creando usuario '$UserName'..." -ForegroundColor Yellow
-    $password = ConvertTo-SecureString "Kiosco123!" -AsPlainText -Force
+    $password = ConvertTo-SecureString $Password -AsPlainText -Force
     New-LocalUser -Name $UserName -Password $password -FullName "Usuario Kiosco" -Description "Cuenta para kiosco HiPotApp" | Out-Null
     Add-LocalGroupMember -Group "Users" -Member $UserName
     Write-Host "Usuario creado. Password temporal: Kiosco123! (cambiarla despues)" -ForegroundColor Green
