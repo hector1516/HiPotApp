@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Gauge } from '../components/Gauge';
 
@@ -38,8 +38,8 @@ export function TestScreen({ phase, recipe, values, limits, onStop }: {
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-        <span className={`pill ${isPlc ? 'accent' : 'on'}`}>{isPlc ? '● PLC midiendo' : '✓ PLC completado'}</span>
-        <span className={`pill ${!isPlc ? 'accent' : ''}`}>{!isPlc ? '● Hipot midiendo' : '○ Hipot pendiente'}</span>
+        <span className={`pill ${!isPlc ? 'accent' : 'on'}`}>{!isPlc ? 'Hipot midiendo' : 'Hipot completado'}</span>
+        <span className={`pill ${isPlc ? 'accent' : ''}`}>{isPlc ? 'Electrica midiendo' : 'Electrica pendiente'}</span>
       </div>
 
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-start' }}>

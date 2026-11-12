@@ -100,8 +100,8 @@ export default function App() {
     } catch { /* offline: seguir simulado */ }
     const start = Date.now();
     setT0(start);
-    setStep(4); setPhase('PLC_RUNNING'); setView('test');
-    later(() => { setStep(5); setPhase('HIPOT_RUNNING'); }, 4000);
+    setStep(4); setPhase('HIPOT_RUNNING'); setView('test');
+    later(() => { setStep(5); setPhase('PLC_RUNNING'); }, 4000);
     later(() => {
       const good = Math.random() > 0.2;
       const s = Math.round((Date.now() - start) / 1000);

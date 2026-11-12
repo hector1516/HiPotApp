@@ -597,8 +597,10 @@ function SystemTab() {
   const [mode, setMode] = useState('overwrite');
   const [hold, setHold] = useState('10');
   const [holdMsg, setHoldMsg] = useState('');
+  const [autoStart, setAutoStart] = useState(false);
+  const [autoStartMsg, setAutoStartMsg] = useState('');
   const loadLog = () => api.get('/admin/import-export-log').then(setImpLog).catch(() => setImpLog([]));
-  useEffect(() => { loadLog(); api.get('/admin/config').then(c => setHold(String(c?.result_hold_seconds ?? '10'))).catch(() => {}); }, []);
+  useEffect(() => { loadLog(); api.get('/admin/config').then(c => setHold(String(c?.result_hold_seconds ?? '10'))).catch(() => {}); api.get('/admin/autostart').then(r => setAutoStart(!!r?.enabled)).catch(() => {}); }, []);
   const doExport = async () => { const r = await api.get('/admin/export'); const blob = new Blob([r.data], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `config_export_${new Date().toISOString().slice(0,10)}.json`; a.click(); };
   const doImport = async (f: File) => { try { const t = await f.text(); const r = await api.post('/admin/import', { data: t, mode }); setMsg(`Import OK: ${r.imported} · Conflictos: ${(r.conflicts ?? []).length}`); loadLog(); } catch (e) { setMsg(String(e)); } };
   return (
@@ -618,6 +620,25 @@ function SystemTab() {
           {holdMsg && <span className="pill on" style={{ fontSize: 12 }}>{holdMsg}</span>}
         </div>
       </div>
+      <div className="card" style={{ marginBottom: 10 }}>
+        <h3>Inicio automatico de Windows</h3>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', minWidth: 0 }}>
+          <span style={{ fontSize: 13, color: '#475569' }}>Abrir HiPotApp al iniciar Windows:</span>
+          <button className={`btn ${autoStart ? 'primary' : ''}`} onClick={async () => {
+            const next = !autoStart;
+            try {
+              await api.post('/admin/autostart', { enabled: next });
+              setAutoStart(next);
+              setAutoStartMsg(next ? 'Activado' : 'Desactivado');
+              setTimeout(() => setAutoStartMsg(''), 2000);
+            } catch (e) { setAutoStartMsg(String(e)); }
+          }}>{autoStart ? 'Desactivar' : 'Activar'}</button>
+          {autoStartMsg && <span className="pill on" style={{ fontSize: 12 }}>{autoStartMsg}</span>}
+        </div>
+        <div style={{ marginTop: 6, fontSize: 12, color: '#64748b' }}>
+          {autoStart ? 'La app se abrira automaticamente al encender el equipo.' : 'La app no se abrira automaticamente.'}
+        </div>
+      </div>
       <div className="card" style={{ minWidth: 0 }}>
         <h3>Import / Export</h3>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
@@ -627,26 +648,6 @@ function SystemTab() {
         </div>
         <div style={{ marginTop: 10, fontSize: 12, color: '#64748b' }}>{impLog.map((r: any) => <div key={r.id}>#{r.id} {r.op} ({r.mode}) — {r.status}</div>)}</div>
       </div>
-    </div>
-  );
-}
-function ManualPlc() {
-  const [db, setDb] = useState('1');
-  const [off, setOff] = useState('0');
-  const [val, setVal] = useState('0');
-  const [out, setOut] = useState('');
-  return (
-    <div style={{ minWidth: 0 }}>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 8, minWidth: 0, flexWrap: 'wrap' }}>
-        <input className="input" placeholder="DB" value={db} onChange={e => setDb(e.target.value)} style={{ flex: '1 1 60px' }} />
-        <input className="input" placeholder="Offset" value={off} onChange={e => setOff(e.target.value)} style={{ flex: '1 1 80px' }} />
-        <input className="input" placeholder="Valor" value={val} onChange={e => setVal(e.target.value)} style={{ flex: '1 1 80px' }} />
-      </div>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button className="btn" onClick={() => api.post('/admin/plc-read', { db: +db, offset: +off, type: 'REAL' }).then(r => setOut(`→ ${r.value}`))}>Leer</button>
-        <button className="btn primary" onClick={() => api.post('/admin/plc-write', { db: +db, offset: +off, type: 'REAL', value: +val }).then(r => setOut(JSON.stringify(r)))}>Escribir</button>
-      </div>
-      {out && <pre style={{ marginTop: 8, fontSize: 12, background: '#f1f5f9', padding: 8, borderRadius: 6, overflow: 'auto', wordBreak: 'break-all' }}>{out}</pre>}
     </div>
   );
 }
