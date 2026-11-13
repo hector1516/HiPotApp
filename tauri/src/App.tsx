@@ -50,6 +50,18 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
+  // Abrir teclado tactil de Windows al enfocar un input
+  React.useEffect(() => {
+    const onFocus = (e: FocusEvent) => {
+      const t = e.target as HTMLElement;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) {
+        (window as any).__TAURI__?.core?.invoke?.('show_touch_keyboard')?.catch?.(() => {});
+      }
+    };
+    document.addEventListener('focusin', onFocus);
+    return () => document.removeEventListener('focusin', onFocus);
+  }, []);
+
   const triggerGodMode = React.useCallback(() => {
     if (godActive) return;
     setGodActive(true);

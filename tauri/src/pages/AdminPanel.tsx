@@ -1,8 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../api';
+import { getVersion } from '@tauri-apps/api/app';
+import { check } from '@tauri-apps/plugin-updater';
+import { relaunch } from '@tauri-apps/plugin-process';
 import { LabelEditor, LObj, objsToTemplate, templateToObjs } from '../components/LabelEditor';
 
-const TABS = ['Usuarios', 'Recetas', 'PLC', 'Hipot', 'BD', 'Etiquetas', 'Logs', 'Sistema'] as const;
+const TABS = ['Usuarios', 'Recetas', 'PLC', 'Hipot', 'BD', 'Etiquetas', 'Logs', 'Manual', 'Sistema'] as const;
 
 export function AdminPanel({ onBack, adminBatch }: { onBack: () => void; adminBatch?: string }) {
   const [tab, setTab] = useState<(typeof TABS)[number]>('Recetas');
@@ -25,6 +28,7 @@ export function AdminPanel({ onBack, adminBatch }: { onBack: () => void; adminBa
         {tab === 'BD' && <DbTab />}
         {tab === 'Etiquetas' && <LabelsTab />}
         {tab === 'Logs' && <LogsTab />}
+        {tab === 'Manual' && <ManualTab />}
         {tab === 'Sistema' && <SystemTab />}
       </div>
     </div>
@@ -361,11 +365,11 @@ function PlcTab() {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <label style={{ fontSize: 11, fontWeight: 700, color: '#475569' }}>Rack</label>
-            <input className="input" type="number" value={cfg.rack} onChange={e => setCfg({ ...cfg, rack: parseInt(e.target.value) || 0 })} style={{ width: 64 }} />
+            <input className="input" type="number" inputMode="numeric" value={cfg.rack} onChange={e => setCfg({ ...cfg, rack: parseInt(e.target.value) || 0 })} style={{ width: 64 }} />
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <label style={{ fontSize: 11, fontWeight: 700, color: '#475569' }}>Slot</label>
-            <input className="input" type="number" value={cfg.slot} onChange={e => setCfg({ ...cfg, slot: parseInt(e.target.value) || 1 })} style={{ width: 64 }} />
+            <input className="input" type="number" inputMode="numeric" value={cfg.slot} onChange={e => setCfg({ ...cfg, slot: parseInt(e.target.value) || 1 })} style={{ width: 64 }} />
           </div>
           <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, marginTop: 16 }}>
             <input type="checkbox" checked={cfg.simulate} onChange={e => setCfg({ ...cfg, simulate: e.target.checked })} style={{ width: 16, height: 16 }} /> Modo Simulación
@@ -597,10 +601,21 @@ function SystemTab() {
   const [mode, setMode] = useState('overwrite');
   const [hold, setHold] = useState('10');
   const [holdMsg, setHoldMsg] = useState('');
-  const [autoStart, setAutoStart] = useState(false);
-  const [autoStartMsg, setAutoStartMsg] = useState('');
+  const [appVersion, setAppVersion] = useState('');
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState('');
+  const [plcStatus, setPlcStatus] = useState<any>(null);
+  const [hipotStatus, setHipotStatus] = useState<any>(null);
+  const [cfg, setCfg] = useState<any>({});
   const loadLog = () => api.get('/admin/import-export-log').then(setImpLog).catch(() => setImpLog([]));
-  useEffect(() => { loadLog(); api.get('/admin/config').then(c => setHold(String(c?.result_hold_seconds ?? '10'))).catch(() => {}); api.get('/admin/autostart').then(r => setAutoStart(!!r?.enabled)).catch(() => {}); }, []);
+  useEffect(() => {
+    loadLog();
+    api.get('/admin/config').then(c => { setHold(String(c?.result_hold_seconds ?? '10')); setCfg(c || {}); }).catch(() => {});
+   
+    getVersion().then(setAppVersion).catch(() => setAppVersion('1.0.0'));
+    api.get('/status/plc').then(setPlcStatus).catch(() => {});
+    api.get('/status/hipot').then(setHipotStatus).catch(() => {});
+  }, []);
   const doExport = async () => { const r = await api.get('/admin/export'); const blob = new Blob([r.data], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `config_export_${new Date().toISOString().slice(0,10)}.json`; a.click(); };
   const doImport = async (f: File) => { try { const t = await f.text(); const r = await api.post('/admin/import', { data: t, mode }); setMsg(`Import OK: ${r.imported} · Conflictos: ${(r.conflicts ?? []).length}`); loadLog(); } catch (e) { setMsg(String(e)); } };
   return (
@@ -611,7 +626,7 @@ function SystemTab() {
         <h3>Espera en resultado</h3>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', minWidth: 0 }}>
           <span style={{ fontSize: 13, color: '#475569' }}>Segundos antes de volver al inicio:</span>
-          <input className="input" type="number" min={3} max={60} value={hold} onChange={e => setHold(e.target.value)} style={{ maxWidth: 90 }} />
+          <input className="input" type="number" inputMode="numeric" min={3} max={60} value={hold} onChange={e => setHold(e.target.value)} style={{ maxWidth: 90 }} />
           <button className="btn primary" onClick={async () => {
             const n = Math.max(3, Math.min(60, parseInt(hold || '10', 10) || 10));
             await api.post('/admin/config', { result_hold_seconds: String(n) });
@@ -621,22 +636,48 @@ function SystemTab() {
         </div>
       </div>
       <div className="card" style={{ marginBottom: 10 }}>
-        <h3>Inicio automatico de Windows</h3>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', minWidth: 0 }}>
-          <span style={{ fontSize: 13, color: '#475569' }}>Abrir HiPotApp al iniciar Windows:</span>
-          <button className={`btn ${autoStart ? 'primary' : ''}`} onClick={async () => {
-            const next = !autoStart;
-            try {
-              await api.post('/admin/autostart', { enabled: next });
-              setAutoStart(next);
-              setAutoStartMsg(next ? 'Activado' : 'Desactivado');
-              setTimeout(() => setAutoStartMsg(''), 2000);
-            } catch (e) { setAutoStartMsg(String(e)); }
-          }}>{autoStart ? 'Desactivar' : 'Activar'}</button>
-          {autoStartMsg && <span className="pill on" style={{ fontSize: 12 }}>{autoStartMsg}</span>}
+        <h3>Actualizacion y version</h3>
+        <div style={{ fontSize: 12, color: '#475569', marginBottom: 8 }}>
+          Version de la app: <span className="font-mono">{appVersion || '1.0.0'}</span>
         </div>
-        <div style={{ marginTop: 6, fontSize: 12, color: '#64748b' }}>
-          {autoStart ? 'La app se abrira automaticamente al encender el equipo.' : 'La app no se abrira automaticamente.'}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <button className="btn ok" disabled={checkingUpdate} onClick={async () => {
+            setCheckingUpdate(true);
+            setUpdateStatus('Buscando actualizaciones...');
+            try {
+              const update = await check();
+              if (update) {
+                setUpdateStatus(`Nueva version ${update.version}. Descargando...`);
+                await update.downloadAndInstall();
+                setUpdateStatus('Instalada. Reiniciando...');
+                await relaunch();
+              } else {
+                setUpdateStatus('Ya tienes la ultima version.');
+              }
+            } catch (e: any) {
+              setUpdateStatus('Error: ' + (e?.message || e));
+            } finally {
+              setCheckingUpdate(false);
+            }
+          }}>{checkingUpdate ? 'Buscando...' : 'Buscar actualizaciones'}</button>
+          {updateStatus && <span style={{ fontSize: 12, color: '#64748b' }}>{updateStatus}</span>}
+        </div>
+      </div>
+      <div className="card" style={{ marginBottom: 10 }}>
+        <h3>Datos de debug</h3>
+        <div style={{ fontSize: 12, color: '#475569', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div>Backend: <span className="font-mono">http://127.0.0.1:8000</span></div>
+          <div>PLC: <span className="font-mono">{plcStatus?.ip || cfg?.plc_ip || '-'}</span> ({plcStatus?.connected ? 'conectado' : 'desconectado'})</div>
+          <div>Hipot: <span className="font-mono">{hipotStatus?.port || '-'}</span></div>
+          <div>SQL: <span className="font-mono">{cfg?.sql_server || '-'}</span> / {cfg?.sql_database || '-'}</div>
+          <button className="btn ghost" style={{ fontSize: 11, marginTop: 4 }} onClick={async () => {
+            try {
+              const h = await api.get('/health');
+              const p = await api.get('/status/plc');
+              const hp = await api.get('/status/hipot');
+              alert(`Health: ${JSON.stringify(h)}\nPLC: ${JSON.stringify(p)}\nHipot: ${JSON.stringify(hp)}`);
+            } catch (e: any) { alert('Error: ' + (e?.message || e)); }
+          }}>Ver estado completo</button>
         </div>
       </div>
       <div className="card" style={{ minWidth: 0 }}>
@@ -647,6 +688,92 @@ function SystemTab() {
           <select className="input" style={{ maxWidth: 140, flex: '1 1 130px' }} value={mode} onChange={e => setMode(e.target.value)}><option value="overwrite">Sobreescribir</option><option value="add">Agregar</option><option value="merge">Merge</option></select>
         </div>
         <div style={{ marginTop: 10, fontSize: 12, color: '#64748b' }}>{impLog.map((r: any) => <div key={r.id}>#{r.id} {r.op} ({r.mode}) — {r.status}</div>)}</div>
+      </div>
+    </div>
+  );
+}
+
+
+function ManualTab() {
+  const [tags, setTags] = useState<any[]>([]);
+  const [msg, setMsg] = useState('');
+  const [hipot, setHipot] = useState<{ raw: string; parsed: any } | null>(null);
+  const [voltage, setVoltage] = useState(120);
+  const [writing, setWriting] = useState<number | null>(null);
+
+  const load = () => api.get('/admin/plc-tags').then(setTags).catch(() => setTags([]));
+  useEffect(() => { load(); }, []);
+
+  const writeTag = async (tag: any, value: any) => {
+    setWriting(tag.id);
+    try {
+      await api.post('/admin/plc-write', { tag_id: tag.id, value });
+      setMsg(`Escrito ${tag.name} = ${value}`);
+      load();
+    } catch (e: any) { setMsg(String(e?.message ?? e)); }
+    finally { setWriting(null); }
+  };
+
+  const hipotCmd = async (action: 'START' | 'STOP' | 'STATUS') => {
+    try {
+      const r = await api.post('/manual/hipot', { action });
+      setHipot({ raw: r.response ?? '', parsed: r.parsed ?? {} });
+    } catch (e: any) { setMsg(String(e?.message ?? e)); }
+  };
+
+  return (
+    <div style={{ minWidth: 0 }}>
+      <h2 style={{ margin: '0 0 10px 0', fontSize: 16 }}>Manual avanzado (sin registro)</h2>
+      {msg && <div style={{ marginBottom: 8, fontSize: 12, color: '#475569' }}>{msg}</div>}
+
+      <div className="card" style={{ marginBottom: 10 }}>
+        <h3>Salidas del PLC (tags)</h3>
+        <div style={{ fontSize: 12, color: '#64748b', marginBottom: 8 }}>
+          Escribe valores directamente en los tags del PLC. No se guarda en BD.
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 240, overflow: 'auto' }}>
+          {tags.map((t: any) => (
+            <div key={t.id} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', minWidth: 0 }}>
+              <span style={{ flex: '1 1 120px', fontSize: 13, fontWeight: 600 }}>{t.name}</span>
+              <span style={{ fontSize: 11, color: '#64748b', flex: '0 1 80px' }}>{t.data_type}</span>
+              <input className="input" style={{ maxWidth: 100, flex: '0 1 100px' }}
+                defaultValue={t.value ?? ''} id={`tag-${t.id}`}
+                placeholder="valor" />
+              <button className="btn primary" style={{ fontSize: 12 }}
+                disabled={writing === t.id}
+                onClick={() => {
+                  const inp = document.getElementById(`tag-${t.id}`) as HTMLInputElement;
+                  writeTag(t, inp?.value ?? '');
+                }}>
+                {writing === t.id ? '...' : 'Escribir'}
+              </button>
+            </div>
+          ))}
+          {!tags.length && <div style={{ fontSize: 12, color: '#64748b' }}>No hay tags configurados.</div>}
+        </div>
+      </div>
+
+      <div className="card" style={{ minWidth: 0 }}>
+        <h3>Hipot manual (sin registro)</h3>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+          <span style={{ fontSize: 13, color: '#475569' }}>Voltaje:</span>
+          <select className="input" style={{ maxWidth: 120 }} value={voltage} onChange={e => setVoltage(+e.target.value)}>
+            {[120, 208, 220, 240].map(v => <option key={v} value={v}>{v} V</option>)}
+          </select>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <button className="btn ok" onClick={() => hipotCmd('START')}>Hipot Start</button>
+          <button className="btn danger" onClick={() => hipotCmd('STOP')}>Stop</button>
+          <button className="btn" onClick={() => hipotCmd('STATUS')}>Estado</button>
+          {hipot && (
+            <span style={{ fontSize: 12, color: '#475569', marginLeft: 8 }}>
+              {hipot.raw || '-'} {hipot.parsed?.voltage != null ? `→ ${hipot.parsed.voltage}V` : ''} {hipot.parsed?.pass ? 'PASS' : hipot.parsed?.pass === false ? 'FAIL' : ''}
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>
+          No guarda en BD. Solo visualización y control directo.
+        </div>
       </div>
     </div>
   );
