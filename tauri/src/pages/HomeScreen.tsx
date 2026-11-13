@@ -59,12 +59,6 @@ export function HomeScreen({ step, recipe, serial, batch, error, onScanModel, on
               <div className="scan-zone" style={{ marginTop: 6 }}>
                 <BarcodeInput label="" onScan={handler} autoFocus />
               </div>
-              <div style={{ marginTop: 8, display: 'flex', justifyContent: 'center' }}>
-                <button className="btn" onClick={() => {
-                  const code = window.prompt('Ingrese el codigo de barras manualmente:');
-                  if (code) handler(code.trim().toUpperCase());
-                }}>Capturar codigo manual</button>
-              </div>
             </>
           ) : (
             <div style={{ background: '#fffbeb', border: '1px solid #fde68a', padding: 16, borderRadius: 8, textAlign: 'center' }}>
