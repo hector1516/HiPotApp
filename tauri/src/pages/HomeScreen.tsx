@@ -108,6 +108,9 @@ export function HomeScreen({ step, recipe, serial, batch, error, onScanModel, on
           <div>2. Serie → valida unidad</div>
           <div>3. Batch → arranca automáticamente</div>
         </div>
+        <div className="card" style={{ display: 'flex', justifyContent: 'center', padding: 8 }}>
+          <img src="/IMG_0854.png" alt="HiPotApp" style={{ maxWidth: '100%', maxHeight: 120, objectFit: 'contain', borderRadius: 8 }} />
+        </div>
       </div>
     </div>
   );

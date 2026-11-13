@@ -759,7 +759,7 @@ function SystemTab() {
           <button className="btn ok" onClick={async () => {
             try { await api.post('/admin/local-db-config', localDbCfg); alert('Guardado. Reinicia la app para aplicar.'); } catch (e: any) { alert('Error: ' + (e?.message || e)); }
           }}>Guardar</button>
-          <button className="btn ghost" onClick={() => (window as any).__TAURI__?.core?.invoke?.('open_external', { url: 'https://www.microsoft.com/es-es/sql-server/sql-server-downloads' }).catch?.(() => window.open('https://www.microsoft.com/es-es/sql-server/sql-server-downloads', '_blank'))}>Descargar SQL Express</button>
+          <button className="btn ghost" onClick={() => (window as any).__TAURI__?.core?.invoke?.('open_external', { url: 'https://www.microsoft.com/es-es/sql-server/sql-server-downloads' }).catch?.(() => window.open('https://www.microsoft.com/es-es/sql-server/sql-server-downloads', '_blank'))}>Descargar SQL Express 2025</button>
         </div>
         <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>
           Las tablas se crean automáticamente al arrancar. Los cambios aplican al reiniciar.
@@ -807,7 +807,7 @@ function SystemTab() {
           <button className="btn ghost" onClick={async () => {
             try { const r = await api.get('/audit/tables-status'); alert(`Conexión: ${r.connected ? 'OK' : 'Sin conexión'}\\nTabla: ${r.table_exists ? 'Existe' : 'No existe'}`); } catch (e: any) { alert('Error: ' + (e?.message || e)); }
           }}>Verificar conexión</button>
-          <button className="btn ghost" onClick={() => { (window as any).__TAURI__?.core?.invoke?.('open_external', { url: 'https://www.microsoft.com/es-es/sql-server/sql-server-downloads' }).catch?.(() => window.open('https://www.microsoft.com/es-es/sql-server/sql-server-downloads', '_blank')); }}>Descargar SQL Express</button>
+          <button className="btn ghost" onClick={() => { (window as any).__TAURI__?.core?.invoke?.('open_external', { url: 'https://www.microsoft.com/es-es/sql-server/sql-server-downloads' }).catch?.(() => window.open('https://www.microsoft.com/es-es/sql-server/sql-server-downloads', '_blank')); }}>Descargar SQL Express 2025</button>
         </div>
         <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>
           Para usar SQL Express local, define USE_SQLITE=0 y DB_LOCAL_SERVER en el entorno.
