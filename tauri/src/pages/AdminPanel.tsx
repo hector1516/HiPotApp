@@ -316,7 +316,12 @@ function PlcTab() {
       setMsg('Configuración de PLC guardada correctamente');
       api.get('/status/plc').then(setSt);
     } catch (e: any) {
-      setMsg(`Error al guardar red: ${String(e?.message ?? e)}`);
+      const errMsg = String(e?.message ?? e);
+      if (errMsg.includes('Failed to fetch') || errMsg.includes('NetworkError')) {
+        setMsg('Error: Backend no disponible. Verifica que la app esté corriendo (indicador "Backend OK" en el pie de página).');
+      } else {
+        setMsg(`Error al guardar red: ${errMsg}`);
+      }
     }
   };
 

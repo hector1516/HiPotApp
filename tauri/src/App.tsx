@@ -32,6 +32,7 @@ export default function App() {
   const [values, setValues] = useState<Record<string, number>>({ FAN: 0.45, DOOR: 2.1 });
   const [final, setFinal] = useState<'GOOD' | 'BAD'>('GOOD');
   const [t0, setT0] = useState<number>(0);
+  const [health, setHealth] = useState<boolean>(false);
   const [elapsed, setElapsed] = useState('0:00');
   const [holdSeconds, setHoldSeconds] = useState(10);
   const [printStatus, setPrintStatus] = useState<'sending' | 'sent' | 'error' | null>(null);
@@ -50,6 +51,17 @@ export default function App() {
       const v = parseInt(c?.result_hold_seconds ?? '10', 10);
       if (!Number.isNaN(v) && v >= 3 && v <= 60) setHoldSeconds(v);
     }).catch(() => {});
+    return () => clearInterval(id);
+  }, []);
+
+  // Health check del backend
+  React.useEffect(() => {
+    const check = async () => {
+      try { await api.get('/health'); setHealth(true); }
+      catch { setHealth(false); }
+    };
+    check();
+    const id = setInterval(check, 3000);
     return () => clearInterval(id);
   }, []);
 
@@ -249,6 +261,10 @@ export default function App() {
                        position: 'relative', zIndex: 1, borderTop: '1px solid #2a3a52', fontSize: 13 }}>
         <span className={`pill ${phase.startsWith('COMPLETE_GOOD') ? 'on' : phase.startsWith('COMPLETE_BAD') ? 'off' : ''}`} style={{ fontSize: 12 }}>
           {phase.replace(/_/g, ' ')}
+        </span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: health ? '#166534' : '#991b1b' }} />
+          {health ? 'Backend OK' : 'Sin conexion'}
         </span>
         <span style={{ marginLeft: 'auto' }}>Offline-first · Windows 11 · v1.0.0 · Ctrl+Shift+K → GodMode</span>
       </footer>
