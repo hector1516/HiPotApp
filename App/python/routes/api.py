@@ -540,6 +540,8 @@ def set_config(body: dict):
             else:
                 s.add(Configuration(config_key=k, config_value=str(v)))
         s.commit()
+        from ..logger import logger
+        logger.info("CONFIG", "save", f"Config guardada: {list(body.keys())}", value_sent=str(body)[:200])
         return {"status": "saved"}
     finally:
         s.close()
@@ -552,6 +554,8 @@ def sync_now():
     try:
         mgr = SyncManager(local_db.Session, get_remote_db().Session)
         n = mgr.sync_pending()
+        from ..logger import logger
+        logger.info("SYNC", "sync_now", f"Sincronizados {n} registros")
         return {"status": "ok", "synced": n}
     except Exception as e:
         return {"status": "error", "error": str(e), "synced": 0}
