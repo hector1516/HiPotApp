@@ -607,6 +607,7 @@ function SystemTab() {
   const [plcStatus, setPlcStatus] = useState<any>(null);
   const [hipotStatus, setHipotStatus] = useState<any>(null);
   const [cfg, setCfg] = useState<any>({});
+  const [previewStatus, setPreviewStatus] = useState<'GOOD' | 'BAD' | null>(null);
   const loadLog = () => api.get('/admin/import-export-log').then(setImpLog).catch(() => setImpLog([]));
   useEffect(() => {
     loadLog();
@@ -678,6 +679,28 @@ function SystemTab() {
               alert(`Health: ${JSON.stringify(h)}\nPLC: ${JSON.stringify(p)}\nHipot: ${JSON.stringify(hp)}`);
             } catch (e: any) { alert('Error: ' + (e?.message || e)); }
           }}>Ver estado completo</button>
+        </div>
+      </div>
+      <div className="card" style={{ marginBottom: 10 }}>
+        <h3>Previsualizacion de resultado</h3>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button className="btn" title="Simular OK" aria-label="Simular OK" onClick={() => setPreviewStatus('GOOD')}
+            style={{ fontSize: 20, padding: '4px 10px' }}>✅</button>
+          <button className="btn" title="Simular NO OK" aria-label="Simular NO OK" onClick={() => setPreviewStatus('BAD')}
+            style={{ fontSize: 20, padding: '4px 10px' }}>❌</button>
+          {previewStatus && (
+            <div style={{
+              marginLeft: 12, padding: '6px 14px', borderRadius: 8, fontWeight: 700, fontSize: 14,
+              background: previewStatus === 'GOOD' ? '#dcfce7' : '#fee2e2',
+              color: previewStatus === 'GOOD' ? '#166534' : '#991b1b',
+              border: `1px solid ${previewStatus === 'GOOD' ? '#86efac' : '#fca5a5'}`,
+            }}>
+              {previewStatus === 'GOOD' ? '✓ RESULTADO: BUENO' : '✗ RESULTADO: MALO'}
+            </div>
+          )}
+        </div>
+        <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>
+          Solo previsualizacion. No se guarda ni se registra.
         </div>
       </div>
       <div className="card" style={{ minWidth: 0 }}>
