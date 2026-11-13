@@ -635,6 +635,7 @@ function SystemTab() {
   const [localDbCfg, setLocalDbCfg] = useState<any>({ use_sqlite: '1', server: '', name: '', user: '', password: '' });
   const [tableNames, setTableNames] = useState<string[]>([]);
   const [previewStatus, setPreviewStatus] = useState<'GOOD' | 'BAD' | null>(null);
+  const [kbMode, setKbMode] = useState(() => localStorage.getItem('keyboard_mode') || 'integrated');
   const loadLog = () => api.get('/admin/import-export-log').then(setImpLog).catch(() => setImpLog([]));
   useEffect(() => {
     loadLog();
@@ -817,6 +818,23 @@ function SystemTab() {
         </div>
         <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>
           Para usar SQL Express local, define USE_SQLITE=0 y DB_LOCAL_SERVER en el entorno.
+        </div>
+      </div>
+      <div className="card" style={{ marginBottom: 10 }}>
+        <h3>Teclado en pantalla</h3>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 13, color: '#475569' }}>Modo:</span>
+          <select className="input" style={{ maxWidth: 200 }} value={kbMode} onChange={e => {
+            const v = e.target.value;
+            setKbMode(v);
+            localStorage.setItem('keyboard_mode', v);
+          }}>
+            <option value="integrated">Integrado (app)</option>
+            <option value="windows">Teclado de Windows</option>
+          </select>
+        </div>
+        <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>
+          {kbMode === 'integrated' ? 'Se usa el teclado virtual de la app.' : 'Se usa el teclado tactil de Windows (TabTip).'}
         </div>
       </div>
       <div className="card" style={{ minWidth: 0 }}>

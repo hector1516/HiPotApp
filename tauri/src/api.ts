@@ -1,5 +1,5 @@
 // Cliente HTTP al backend FastAPI (offline-first: reintenta, no bloquea).
-const BASE = (import.meta as any).env?.VITE_API_URL ?? 'http://localhost:8000';
+const BASE = (import.meta as any).env?.VITE_API_URL ?? 'http://127.0.0.1:8765';
 
 async function req(path: string, init?: RequestInit) {
   const r = await fetch(`${BASE}${path}`, {

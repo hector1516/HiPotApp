@@ -71,8 +71,13 @@ export default function App() {
       const t = e.target as HTMLInputElement;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) {
         const mode = t.inputMode || (t.type === 'number' ? 'numeric' : 'text');
-        setKbLayout(mode === 'numeric' ? 'numeric' : 'text');
-        setKbVisible(true);
+        const kbPref = localStorage.getItem('keyboard_mode') || 'integrated';
+        if (kbPref === 'windows') {
+          (window as any).__TAURI__?.core?.invoke?.('show_touch_keyboard')?.catch?.(() => {});
+        } else {
+          setKbLayout(mode === 'numeric' ? 'numeric' : 'text');
+          setKbVisible(true);
+        }
       }
     };
     const onBlur = () => {

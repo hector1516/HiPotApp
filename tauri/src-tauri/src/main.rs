@@ -9,6 +9,15 @@ use tauri::{Manager, State, WindowEvent};
 const BACKEND_BIN: &str = "hipot-backend-x86_64-pc-windows-msvc.exe";
 
 #[tauri::command]
+fn show_touch_keyboard() {
+    #[cfg(target_os = "windows")]
+    {
+        let tabtip = "C:\\Program Files\\Common Files\\Microsoft Shared\\Ink\\TabTip.exe";
+        let _ = std::process::Command::new(tabtip).spawn();
+    }
+}
+
+#[tauri::command]
 fn open_external(url: String) {
     #[cfg(target_os = "windows")]
     {
@@ -69,7 +78,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .invoke_handler(tauri::generate_handler![open_external])
+        .invoke_handler(tauri::generate_handler![open_external, show_touch_keyboard])
         .manage(Backend(Mutex::new(None)))
         .setup(|app| {
             match backend_path(app.handle()) {

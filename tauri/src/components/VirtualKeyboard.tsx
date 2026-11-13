@@ -6,7 +6,13 @@ interface Props {
   onClose: () => void;
 }
 
-const NUMERIC = ['1','2','3','4','5','6','7','8','9','0','.','-','Backspace','Enter'];
+const NUMERIC_ROWS = [
+  ['7','8','9','/'],
+  ['4','5','6','*'],
+  ['1','2','3','-'],
+  ['0','.','+','Backspace'],
+  ['Enter'],
+];
 const ALPHA_ROWS = [
   ['1','2','3','4','5','6','7','8','9','0'],
   ['q','w','e','r','t','y','u','i','o','p'],
@@ -135,9 +141,13 @@ export default function VirtualKeyboard({ visible, layout, onClose }: Props) {
         {preview || <span style={{ opacity: 0.4 }}>Escribiendo…</span>}
       </div>
       {layout === 'numeric' ? (
-        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', maxWidth: 420 }}>
-          {NUMERIC.map(k => renderKey(k))}
-        </div>
+        <>
+          {NUMERIC_ROWS.map((row, ri) => (
+            <div key={ri} style={{ display: 'flex', justifyContent: 'center' }}>
+              {row.map(k => renderKey(k))}
+            </div>
+          ))}
+        </>
       ) : (
         <>
           {ALPHA_ROWS.map((row, ri) => (
