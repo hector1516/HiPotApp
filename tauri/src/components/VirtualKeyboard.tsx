@@ -50,13 +50,21 @@ function insertKey(key: string) {
 
 export default function VirtualKeyboard({ visible, layout, onClose }: Props) {
   const [shift, setShift] = useState(false);
-  const [pos, setPos] = useState({ x: 100, y: 100 });
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [preview, setPreview] = useState('');
   const dragging = useRef(false);
   const dragOffset = useRef({ x: 0, y: 0 });
+  const kbRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!visible) setShift(false);
-  }, [visible]);
+    if (!visible) { setShift(false); return; }
+    // Centrar horizontalmente, colocar cerca del fondo
+    const w = kbRef.current?.offsetWidth ?? 600;
+    setPos({ x: Math.max(10, (window.innerWidth - w) / 2), y: window.innerHeight - (kbRef.current?.offsetHeight ?? 300) - 20 });
+    // Preview inicial
+    const el = document.activeElement as HTMLInputElement | null;
+    setPreview(el?.value ?? '');
+  }, [visible, layout]);
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
@@ -75,6 +83,12 @@ export default function VirtualKeyboard({ visible, layout, onClose }: Props) {
     dragOffset.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
   };
 
+  const handleKey = (k: string) => {
+    insertKey(k);
+    const el = document.activeElement as HTMLInputElement | null;
+    setPreview(el?.value ?? '');
+  };
+
   if (!visible) return null;
 
   const keyStyle: React.CSSProperties = {
@@ -90,7 +104,7 @@ export default function VirtualKeyboard({ visible, layout, onClose }: Props) {
     const val = (shift && layout === 'text' && k.length === 1 && /[a-z]/.test(k)) ? k.toUpperCase() : k;
     return (
       <button key={k} style={isSpecial ? specialStyle : keyStyle}
-        onMouseDown={e => { e.preventDefault(); insertKey(k === 'Space' ? 'Space' : val); }}
+        onMouseDown={e => { e.preventDefault(); handleKey(k === 'Space' ? 'Space' : val); }}
       >
         {display}
       </button>
@@ -98,18 +112,26 @@ export default function VirtualKeyboard({ visible, layout, onClose }: Props) {
   };
 
   return (
-    <div style={{
+    <div ref={kbRef} style={{
       position: 'fixed', left: pos.x, top: pos.y, zIndex: 9999,
       background: 'rgba(30,41,59,0.75)', padding: 10, borderRadius: 14,
       border: '1px solid rgba(255,255,255,0.15)', backdropFilter: 'blur(12px)',
       boxShadow: '0 8px 32px rgba(0,0,0,0.3)', display: 'flex', flexDirection: 'column', gap: 6,
-      cursor: 'move',
+      cursor: 'move', minWidth: 320,
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, cursor: 'move' }}
         onMouseDown={startDrag}>
         <span style={{ color: '#fff', fontSize: 12, fontWeight: 600, opacity: 0.7 }}>Teclado virtual</span>
         <button style={{ ...specialStyle, background: 'rgba(239,68,68,0.8)', color: '#fff', minWidth: 32, padding: '4px 8px' }}
           onMouseDown={e => { e.preventDefault(); onClose(); }}>✕</button>
+      </div>
+      {/* Cuadro de preview */}
+      <div style={{
+        background: 'rgba(255,255,255,0.15)', borderRadius: 8, padding: '6px 10px', marginBottom: 6,
+        color: '#fff', fontSize: 16, fontFamily: 'monospace', minHeight: 28,
+        border: '1px solid rgba(255,255,255,0.2)', wordBreak: 'break-all',
+      }}>
+        {preview || <span style={{ opacity: 0.4 }}>Escribiendo…</span>}
       </div>
       {layout === 'numeric' ? (
         <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', maxWidth: 420 }}>
@@ -124,9 +146,9 @@ export default function VirtualKeyboard({ visible, layout, onClose }: Props) {
           ))}
           <div style={{ display: 'flex', justifyContent: 'center', gap: 6 }}>
             <button style={{ ...specialStyle, minWidth: 70 }} onMouseDown={e => { e.preventDefault(); setShift(s => !s); }}>⇧ Shift</button>
-            <button style={{ ...keyStyle, minWidth: 220 }} onMouseDown={e => { e.preventDefault(); insertKey('Space'); }}>Espacio</button>
-            <button style={specialStyle} onMouseDown={e => { e.preventDefault(); insertKey('Backspace'); }}>⌫</button>
-            <button style={specialStyle} onMouseDown={e => { e.preventDefault(); insertKey('Enter'); }}>↵ Enter</button>
+            <button style={{ ...keyStyle, minWidth: 220 }} onMouseDown={e => { e.preventDefault(); handleKey('Space'); }}>Espacio</button>
+            <button style={specialStyle} onMouseDown={e => { e.preventDefault(); handleKey('Backspace'); }}>⌫</button>
+            <button style={specialStyle} onMouseDown={e => { e.preventDefault(); handleKey('Enter'); }}>↵ Enter</button>
           </div>
         </>
       )}
