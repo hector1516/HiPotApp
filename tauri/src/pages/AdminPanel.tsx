@@ -703,6 +703,44 @@ function SystemTab() {
           Solo previsualizacion. No se guarda ni se registra.
         </div>
       </div>
+      <div className="card" style={{ marginBottom: 10 }}>
+        <h3>Base de datos remota (SQL Server)</h3>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+          <div>
+            <label style={{ fontSize: 12, color: '#475569' }}>Servidor</label>
+            <input className="input" value={cfg.sql_server ?? ''} onChange={e => setCfg({ ...cfg, sql_server: e.target.value })} placeholder="192.168.1.200" inputMode="text" />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#475569' }}>Base de datos</label>
+            <input className="input" value={cfg.sql_database ?? ''} onChange={e => setCfg({ ...cfg, sql_database: e.target.value })} placeholder="HiPotDB_Central" inputMode="text" />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#475569' }}>Usuario</label>
+            <input className="input" value={cfg.sql_user ?? ''} onChange={e => setCfg({ ...cfg, sql_user: e.target.value })} placeholder="sa" inputMode="text" />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#475569' }}>Contraseña</label>
+            <input className="input" type="password" value={cfg.sql_password ?? ''} onChange={e => setCfg({ ...cfg, sql_password: e.target.value })} placeholder="****" inputMode="text" />
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <button className="btn ok" onClick={async () => {
+            const vals: any = {};
+            ['sql_server', 'sql_database', 'sql_user', 'sql_password'].forEach(k => { if (cfg[k] !== undefined) vals[k] = cfg[k]; });
+            try { await api.post('/admin/config', { values: vals }); alert('Guardado'); } catch (e: any) { alert('Error: ' + (e?.message || e)); }
+          }}>Guardar</button>
+          <button className="btn ghost" onClick={async () => {
+            try { const r = await api.post('/audit/ensure-table'); alert(r.exists ? 'Tablas creadas/verificadas' : 'No se pudo crear'); } catch (e: any) { alert('Error: ' + (e?.message || e)); }
+          }}>Crear tablas en remoto</button>
+          <button className="btn ghost" onClick={async () => {
+            try { const r = await api.get('/audit/tables-status'); alert(`Conexión: ${r.connected ? 'OK' : 'Sin conexión'}\\nTabla: ${r.table_exists ? 'Existe' : 'No existe'}`); } catch (e: any) { alert('Error: ' + (e?.message || e)); }
+          }}>Verificar conexión</button>
+          <button className="btn ghost" onClick={() => window.open('https://www.microsoft.com/es-es/sql-server/sql-server-downloads', '_blank')}>Descargar SQL Express</button>
+        </div>
+        <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>
+          Para usar SQL Express local, define USE_SQLITE=0 y DB_LOCAL_SERVER en el entorno.
+        </div>
+      </div>
       <div className="card" style={{ minWidth: 0 }}>
         <h3>Import / Export</h3>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
