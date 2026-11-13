@@ -31,13 +31,19 @@ class PLCManager:
     def connect(self) -> bool:
         if self.simulate:
             self.connected = True
+            from .logger import logger
+            logger.info("PLC", "connect", f"Simulado conectado a {self.ip}")
             return True
         try:
             self.client.connect(self.ip, self.rack, self.slot)
             self.connected = True
+            from .logger import logger
+            logger.info("PLC", "connect", f"Conectado a {self.ip} rack={self.rack} slot={self.slot}")
             return True
-        except Exception:
+        except Exception as e:
             self.connected = False
+            from .logger import logger
+            logger.error("PLC", "connect", f"Error conectando a {self.ip}: {e}", error_message=str(e))
             return False
 
     def disconnect(self):
@@ -47,6 +53,8 @@ class PLCManager:
             except Exception:
                 pass
         self.connected = False
+        from .logger import logger
+        logger.info("PLC", "disconnect", f"Desconectado de {self.ip}")
 
     def update_config(self, ip: str, rack: int = 0, slot: int = 1, simulate: bool = True):
         self.ip = ip

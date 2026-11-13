@@ -34,6 +34,11 @@ class HipotManager:
         if self.simulate:
             self.connected = True
             self.start_reading()
+            try:
+                from .logger import logger
+                logger.info("HIPOT", "connect", f"Simulado conectado a {self.port}")
+            except Exception:
+                pass
             return True
         try:
             self.serial = serial.Serial(port=self.port, baudrate=self.baudrate,
@@ -42,9 +47,19 @@ class HipotManager:
                                         stopbits=serial.STOPBITS_ONE, timeout=1)
             self.connected = True
             self.start_reading()
+            try:
+                from .logger import logger
+                logger.info("HIPOT", "connect", f"Conectado a {self.port} baud={self.baudrate}")
+            except Exception:
+                pass
             return True
-        except Exception:
+        except Exception as e:
             self.connected = False
+            try:
+                from .logger import logger
+                logger.error("HIPOT", "connect", f"Error conectando a {self.port}: {e}", error_message=str(e))
+            except Exception:
+                pass
             return False
 
     def disconnect(self):
@@ -57,6 +72,11 @@ class HipotManager:
         except Exception:
             pass
         self.connected = False
+        try:
+            from .logger import logger
+            logger.info("HIPOT", "disconnect", f"Desconectado de {self.port}")
+        except Exception:
+            pass
 
     def send_command(self, command: str) -> bool:
         if not self.connected:

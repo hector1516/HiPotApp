@@ -17,6 +17,11 @@ class BarcodeManager:
     def process(raw: str, barcode_type: str = "model", scan_order: int = 1) -> dict:
         normalized = normalize_code(raw)
         if not normalized:
+            from .logger import logger
+            logger.warn("BARCODE", "process", "Código vacío")
             return {"ok": False, "error": "Código vacío"}
+        from .logger import logger
+        logger.info("BARCODE", "process", f"Scan {barcode_type}: {normalized}",
+                    value_received=normalized)
         return {"ok": True, "raw": raw, "code": normalized,
                 "barcode_type": barcode_type, "scan_order": scan_order}

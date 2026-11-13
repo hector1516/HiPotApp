@@ -2,6 +2,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import time
 
 from .database import local_db
 from .logger import AppLogger, logger
@@ -51,6 +52,20 @@ except Exception:
     pass
 
 app.include_router(router)
+
+
+@app.middleware("http")
+async def log_requests(request, call_next):
+    import time
+    from .logger import logger
+    start = time.time()
+    response = await call_next(request)
+    ms = int((time.time() - start) * 1000)
+    # No loguear health check para evitar spam
+    if request.url.path not in ("/", "/health"):
+        logger.info("HTTP", f"{request.method} {request.url.path}",
+                    f"status={response.status_code}", duration_ms=ms)
+    return response
 
 
 @app.get("/")

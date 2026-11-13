@@ -32,8 +32,18 @@ class ZebraPrinter:
                 subprocess.run(["print", f"/d:{self.printer_name}", path],
                                check=True, shell=True, timeout=30)
             os.unlink(path)
+            try:
+                from .logger import logger
+                logger.info("PRINTER", "print_zpl", f"Impresion OK ({len(zpl_data)} chars)")
+            except Exception:
+                pass
             return True
-        except Exception:
+        except Exception as e:
+            try:
+                from .logger import logger
+                logger.error("PRINTER", "print_zpl", f"Error imprimiendo: {e}", error_message=str(e))
+            except Exception:
+                pass
             return False
 
     def print_from_template(self, template_json: str, execution_data: dict) -> bool:

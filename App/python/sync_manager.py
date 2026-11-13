@@ -32,6 +32,11 @@ class SyncManager:
         n = 0
         start = datetime.now()
         try:
+            from .logger import logger
+            logger.info("SYNC", "sync_pending", "Inicio sincronizacion local->remoto")
+        except Exception:
+            pass
+        try:
             pend = ls.query(Execution).filter(Execution.synced_to_remote == False).all()  # noqa: E712
             for rec in pend:
                 try:
@@ -53,6 +58,11 @@ class SyncManager:
                             records_synced=n, status="success",
                             completed_at=datetime.now()))
             ls.commit()
+            try:
+                from .logger import logger
+                logger.info("SYNC", "sync_pending", f"Sincronizados {n} registros")
+            except Exception:
+                pass
         finally:
             ls.close(); rs.close()
         return n
