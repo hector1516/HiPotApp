@@ -586,10 +586,29 @@ function LogsTab() {
           <button className="btn primary" style={{ flexShrink: 0 }} onClick={load}>Buscar</button>
         </div>
       </div>
-      <div className="card" style={{ maxHeight: 380, overflow: 'auto', fontSize: 13, minWidth: 0 }}>
-        {logs.map(l => <div key={l.id} style={{ borderBottom: '1px solid #e8edf3', padding: '6px 0', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          <b>#{l.id}</b> [{l.ts}] <span className={`pill ${l.level === 'ERROR' ? 'off' : ''}`} style={{ fontSize: 11 }}>{l.level}</span> [{l.cat}] <b>{l.action}</b>: {l.detail}
-        </div>)}
+      <div className="card" style={{ maxHeight: 420, overflow: 'auto', fontSize: 12, minWidth: 0 }}>
+        {logs.map(l => (
+          <div key={l.id} style={{ borderBottom: '1px solid #e8edf3', padding: '6px 0', minWidth: 0 }}>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+              <b>#{l.id}</b>
+              <span style={{ color: '#64748b' }}>{l.ts}</span>
+              <span className={`pill ${l.level === 'ERROR' ? 'off' : l.level === 'WARN' ? 'accent' : ''}`} style={{ fontSize: 10 }}>{l.level}</span>
+              <span className="pill" style={{ fontSize: 10 }}>{l.cat}</span>
+              <b>{l.action}</b>
+              {l.execution_id && <span style={{ fontSize: 10, color: '#64748b' }}>Exec #{l.execution_id}</span>}
+              {l.duration_ms != null && <span style={{ fontSize: 10, color: '#64748b' }}>{l.duration_ms}ms</span>}
+              {l.success === 0 && <span className="pill off" style={{ fontSize: 10 }}>FAIL</span>}
+            </div>
+            {l.detail && <div style={{ fontSize: 11, color: '#334155', marginTop: 2, wordBreak: 'break-word' }}>{l.detail}</div>}
+            {(l.value_sent || l.value_received) && (
+              <div style={{ fontSize: 10, color: '#64748b', marginTop: 2, fontFamily: 'monospace' }}>
+                {l.value_sent && <span>Enviado: {l.value_sent} </span>}
+                {l.value_received && <span>Recibido: {l.value_received}</span>}
+              </div>
+            )}
+            {l.error_message && <div style={{ fontSize: 11, color: '#991b1b', marginTop: 2 }}>{l.error_message}</div>}
+          </div>
+        ))}
       </div>
     </div>
   );

@@ -402,6 +402,10 @@ def exec_start(body: ExecStart):
                        serial_number=(body.serial_number or "").strip().upper(),
                        plc_start_time=datetime.now())
         s.add(ex); s.commit()
+        from ..logger import logger
+        logger.info("EXEC", "start", f"Execution {ex.id} iniciada",
+                    execution_id=ex.id, user_id=body.operator_id,
+                    value_sent=f"recipe={body.recipe_id} serial={body.serial_number} batch={body.batch}")
         return {"execution_id": ex.id, "status": "started"}
     finally:
         s.close()
@@ -426,6 +430,10 @@ def exec_plc(eid: int, passed: bool, readings: list = []):
                              min_limit=r.get("min"), max_limit=r.get("max"),
                              is_pass=r.get("pass")))
         s.commit()
+        from ..logger import logger
+        logger.info("PLC", "result", f"Execution {eid} PLC {'PASS' if passed else 'FAIL'}",
+                    execution_id=eid, success=passed,
+                    value_received=str(readings)[:200])
         return {"status": "saved", "plc_pass": passed}
     finally:
         s.close()
@@ -455,6 +463,10 @@ def exec_hipot(eid: int, body: dict):
         if ex.plc_start_time:
             ex.total_duration = (ex.hipot_end_time - ex.plc_start_time).total_seconds()
         s.commit()
+        from ..logger import logger
+        logger.info("HIPOT", "result", f"Execution {eid} Hipot {'PASS' if ex.hipot_pass_fail else 'FAIL'} -> {ex.final_status}",
+                    execution_id=eid, success=ex.hipot_pass_fail,
+                    value_received=str(body)[:200])
         return {"status": "completed", "final_status": ex.final_status}
     finally:
         s.close()
@@ -853,8 +865,13 @@ def plc_write(body: dict):
         raise HTTPException(400, "value es requerido")
     try:
         plc.write_tag(db, off, typ, val, bit)
+        from ..logger import logger
+        logger.info("PLC", "write", f"Tag db={db} off={off} type={typ} bit={bit} = {val}",
+                    value_sent=f"{db}/{off}/{typ}/{bit}={val}")
         return {"status": "written", "value": val}
     except Exception as e:
+        from ..logger import logger
+        logger.error("PLC", "write", f"Error escribiendo tag: {e}", error_message=str(e))
         raise HTTPException(500, str(e))
 
 
@@ -999,6 +1016,8 @@ def manual_hipot(body: dict):
     time.sleep(0.45)
     from ..hipot_manager import HipotManager
     resp = h.read_response(timeout=0.6)
+    from ..logger import logger
+    logger.info("HIPOT", "manual", f"Comando {action} -> {resp}", value_sent=action, value_received=resp)
     return {"action": action, "response": resp, "parsed": HipotManager.parse_measurement(resp or "")}
 
 
