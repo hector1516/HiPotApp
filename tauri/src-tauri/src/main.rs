@@ -8,15 +8,6 @@ use tauri::{Manager, State, WindowEvent};
 
 const BACKEND_BIN: &str = "hipot-backend-x86_64-pc-windows-msvc.exe";
 
-#[tauri::command]
-fn show_touch_keyboard() {
-    #[cfg(target_os = "windows")]
-    {
-        let tabtip = "C:\\Program Files\\Common Files\\Microsoft Shared\\Ink\\TabTip.exe";
-        let _ = std::process::Command::new(tabtip).spawn();
-    }
-}
-
 struct Backend(Mutex<Option<Child>>);
 
 fn backend_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
@@ -68,7 +59,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .invoke_handler(tauri::generate_handler![show_touch_keyboard])
+
         .manage(Backend(Mutex::new(None)))
         .setup(|app| {
             match backend_path(app.handle()) {

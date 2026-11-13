@@ -11,6 +11,7 @@ import { ReprintPopup } from './components/ReprintPopup';
 import { LogPopup } from './components/LogPopup';
 import { HistoryPopup } from './components/HistoryPopup';
 import { ConfigGatePopup } from './components/ConfigGatePopup';
+import VirtualKeyboard from './components/VirtualKeyboard';
 import { Phase } from './styles/theme';
 import { api } from './api';
 
@@ -21,6 +22,8 @@ export default function App() {
   const [view, setView] = useState<View>('home');
   const [phase, setPhase] = useState<Phase>('IDLE');
   const [step, setStep] = useState(1);
+  const [kbVisible, setKbVisible] = useState(false);
+  const [kbLayout, setKbLayout] = useState<'numeric' | 'text'>('text');
   const [recipe, setRecipe] = useState<any>(null);
   const [serial, setSerial] = useState('');
   const [batch, setBatch] = useState('');
@@ -53,13 +56,27 @@ export default function App() {
   // Abrir teclado tactil de Windows al enfocar un input
   React.useEffect(() => {
     const onFocus = (e: FocusEvent) => {
-      const t = e.target as HTMLElement;
+      const t = e.target as HTMLInputElement;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) {
-        (window as any).__TAURI__?.core?.invoke?.('show_touch_keyboard')?.catch?.(() => {});
+        const mode = t.inputMode || (t.type === 'number' ? 'numeric' : 'text');
+        setKbLayout(mode === 'numeric' ? 'numeric' : 'text');
+        setKbVisible(true);
       }
     };
+    const onBlur = () => {
+      setTimeout(() => {
+        const ae = document.activeElement;
+        if (!ae || (ae.tagName !== 'INPUT' && ae.tagName !== 'TEXTAREA')) {
+          setKbVisible(false);
+        }
+      }, 100);
+    };
     document.addEventListener('focusin', onFocus);
-    return () => document.removeEventListener('focusin', onFocus);
+    document.addEventListener('focusout', onBlur);
+    return () => {
+      document.removeEventListener('focusin', onFocus);
+      document.removeEventListener('focusout', onBlur);
+    };
   }, []);
 
   const triggerGodMode = React.useCallback(() => {
@@ -172,6 +189,7 @@ export default function App() {
         style={{ position: 'fixed', right: 16, bottom: 12, width: 320,
                  opacity: 0.06, zIndex: 0, pointerEvents: 'none' }} />
       <UpdateNotification />
+      <VirtualKeyboard visible={kbVisible} layout={kbLayout} onClose={() => setKbVisible(false)} />
       <header style={{ height: 64, display: 'flex', alignItems: 'center', gap: 10, padding: '0 12px',
                        background: '#141b26', color: '#fff',
                        position: 'relative', zIndex: 1, borderBottom: '3px solid #b7790f' }}>
