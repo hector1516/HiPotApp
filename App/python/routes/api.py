@@ -840,8 +840,13 @@ def plc_read(body: dict):
     bit = int(body.get("bit", 0))
     try:
         val = plc.read_tag(db, off, typ, bit)
+        from ..logger import logger
+        logger.info("PLC", "read", f"Tag db={db} off={off} type={typ} bit={bit} = {val}",
+                    value_received=str(val))
         return {"value": val}
     except Exception as e:
+        from ..logger import logger
+        logger.error("PLC", "read", f"Error leyendo tag: {e}", error_message=str(e))
         raise HTTPException(500, str(e))
 
 
@@ -882,11 +887,14 @@ def plc_write(body: dict):
 @router.post("/admin/hipot-cmd")
 def hipot_cmd(body: dict):
     from ..hipot_manager import HipotManager
+    cmd = body.get("command", "STATUS?")
     h = HipotManager(simulate=True)
     h.connect()
-    ok = h.send_command(body.get("command", "STATUS?"))
+    ok = h.send_command(cmd)
     resp = h.read_response(timeout=0.5)
     parsed = HipotManager.parse_measurement(resp or "")
+    from ..logger import logger
+    logger.info("HIPOT", "cmd", f"Comando {cmd} -> {resp}", value_sent=cmd, value_received=resp)
     return {"sent": ok, "response": resp, "parsed": parsed}
 
 
@@ -1003,6 +1011,9 @@ def manual_plc_test(body: dict):
     except Exception as e:
         raise HTTPException(500, str(e))
     v = vals.get(comp, 0.0)
+    from ..logger import logger
+    logger.info("PLC", "manual_test", f"Componente {comp} a {body.get('voltage')}V -> {v}",
+                value_sent=f"{comp}@{body.get('voltage')}V", value_received=str(v))
     return {"component": comp, "value": v, "all": vals}
 
 
