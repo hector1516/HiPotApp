@@ -20,6 +20,19 @@ def _build_mssql_url(server: str, db: str, user: str = "", password: str = "") -
     return f"mssql+pyodbc://@{server}/{db}?driver={driver}&trusted_connection=yes"
 
 
+def _read_local_db_config() -> dict:
+    """Lee db_config.json de AppData si existe."""
+    try:
+        import json
+        path = os.path.join(_writable_base(), "db_config.json")
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
 def get_database_url(which: str = "local") -> str:
     if which == "remote":
         if os.getenv("REMOTE_DATABASE_URL"):
@@ -33,11 +46,15 @@ def get_database_url(which: str = "local") -> str:
     # local
     if os.getenv("DATABASE_URL"):
         return os.getenv("DATABASE_URL")
-    if os.getenv("USE_SQLITE", "1") == "1":
+    cfg = _read_local_db_config()
+    use_sqlite = cfg.get("use_sqlite", os.getenv("USE_SQLITE", "1"))
+    if str(use_sqlite) == "1":
         return f"sqlite:///{os.path.join(_writable_base(), 'hipot_local.db')}"
-    server = os.getenv("DB_LOCAL_SERVER", ".\\SQLEXPRESS")
-    name = os.getenv("DB_LOCAL_NAME", "HiPotDB")
-    return _build_mssql_url(server, name)
+    server = cfg.get("server", os.getenv("DB_LOCAL_SERVER", ".\\SQLEXPRESS"))
+    name = cfg.get("name", os.getenv("DB_LOCAL_NAME", "HiPotDB"))
+    user = cfg.get("user", os.getenv("DB_LOCAL_USER", ""))
+    pwd = cfg.get("password", os.getenv("DB_LOCAL_PASSWORD", ""))
+    return _build_mssql_url(server, name, user, pwd)
 
 
 class DatabaseManager:

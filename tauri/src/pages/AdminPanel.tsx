@@ -607,11 +607,13 @@ function SystemTab() {
   const [plcStatus, setPlcStatus] = useState<any>(null);
   const [hipotStatus, setHipotStatus] = useState<any>(null);
   const [cfg, setCfg] = useState<any>({});
+  const [localDbCfg, setLocalDbCfg] = useState<any>({ use_sqlite: '1', server: '', name: '', user: '', password: '' });
   const [previewStatus, setPreviewStatus] = useState<'GOOD' | 'BAD' | null>(null);
   const loadLog = () => api.get('/admin/import-export-log').then(setImpLog).catch(() => setImpLog([]));
   useEffect(() => {
     loadLog();
     api.get('/admin/config').then(c => { setHold(String(c?.result_hold_seconds ?? '10')); setCfg(c || {}); }).catch(() => {});
+    api.get('/admin/local-db-config').then(r => setLocalDbCfg(r || { use_sqlite: '1', server: '', name: '', user: '', password: '' })).catch(() => {});
    
     getVersion().then(setAppVersion).catch(() => setAppVersion('1.0.0'));
     api.get('/status/plc').then(setPlcStatus).catch(() => {});
@@ -705,13 +707,41 @@ function SystemTab() {
       </div>
       <div className="card" style={{ marginBottom: 10 }}>
         <h3>Base de datos local</h3>
-        <div style={{ fontSize: 12, color: '#475569', marginBottom: 8 }}>
-          Por defecto la app usa <b>SQLite</b> (archivo local). Para usar SQL Express, define las variables de entorno
-          <code style={{ marginLeft: 4 }}>USE_SQLITE=0</code> y <code style={{ marginLeft: 4 }}>DB_LOCAL_SERVER=.\SQLEXPRESS</code>.
-          Las tablas se crean automáticamente al arrancar.
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+          <label style={{ fontSize: 12, color: '#475569' }}>Tipo:</label>
+          <select className="input" style={{ maxWidth: 140 }} value={localDbCfg.use_sqlite === '0' ? 'sql' : 'sqlite'} onChange={e => setLocalDbCfg({ ...localDbCfg, use_sqlite: e.target.value === 'sql' ? '0' : '1' })}>
+            <option value="sqlite">SQLite (default)</option>
+            <option value="sql">SQL Express</option>
+          </select>
         </div>
+        {localDbCfg.use_sqlite === '0' && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+            <div>
+              <label style={{ fontSize: 12, color: '#475569' }}>Servidor</label>
+              <input className="input" value={localDbCfg.server ?? ''} onChange={e => setLocalDbCfg({ ...localDbCfg, server: e.target.value })} placeholder=".\\SQLEXPRESS" inputMode="text" />
+            </div>
+            <div>
+              <label style={{ fontSize: 12, color: '#475569' }}>Base de datos</label>
+              <input className="input" value={localDbCfg.name ?? ''} onChange={e => setLocalDbCfg({ ...localDbCfg, name: e.target.value })} placeholder="HiPotDB" inputMode="text" />
+            </div>
+            <div>
+              <label style={{ fontSize: 12, color: '#475569' }}>Usuario</label>
+              <input className="input" value={localDbCfg.user ?? ''} onChange={e => setLocalDbCfg({ ...localDbCfg, user: e.target.value })} placeholder="(vacío = trusted)" inputMode="text" />
+            </div>
+            <div>
+              <label style={{ fontSize: 12, color: '#475569' }}>Contraseña</label>
+              <input className="input" type="password" value={localDbCfg.password ?? ''} onChange={e => setLocalDbCfg({ ...localDbCfg, password: e.target.value })} placeholder="****" inputMode="text" />
+            </div>
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          <button className="btn ghost" onClick={() => window.open('https://www.microsoft.com/es-es/sql-server/sql-server-downloads', '_blank')}>Descargar SQL Express</button>
+          <button className="btn ok" onClick={async () => {
+            try { await api.post('/admin/local-db-config', localDbCfg); alert('Guardado. Reinicia la app para aplicar.'); } catch (e: any) { alert('Error: ' + (e?.message || e)); }
+          }}>Guardar</button>
+          <button className="btn ghost" onClick={() => (window as any).__TAURI__?.core?.invoke?.('open_external', { url: 'https://www.microsoft.com/es-es/sql-server/sql-server-downloads' }).catch?.(() => window.open('https://www.microsoft.com/es-es/sql-server/sql-server-downloads', '_blank'))}>Descargar SQL Express</button>
+        </div>
+        <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>
+          Las tablas se crean automáticamente al arrancar. Los cambios aplican al reiniciar.
         </div>
       </div>
       <div className="card" style={{ marginBottom: 10 }}>

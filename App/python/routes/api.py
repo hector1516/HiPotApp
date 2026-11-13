@@ -1013,6 +1013,32 @@ def manual_abort():
     return {"status": "aborted"}
 
 
+# ---------- config BD local ----------
+@router.get("/admin/local-db-config")
+def get_local_db_config():
+    import json, os
+    from ..database import _writable_base
+    path = os.path.join(_writable_base(), "db_config.json")
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"use_sqlite": "1", "server": "", "name": "", "user": "", "password": ""}
+
+
+@router.post("/admin/local-db-config")
+def set_local_db_config(body: dict):
+    import json, os
+    from ..database import _writable_base
+    path = os.path.join(_writable_base(), "db_config.json")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(body, f, indent=2)
+    return {"status": "saved"}
+
+
 # ---------- auditoria / BD remota ----------
 @router.get("/audit/tables-status")
 def audit_tables_status():
