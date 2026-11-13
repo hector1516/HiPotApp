@@ -608,12 +608,14 @@ function SystemTab() {
   const [hipotStatus, setHipotStatus] = useState<any>(null);
   const [cfg, setCfg] = useState<any>({});
   const [localDbCfg, setLocalDbCfg] = useState<any>({ use_sqlite: '1', server: '', name: '', user: '', password: '' });
+  const [tableNames, setTableNames] = useState<string[]>([]);
   const [previewStatus, setPreviewStatus] = useState<'GOOD' | 'BAD' | null>(null);
   const loadLog = () => api.get('/admin/import-export-log').then(setImpLog).catch(() => setImpLog([]));
   useEffect(() => {
     loadLog();
     api.get('/admin/config').then(c => { setHold(String(c?.result_hold_seconds ?? '10')); setCfg(c || {}); }).catch(() => {});
     api.get('/admin/local-db-config').then(r => setLocalDbCfg(r || { use_sqlite: '1', server: '', name: '', user: '', password: '' })).catch(() => {});
+    api.get('/audit/table-names').then(r => setTableNames(r?.tables ?? [])).catch(() => {});
    
     getVersion().then(setAppVersion).catch(() => setAppVersion('1.0.0'));
     api.get('/status/plc').then(setPlcStatus).catch(() => {});
@@ -742,6 +744,16 @@ function SystemTab() {
         </div>
         <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>
           Las tablas se crean automáticamente al arrancar. Los cambios aplican al reiniciar.
+        </div>
+      </div>
+      <div className="card" style={{ marginBottom: 10 }}>
+        <h3>Tablas de la base de datos</h3>
+        <div style={{ fontSize: 12, color: '#475569', marginBottom: 6 }}>
+          Tablas que se crean automaticamente (local y remota):
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+          {tableNames.map(t => <span key={t} className="pill" style={{ fontSize: 11 }}>{t}</span>)}
+          {!tableNames.length && <span style={{ fontSize: 12, color: '#64748b' }}>Cargando...</span>}
         </div>
       </div>
       <div className="card" style={{ marginBottom: 10 }}>

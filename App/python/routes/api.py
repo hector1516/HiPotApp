@@ -1066,3 +1066,9 @@ def audit_ensure_table():
         raise HTTPException(500, "No se pudo conectar a la BD remota")
     Base.metadata.create_all(rdb.engine)
     return {"exists": True}
+
+
+@router.get("/audit/table-names")
+def audit_table_names():
+    from ..models import Base
+    return {"tables": sorted(Base.metadata.tables.keys())}
