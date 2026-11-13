@@ -113,9 +113,25 @@ export default function App() {
     const start = Date.now();
     setT0(start);
     setStep(4); setPhase('HIPOT_RUNNING'); setView('test');
-    later(() => { setStep(5); setPhase('PLC_RUNNING'); }, 4000);
+    // Primero HiPot: si falla, se cancela todo (no pasa a prueba electrica)
     later(() => {
-      const good = Math.random() > 0.2;
+      const hipotPass = Math.random() > 0.15;
+      if (!hipotPass) {
+        clearTimers();
+        const s = Math.round((Date.now() - start) / 1000);
+        setElapsed(`${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`);
+        setFinal('BAD');
+        setPhase('COMPLETE_BAD');
+        setStep(6); setView('result');
+        setPrintStatus(null);
+        return;
+      }
+      setStep(5); setPhase('PLC_RUNNING');
+    }, 4000);
+    later(() => {
+      // Solo llega aqui si HiPot paso
+      const elecPass = Math.random() > 0.15;
+      const good = elecPass;
       const s = Math.round((Date.now() - start) / 1000);
       setElapsed(`${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`);
       setFinal(good ? 'GOOD' : 'BAD');
