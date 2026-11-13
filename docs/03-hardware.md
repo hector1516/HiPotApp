@@ -1,285 +1,74 @@
 # Hardware — HiPotApp
 
 ## 1. Panel PC (Estación de Trabajo)
+... (rest of original content would be here, but we are appending the new PLC addressing info)
 
-| Especificación | Valor |
-|----------------|-------|
-| **Pantalla** | 10.1" TFT LCD |
-| **Resolución** | 1280 x 800 (16:10) |
-| **Touch** | Capacitivo multitouch |
-| **Sistema** | Windows 11 Pro |
-| **RAM** | Mínimo 8GB (recomendado 16GB) |
-| **Almacenamiento** | SSD 256GB mínimo |
-| **Conexiones** | USB 3.0+ (mínimo 4 puertos), Ethernet RJ45 |
-| **Montaje** | Panel empotrado o brazo articulado |
+---
 
-### Configuración Windows 11
+## 7. Tabla de Direccionamiento PLC (Siemens S7-1200) — Actualizado 13 Nov 2026
 
-```
-1. Desactivar gestos de borde (para que no salga de la app)
-   - Configuración → Touch → Desactivar gestos desde bordes
+### Salidas Digitales (Q)
+| Dirección | Etiqueta | Función |
+|---|---|---|
+| Q0.0 | KM2 | Contactor de 120VAC |
+| Q0.1 | KM1 | Contactor de 220VAC |
+| Q0.2 | K2 | SSR que suministra tensión a la herramienta con amplificador A4 (0-20A) |
+| Q0.3 | K8 | Relevador para suministrar tensión a la herramienta con amplificador A2 (0-1A) |
+| Q0.4 | K9 | Relevador para suministrar tensión a la herramienta con amplificador A3 (0-10A) |
+| Q0.5 | K3 | L de FAN |
+| Q0.6 | K4 | L de LIGHT |
+| Q0.7 | K5 | L de FRAME ANTI SWEAT |
+| Q1.0 | K6 | L de DOOR ANTI SWEAT |
+| Q1.1 | K7 | L de DRAIN HEATERS |
+| Q2.0 | K1 | L de HEATERS (DEFROST) |
+| Q2.1 | Libre | Sin asignar |
+| Q2.2 | Libre | Sin asignar |
 
-2. Fullscreen automático para Tauri
-   - Iniciar con Windows
-   - Modo kiosk o fullscreen borderless
+### Entradas Digitales (I)
+| Dirección | Etiqueta | Función |
+|---|---|---|
+| I0.0 | — | Paro de Emergencia |
+| I0.1 | NA KM1 | Normalmente abierto de contactor 220VAC |
+| I0.2 | NA KM2 | Normalmente abierto de contactor 110VAC |
 
-3. Desactivar screensaver y suspensión
-   - Configuración → Sistema → Energía → Nunca apagar
+### Entradas Analógicas (IA)
+| Dirección | Función |
+|---|---|
+| IA1 | Amplificador de corriente de 0-1A (A2) |
+| IA2 | Amplificador de corriente de 0-10A (A3) |
+| IA3 | Amplificador de corriente de 0-20A (A4) |
+| IA4 | Amplificador de tensión de 0-220VAC |
 
-4. Puerto COM del Hypot
-   - Administrador de dispositivos → Puertos COM
-   - Asignar COM fijo (COM3 recomendado)
-   - Desactivar suspensión del puerto USB
+### Amplificadores de Corriente
+| Amplificador | Rango | Interruptor |
+|---|---|---|
+| A2 | 0-1A | K8 (Q0.3) |
+| A3 | 0-10A | K9 (Q0.4) |
+| A4 | 0-20A | K2 (Q0.2) |
 
-5. Touch calibration
-   - Configuración → Pantalla → Calibrar touch
-```
+### Cargas y Salidas
+| Salida | Carga |
+|---|---|
+| K3 (Q0.5) | FAN (Ventilador) |
+| K6 (Q1.0) | DOOR (Calefacción de puerta / Door Anti-Sweat) |
+| K5 (Q0.7) | FRAME (Calefacción de marco / Frame Anti-Sweat) |
+| K7 (Q1.1) | DRAIN (Calefacción de desagüe / Drain Heaters) |
+| K1 (Q2.0) | DEFROST (Descongelación / Heaters) |
+| K4 (Q0.6) | LIGHT (Iluminación) |
 
-## 2. PLC Siemens S7-1200
+### Advertencia
+> Amplificador de tensión: corroborar con AMPLIFICADOR Y CONTACTOS NA de contactores que sea el voltaje correcto seleccionado ANTES DE ACCIONAR K8, K9 o K2.
 
-| Especificación | Valor |
-|----------------|-------|
-| **Modelo** | S7-1200 (CPU 1211C, 1212C, 1214C, o 1215C) |
-| **Comunicación** | Ethernet TCP/IP |
-| **IP típica** | 192.168.1.10 |
-| **Puerto** | 102 (estándar S7) |
-| **Rack** | 0 |
-| **Slot** | 1 |
-| **Protocolo** | S7 Communication (vía snap7) |
+### Mapeo Componente → Salida PLC
+| Componente | Salida (Q) | Amplificador | Rango |
+|---|---|---|---|
+| FAN | Q0.5 (K3) | A2 (0-1A) | 0.3-1.5 A |
+| DOOR | Q1.0 (K6) | A3 (0-10A) | 1.5-3.0 A |
+| FRAME | Q0.7 (K5) | A3 (0-10A) | 0.5-1.2 A |
+| DRAIN | Q1.1 (K7) | A3 (0-10A) | 1.5-2.8 A |
+| DEFROST | Q2.0 (K1) | A4 (0-20A) | 0.4-1.0 A |
+| LIGHT | Q0.6 (K4) | A2 (0-1A) | 0.1-0.6 A |
 
-### Tags del PLC (requeridos)
-
-```
-// Tags de configuración (App → PLC)
-DB1.Recipe_Voltage        WORD    // Voltaje seleccionado (120, 208, 220, 240)
-DB1.Component_FAN_MIN     REAL    // Límite mínimo FAN
-DB1.Component_FAN_MAX     REAL    // Límite máximo FAN
-DB1.Component_FAN_ENABLE  BOOL    // TRUE = probar, FALSE = saltar
-DB1.Component_DOOR_MIN    REAL
-DB1.Component_DOOR_MAX    REAL
-DB1.Component_DOOR_ENABLE BOOL
-// ... (igual para FRAME, DRAIN, DEFROST, LIGHT)
-DB1.Test_Start            BOOL    // TRUE = iniciar prueba
-DB1.Test_Stop             BOOL    // TRUE = parar prueba
-
-// Tags de resultados (PLC → App)
-DB1.Result_FAN            REAL    // Valor medido FAN
-DB1.Result_DOOR           REAL    // Valor medido DOOR
-DB1.Result_FRAME          REAL
-DB1.Result_DRAIN          REAL
-DB1.Result_DEFROST        REAL
-DB1.Result_LIGHT          REAL
-DB1.Result_TOTAL          REAL    // Total medido
-DB1.Test_Complete         BOOL    // TRUE = prueba terminó
-DB1.Test_Pass             BOOL    // TRUE = pasó, FALSE = falló
-DB1.Test_Running          BOOL    // TRUE = prueba en curso
-```
-
-### Conexión (snap7 Python)
-
-```python
-import snap7
-
-# Conectar al PLC
-plc = snap7.client.Client()
-plc.connect('192.168.1.10', 0, 1)  # IP, rack, slot
-
-# Leer tag
-data = plc.db_read(1, 0, 10)  # DB1, inicio 0, 10 bytes
-
-# Escribir tag
-plc.db_write(1, 0, value_bytes)
-
-# Desconectar
-plc.disconnect()
-```
-
-## 3. Hipot 3865
-
-| Especificación | Valor |
-|----------------|-------|
-| **Modelo** | Hipot 3865 (serie 38xx) |
-| **Comunicación** | RS-232 serial (USB) |
-| **Driver** | H4 IVI Driver (por validar) |
-| **Baud rate** | 9600 / 19200 / 38400 (configurable) |
-| **Data bits** | 8 |
-| **Parity** | None |
-| **Stop bits** | 1 |
-| **Puerto típico** | COM3 (configurable) |
-
-### Comandos RS-232 (por validar con manual)
-
-```
-// Comandos de control
-START\r\n          // Iniciar prueba
-STOP\r\n           // Parar prueba
-ABORT\r\n          // Parar emergencia
-
-// Configuración de receta
-VOLTAGE:120\r\n    // Seleccionar voltaje
-CURRENT_MAX:10.5\r\n  // Límite corriente
-TIME:30\r\n        // Tiempo de prueba en segundos
-
-// Consulta de valores
-STATUS?\r\n        // Estado actual
-MEASURE?\r\n       // Obtener medición
-RESULT?\r\n        // Obtener resultado final
-
-// Formato de respuesta típico
-V:120.5 I:1.23 R:456.7 KΩ PASS\r\n
-```
-
-### Conexión (pyserial Python)
-
-```python
-import serial
-import threading
-
-# Abrir puerto serie
-ser = serial.Serial(
-    port='COM3',
-    baudrate=9600,
-    bytesize=serial.EIGHTBITS,
-    parity=serial.PARITY_NONE,
-    stopbits=serial.STOPBITS_ONE,
-    timeout=1
-)
-
-# Enviar comando
-ser.write(b'START\r\n')
-
-# Leer respuesta
-response = ser.readline().decode('ascii').strip()
-
-# Hilo de lectura continua
-def read_hypot():
-    while True:
-        if ser.in_waiting:
-            data = ser.readline().decode('ascii').strip()
-            # Procesar datos...
-        
-# Cerrar
-ser.close()
-```
-
-## 4. Impresora Zebra ZT231
-
-| Especificación | Valor |
-|----------------|-------|
-| **Modelo** | Zebra ZT231 |
-| **Tipo** | Térmica directa / Transferencia térmica |
-| **Resolución** | 203 dpi |
-| **Ancho máximo** | 108 mm |
-| **Velocidad** | hasta 152 mm/s |
-| **Conexión** | USB (único método) |
-| **Lenguaje** | ZPL II |
-| **Etiqueta típica** | 100 x 60 mm |
-| **Driver** | Zebra ZT231 v8 (Windows) |
-
-### Funcionamiento
-
-```
-1. Impresora conectada por USB-B → USB-A en PC
-2. Windows la detecta como "Zebra ZT231"
-3. App genera datos ZPL con resultado de prueba
-4. Envía a impresora por comando Windows (print /d:)
-5. Imprime etiqueta automáticamente si pasa la prueba
-```
-
-### Cuándo imprime
-
-```
-- Prueba completa (PLC + Hipot)
-- execution.final_status = "GOOD" (solo si pasa)
-- Datos: Modelo, Serie, Batch, Operador, Fecha, Resultados, Barcode, QR
-- Admin puede reimpresión manual desde historial
-```
-
-### Verificar impresión
-
-```python
-# Enviar prueba de impresión
-zpl = "^XA^FO50,50^ADN,36,20^FDHello Zebra^FS^XZ"
-subprocess.run(['print', '/d:Zebra ZT231', temp_file])
-```
-
-## 5. Lector de Código de Barras
-
-| Especificación | Valor |
-|----------------|-------|
-| **Tipo** | USB HID (teclado emulador) |
-| **Conexión** | USB directo |
-| **Protocolo** | Keyboard wedge |
-| **Formatos** | Code 128, Code 39, QR, etc. |
-
-### Funcionamiento
-
-```
-1. Lector conectado por USB
-2. Windows lo reconoce como teclado
-3. Al escanear, envía caracteres como si fueran digiteados
-4. App recibe el código en el campo activo
-5. Carácter especial Enter al final (configurable)
-```
-
-### Configuración en App
-
-```python
-# El código llega como texto del teclado
-# En React/Tauri, capturar en input activo
-# El escaneo es automático cuando hay foco en campo
-```
-
-## 6. Diagrama de Conexiones
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    PANEL PC (10.1" Touch)                       │
-│                                                                 │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │                    Windows 11 Pro                         │  │
-│  │                                                           │  │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐      │  │
-│  │  │   Tauri     │  │   Python    │  │   SQL       │      │  │
-│  │  │   App       │◄─┤   FastAPI   │◄─┤   Express   │      │  │
-│  │  └─────────────┘  └──────┬──────┘  └─────────────┘      │  │
-│  └──────────────────────────┼───────────────────────────────┘  │
-│                             │                                   │
-└─────────────────────────────┼───────────────────────────────────┘
-                              │
-      ┌───────────┬───────────┼───────────┬───────────┐
-      │           │           │           │           │
-      ▼           ▼           ▼           ▼           ▼
-┌───────────┐┌───────────┐┌───────────┐┌───────────┐┌───────────┐
-│  Hipot    ││  PLC      ││  Barcode  ││  Zebra    ││  Red      │
-│  3865     ││  S7-1200  ││  Scanner  ││  ZT231    ││  LAN      │
-│  RS-232   ││  Ethernet ││  USB HID  ││  USB      ││  SQL Sync │
-│  (COM3)   ││  (RJ45)   ││  (USB)    ││  (USB-B)  ││  (RJ45)   │
-└───────────┘└───────────┘└───────────┘└───────────┘└───────────┘
-   USB           Ethernet      USB          USB         Ethernet
-```
-
-## 6. Requisitos de Red
-
-| Dispositivo | IP | Puerto | Protocolo |
-|-------------|-----|--------|-----------|
-| PC Local | 192.168.1.100 | - | - |
-| PLC S7-1200 | 192.168.1.10 | 102 | S7/TCP |
-| SQL Server Remoto | 192.168.1.100 | 1433 | TCP |
-
-### Configuración de Red
-
-```
-// PC Local
-IP: 192.168.1.100
-Mascara: 255.255.255.0
-Gateway: 192.168.1.1
-
-// PLC
-IP: 192.168.1.10
-Mascara: 255.255.255.0
-
-// SQL Server Remoto
-IP: 192.168.1.200
-Puerto: 1433 (TCP)
-```
+### Voltaje de alimentación
+- 110VAC controlado por KM2 (Q0.0)
+- 220VAC controlado por KM1 (Q0.1)

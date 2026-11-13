@@ -4,9 +4,11 @@ import time
 try:
     import snap7
     from snap7.util import get_real, set_real, get_bool, set_bool
+    from snap7.types import Areas
     HAS_SNAP7 = True
 except Exception:
     HAS_SNAP7 = False
+    Areas = None
 
 # Offsets DB1 (doc 06)
 OFF_VOLTAGE = 0
@@ -165,6 +167,99 @@ class PLCManager:
         data = bytearray(self.client.db_read(db, start, 1))
         set_bool(data, 0, bit, bool(value))
         self.client.db_write(db, start, data)
+
+    # --- IO directo (Q, I, IA) ---
+    _Q_MAP = {
+        "Q0.0": (0, 0), "Q0.1": (0, 1), "Q0.2": (0, 2), "Q0.3": (0, 3),
+        "Q0.4": (0, 4), "Q0.5": (0, 5), "Q0.6": (0, 6), "Q0.7": (0, 7),
+        "Q1.0": (1, 0), "Q1.1": (1, 1), "Q2.0": (2, 0), "Q2.1": (2, 1),
+        "Q2.2": (2, 2),
+    }
+    _I_MAP = {
+        "I0.0": (0, 0), "I0.1": (0, 1), "I0.2": (0, 2),
+    }
+    _IA_MAP = {"IA1": 0, "IA2": 2, "IA3": 4, "IA4": 6}
+
+    def _parse_q(self, addr: str):
+        addr = (addr or "").upper().strip()
+        if addr in self._Q_MAP:
+            return self._Q_MAP[addr]
+        # fallback parse Qx.y
+        parts = addr.replace("Q", "").split(".")
+        off = int(parts[0])
+        bit = int(parts[1]) if len(parts) > 1 else 0
+        return (off, bit)
+
+    def _parse_i(self, addr: str):
+        addr = (addr or "").upper().strip()
+        if addr in self._I_MAP:
+            return self._I_MAP[addr]
+        parts = addr.replace("I", "").split(".")
+        off = int(parts[0])
+        bit = int(parts[1]) if len(parts) > 1 else 0
+        return (off, bit)
+
+    def read_digital_output(self, q: str) -> bool:
+        off, bit = self._parse_q(q)
+        if self.simulate:
+            return bool(self._sim.get(("Q", off, bit), False))
+        if Areas is None:
+            return False
+        try:
+            data = self.client.read_area(Areas.PA, 0, off, 1)
+            return get_bool(data, 0, bit)
+        except Exception:
+            return False
+
+    def write_digital_output(self, q: str, value: bool):
+        off, bit = self._parse_q(q)
+        if self.simulate:
+            self._sim[("Q", off, bit)] = bool(value)
+            from .logger import logger
+            logger.info("PLC", "write_Q", f"{q} = {value}")
+            return
+        if Areas is None:
+            return
+        try:
+            data = bytearray(self.client.read_area(Areas.PA, 0, off, 1))
+            set_bool(data, 0, bit, bool(value))
+            self.client.write_area(Areas.PA, 0, off, data)
+            from .logger import logger
+            logger.info("PLC", "write_Q", f"{q} = {value}")
+        except Exception as e:
+            from .logger import logger
+            logger.error("PLC", "write_Q", f"Error escribiendo {q}: {e}", error_message=str(e))
+
+    def read_digital_input(self, i: str) -> bool:
+        off, bit = self._parse_i(i)
+        if self.simulate:
+            return bool(self._sim.get(("I", off, bit), False))
+        if Areas is None:
+            return False
+        try:
+            data = self.client.read_area(Areas.PE, 0, off, 1)
+            return get_bool(data, 0, bit)
+        except Exception:
+            return False
+
+    def read_analog_input(self, ia: str) -> float:
+        ia = (ia or "").upper().strip()
+        off = self._IA_MAP.get(ia, 0)
+        if self.simulate:
+            return float(self._sim.get(("IA", off), 0.0))
+        if Areas is None:
+            return 0.0
+        try:
+            data = self.client.read_area(Areas.PE, 0, off, 2)
+            return int.from_bytes(data, "big", signed=False) / 10.0
+        except Exception:
+            return 0.0
+
+    def get_io_status(self) -> dict:
+        q_status = {q: self.read_digital_output(q) for q in self._Q_MAP}
+        i_status = {i: self.read_digital_input(i) for i in self._I_MAP}
+        ia_status = {ia: self.read_analog_input(ia) for ia in self._IA_MAP}
+        return {"outputs": q_status, "inputs": i_status, "analog": ia_status}
 
     def test_connection(self) -> bool:
         if self.simulate:

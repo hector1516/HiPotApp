@@ -1047,6 +1047,27 @@ def manual_abort():
     return {"status": "aborted"}
 
 
+# ---------- PLC IO (salidas/entradas) ----------
+@router.get("/admin/plc-io-status")
+def plc_io_status():
+    plc = _plc()
+    status = plc.get_io_status()
+    from ..logger import logger
+    logger.debug("PLC", "io_status", f"Q={status['outputs']} I={status['inputs']} IA={status['analog']}")
+    return status
+
+
+@router.post("/admin/plc-io-write")
+def plc_io_write(body: dict):
+    plc = _plc()
+    q = body.get("q", "")
+    val = bool(body.get("value", False))
+    plc.write_digital_output(q, val)
+    from ..logger import logger
+    logger.info("PLC", "io_write", f"{q} = {val}", value_sent=f"{q}={val}")
+    return {"status": "written", "q": q, "value": val}
+
+
 # ---------- config BD local ----------
 @router.get("/admin/local-db-config")
 def get_local_db_config():
