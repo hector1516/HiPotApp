@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 
 interface Props {
   visible: boolean;
@@ -50,26 +50,47 @@ function insertKey(key: string) {
 
 export default function VirtualKeyboard({ visible, layout, onClose }: Props) {
   const [shift, setShift] = useState(false);
+  const [pos, setPos] = useState({ x: 100, y: 100 });
+  const dragging = useRef(false);
+  const dragOffset = useRef({ x: 0, y: 0 });
 
   useEffect(() => {
     if (!visible) setShift(false);
   }, [visible]);
 
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (dragging.current) {
+        setPos({ x: e.clientX - dragOffset.current.x, y: e.clientY - dragOffset.current.y });
+      }
+    };
+    const onUp = () => { dragging.current = false; };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+  }, []);
+
+  const startDrag = (e: React.MouseEvent) => {
+    dragging.current = true;
+    dragOffset.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
+  };
+
   if (!visible) return null;
 
   const keyStyle: React.CSSProperties = {
-    padding: '10px 12px', margin: 2, borderRadius: 8, border: '1px solid #cbd5e1',
-    background: '#f1f5f9', cursor: 'pointer', fontSize: 16, fontWeight: 600,
-    minWidth: 40, userSelect: 'none',
+    padding: '14px 18px', margin: 3, borderRadius: 10, border: '1px solid rgba(203,213,225,0.5)',
+    background: 'rgba(241,245,249,0.85)', cursor: 'pointer', fontSize: 20, fontWeight: 600,
+    minWidth: 52, userSelect: 'none', backdropFilter: 'blur(8px)',
   };
-  const specialStyle: React.CSSProperties = { ...keyStyle, background: '#e2e8f0', fontSize: 13 };
+  const specialStyle: React.CSSProperties = { ...keyStyle, background: 'rgba(226,232,240,0.85)', fontSize: 14 };
 
   const renderKey = (k: string) => {
+    const isSpecial = k === 'Backspace' || k === 'Enter' || k === 'Space';
     const display = k === 'Backspace' ? '⌫' : k === 'Enter' ? '↵' : k === 'Space' ? '␣' : (shift && layout === 'text' && k.length === 1 && /[a-z]/.test(k)) ? k.toUpperCase() : k;
-    const value = (shift && layout === 'text' && k.length === 1 && /[a-z]/.test(k)) ? k.toUpperCase() : k;
+    const val = (shift && layout === 'text' && k.length === 1 && /[a-z]/.test(k)) ? k.toUpperCase() : k;
     return (
-      <button key={k} style={k === 'Backspace' || k === 'Enter' || k === 'Space' ? specialStyle : keyStyle}
-        onMouseDown={e => { e.preventDefault(); insertKey(k === 'Space' ? 'Space' : (shift && layout === 'text' && k.length === 1 && /[a-z]/.test(k)) ? k.toUpperCase() : k); }}
+      <button key={k} style={isSpecial ? specialStyle : keyStyle}
+        onMouseDown={e => { e.preventDefault(); insertKey(k === 'Space' ? 'Space' : val); }}
       >
         {display}
       </button>
@@ -78,15 +99,20 @@ export default function VirtualKeyboard({ visible, layout, onClose }: Props) {
 
   return (
     <div style={{
-      position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 9999,
-      background: 'var(--surface, #1e293b)', padding: 8, borderTop: '1px solid var(--border, #334155)',
-      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+      position: 'fixed', left: pos.x, top: pos.y, zIndex: 9999,
+      background: 'rgba(30,41,59,0.75)', padding: 10, borderRadius: 14,
+      border: '1px solid rgba(255,255,255,0.15)', backdropFilter: 'blur(12px)',
+      boxShadow: '0 8px 32px rgba(0,0,0,0.3)', display: 'flex', flexDirection: 'column', gap: 6,
+      cursor: 'move',
     }}>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', width: '100%', marginBottom: 4 }}>
-        <button style={{ ...specialStyle, background: '#ef4444', color: '#fff' }} onMouseDown={e => { e.preventDefault(); onClose(); }}>✕ Cerrar</button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, cursor: 'move' }}
+        onMouseDown={startDrag}>
+        <span style={{ color: '#fff', fontSize: 12, fontWeight: 600, opacity: 0.7 }}>Teclado virtual</span>
+        <button style={{ ...specialStyle, background: 'rgba(239,68,68,0.8)', color: '#fff', minWidth: 32, padding: '4px 8px' }}
+          onMouseDown={e => { e.preventDefault(); onClose(); }}>✕</button>
       </div>
       {layout === 'numeric' ? (
-        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', maxWidth: 400 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', maxWidth: 420 }}>
           {NUMERIC.map(k => renderKey(k))}
         </div>
       ) : (
@@ -96,9 +122,9 @@ export default function VirtualKeyboard({ visible, layout, onClose }: Props) {
               {row.map(k => renderKey(k))}
             </div>
           ))}
-          <div style={{ display: 'flex', justifyContent: 'center', gap: 4 }}>
-            <button style={{ ...specialStyle, minWidth: 60 }} onMouseDown={e => { e.preventDefault(); setShift(s => !s); }}>⇧ Shift</button>
-            <button style={{ ...keyStyle, minWidth: 200 }} onMouseDown={e => { e.preventDefault(); insertKey('Space'); }}>Espacio</button>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 6 }}>
+            <button style={{ ...specialStyle, minWidth: 70 }} onMouseDown={e => { e.preventDefault(); setShift(s => !s); }}>⇧ Shift</button>
+            <button style={{ ...keyStyle, minWidth: 220 }} onMouseDown={e => { e.preventDefault(); insertKey('Space'); }}>Espacio</button>
             <button style={specialStyle} onMouseDown={e => { e.preventDefault(); insertKey('Backspace'); }}>⌫</button>
             <button style={specialStyle} onMouseDown={e => { e.preventDefault(); insertKey('Enter'); }}>↵ Enter</button>
           </div>

@@ -1011,3 +1011,32 @@ def manual_abort():
         pass
     _plc().set_mode(1)
     return {"status": "aborted"}
+
+
+# ---------- auditoria / BD remota ----------
+@router.get("/audit/tables-status")
+def audit_tables_status():
+    from ..database import get_remote_db
+    from sqlalchemy import text
+    rdb = get_remote_db()
+    connected = rdb.test_connection()
+    table_exists = False
+    if connected:
+        try:
+            with rdb.engine.connect() as c:
+                c.execute(text("SELECT 1 FROM executions"))
+            table_exists = True
+        except Exception:
+            table_exists = False
+    return {"connected": connected, "table_exists": table_exists}
+
+
+@router.post("/audit/ensure-table")
+def audit_ensure_table():
+    from ..database import get_remote_db
+    from ..models import Base
+    rdb = get_remote_db()
+    if not rdb.test_connection():
+        raise HTTPException(500, "No se pudo conectar a la BD remota")
+    Base.metadata.create_all(rdb.engine)
+    return {"exists": True}

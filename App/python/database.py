@@ -100,5 +100,27 @@ class DatabaseManager:
 local_db = DatabaseManager(get_database_url("local"))
 
 
+def get_remote_db_url_from_config() -> str:
+    """Lee la config de BD remota desde la tabla Configuration (si existe)."""
+    try:
+        from .models import Configuration
+        s = local_db.Session()
+        try:
+            def _cfg(key, default=""):
+                row = s.query(Configuration).filter_by(config_key=key).first()
+                return row.config_value if row else default
+            server = _cfg("sql_server", os.getenv("DB_REMOTE_SERVER", "192.168.1.200"))
+            name = _cfg("sql_database", os.getenv("DB_REMOTE_NAME", "HiPotDB_Central"))
+            user = _cfg("sql_user", os.getenv("DB_REMOTE_USER", ""))
+            pwd = _cfg("sql_password", os.getenv("DB_REMOTE_PASSWORD", ""))
+            if server:
+                return _build_mssql_url(server, name, user, pwd)
+        finally:
+            s.close()
+    except Exception:
+        pass
+    return get_database_url("remote")
+
+
 def get_remote_db() -> DatabaseManager:
-    return DatabaseManager(get_database_url("remote"))
+    return DatabaseManager(get_remote_db_url_from_config())
