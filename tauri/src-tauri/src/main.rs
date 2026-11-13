@@ -8,6 +8,16 @@ use tauri::{Manager, State, WindowEvent};
 
 const BACKEND_BIN: &str = "hipot-backend-x86_64-pc-windows-msvc.exe";
 
+#[tauri::command]
+fn open_external(url: String) {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", "", &url])
+            .spawn();
+    }
+}
+
 struct Backend(Mutex<Option<Child>>);
 
 fn backend_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
@@ -59,7 +69,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-
+        .invoke_handler(tauri::generate_handler![open_external])
         .manage(Backend(Mutex::new(None)))
         .setup(|app| {
             match backend_path(app.handle()) {

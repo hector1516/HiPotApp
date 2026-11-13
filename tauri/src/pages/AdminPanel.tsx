@@ -704,6 +704,17 @@ function SystemTab() {
         </div>
       </div>
       <div className="card" style={{ marginBottom: 10 }}>
+        <h3>Base de datos local</h3>
+        <div style={{ fontSize: 12, color: '#475569', marginBottom: 8 }}>
+          Por defecto la app usa <b>SQLite</b> (archivo local). Para usar SQL Express, define las variables de entorno
+          <code style={{ marginLeft: 4 }}>USE_SQLITE=0</code> y <code style={{ marginLeft: 4 }}>DB_LOCAL_SERVER=.\SQLEXPRESS</code>.
+          Las tablas se crean automáticamente al arrancar.
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <button className="btn ghost" onClick={() => window.open('https://www.microsoft.com/es-es/sql-server/sql-server-downloads', '_blank')}>Descargar SQL Express</button>
+        </div>
+      </div>
+      <div className="card" style={{ marginBottom: 10 }}>
         <h3>Base de datos remota (SQL Server)</h3>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
           <div>
@@ -735,7 +746,7 @@ function SystemTab() {
           <button className="btn ghost" onClick={async () => {
             try { const r = await api.get('/audit/tables-status'); alert(`Conexión: ${r.connected ? 'OK' : 'Sin conexión'}\\nTabla: ${r.table_exists ? 'Existe' : 'No existe'}`); } catch (e: any) { alert('Error: ' + (e?.message || e)); }
           }}>Verificar conexión</button>
-          <button className="btn ghost" onClick={() => window.open('https://www.microsoft.com/es-es/sql-server/sql-server-downloads', '_blank')}>Descargar SQL Express</button>
+          <button className="btn ghost" onClick={() => { (window as any).__TAURI__?.core?.invoke?.('open_external', { url: 'https://www.microsoft.com/es-es/sql-server/sql-server-downloads' }).catch?.(() => window.open('https://www.microsoft.com/es-es/sql-server/sql-server-downloads', '_blank')); }}>Descargar SQL Express</button>
         </div>
         <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>
           Para usar SQL Express local, define USE_SQLITE=0 y DB_LOCAL_SERVER en el entorno.
