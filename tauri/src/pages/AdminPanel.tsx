@@ -697,7 +697,7 @@ function SystemTab() {
       <div className="card" style={{ marginBottom: 10 }}>
         <h3>Datos de debug</h3>
         <div style={{ fontSize: 12, color: '#475569', display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div>Backend: <span className="font-mono">http://127.0.0.1:8000</span></div>
+          <div>Backend: <span className="font-mono">http://127.0.0.1:8765</span></div>
           <div>PLC: <span className="font-mono">{plcStatus?.ip || cfg?.plc_ip || '-'}</span> ({plcStatus?.connected ? 'conectado' : 'desconectado'})</div>
           <div>Hipot: <span className="font-mono">{hipotStatus?.port || '-'}</span></div>
           <div>SQL: <span className="font-mono">{cfg?.sql_server || '-'}</span> / {cfg?.sql_database || '-'}</div>
