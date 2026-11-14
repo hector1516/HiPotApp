@@ -815,6 +815,12 @@ function SystemTab() {
             try { const r = await api.get('/audit/tables-status'); alert(`Conexión: ${r.connected ? 'OK' : 'Sin conexión'}\\nTabla: ${r.table_exists ? 'Existe' : 'No existe'}`); } catch (e: any) { alert('Error: ' + (e?.message || e)); }
           }}>Verificar conexión</button>
           <button className="btn ghost" onClick={() => { (window as any).__TAURI__?.core?.invoke?.('open_external', { url: 'https://www.microsoft.com/es-es/sql-server/sql-server-downloads' }).catch?.(() => window.open('https://www.microsoft.com/es-es/sql-server/sql-server-downloads', '_blank')); }}>Descargar SQL Express 2025</button>
+          <button className="btn ghost" onClick={async () => {
+            try {
+              const log = await (window as any).__TAURI__?.core?.invoke?.('read_backend_log');
+              alert(log || 'Sin log');
+            } catch (e: any) { alert('Error: ' + (e?.message || e)); }
+          }}>Ver log del backend</button>
         </div>
         <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>
           Para usar SQL Express local, define USE_SQLITE=0 y DB_LOCAL_SERVER en el entorno.

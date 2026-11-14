@@ -9,6 +9,15 @@ use tauri::{Manager, State, WindowEvent};
 const BACKEND_BIN: &str = "hipot-backend-x86_64-pc-windows-msvc.exe";
 
 #[tauri::command]
+fn read_backend_log() -> String {
+    let log_dir = std::env::var("APPDATA")
+        .map(|d| std::path::PathBuf::from(d).join("HiPotApp"))
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let log_path = log_dir.join("backend.log");
+    std::fs::read_to_string(&log_path).unwrap_or_else(|_| "No hay log disponible.".to_string())
+}
+
+#[tauri::command]
 fn show_touch_keyboard() {
     #[cfg(target_os = "windows")]
     {
@@ -78,20 +87,51 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .invoke_handler(tauri::generate_handler![open_external, show_touch_keyboard])
+        .invoke_handler(tauri::generate_handler![open_external, read_backend_log])
         .manage(Backend(Mutex::new(None)))
         .setup(|app| {
             match backend_path(app.handle()) {
-                Some(path) => match Command::new(&path).spawn() {
-                    Ok(child) => {
-                        *app.state::<Backend>().0.lock().unwrap() = Some(child);
-                        eprintln!("[hipot] backend iniciado: {}", path.display());
+                Some(path) => {
+                    // Redirigir stderr a un archivo de log para diagnóstico
+                    use std::fs::{OpenOptions, create_dir_all};
+                    use std::io::Write;
+                    let log_dir = std::env::var("APPDATA")
+                        .map(|d| std::path::PathBuf::from(d).join("HiPotApp"))
+                        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+                    let _ = create_dir_all(&log_dir);
+                    let log_path = log_dir.join("backend.log");
+                    let stderr_file = OpenOptions::new()
+                        .create(true).append(true).open(&log_path).ok();
+                    let mut cmd = Command::new(&path);
+                    if let Some(f) = stderr_file {
+                        cmd.stderr(std::process::Stdio::from(f));
                     }
-                    Err(e) => eprintln!("[hipot] no se pudo arrancar el backend: {e}"),
-                },
-                None => eprintln!(
-                    "[hipot] backend no encontrado; arráncalo manual: uvicorn App.python.main:app"
-                ),
+                    match cmd.spawn() {
+                        Ok(child) => {
+                            *app.state::<Backend>().0.lock().unwrap() = Some(child);
+                            eprintln!("[hipot] backend iniciado: {}", path.display());
+                        }
+                        Err(e) => eprintln!("[hipot] no se pudo arrancar el backend: {e}"),
+                    }
+                }
+                None => {
+                    eprintln!(
+                        "[hipot] backend no encontrado; arráncalo manual: uvicorn App.python.main:app"
+                    );
+                    // Escribir en log
+                    use std::fs::{OpenOptions, create_dir_all};
+                    let log_dir = std::env::var("APPDATA")
+                        .map(|d| std::path::PathBuf::from(d).join("HiPotApp"))
+                        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+                    let _ = create_dir_all(&log_dir);
+                    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(log_dir.join("backend.log")) {
+                        let ts = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs().to_string())
+                            .unwrap_or_default();
+                        let _ = writeln!(f, "[{}] backend no encontrado en ninguna ruta", ts);
+                    }
+                }
             }
             // Splash -> main: temporizado en Rust para que nunca se atore.
             let handle = app.handle().clone();
