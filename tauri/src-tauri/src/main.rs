@@ -110,8 +110,16 @@ fn main() {
                         Ok(child) => {
                             *app.state::<Backend>().0.lock().unwrap() = Some(child);
                             eprintln!("[hipot] backend iniciado: {}", path.display());
+                            use std::io::Write;
+                            let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_default();
+                            let _ = writeln!(std::fs::OpenOptions::new().create(true).append(true).open(&log_path).unwrap(), "[{}] backend iniciado: {}", ts, path.display());
                         }
-                        Err(e) => eprintln!("[hipot] no se pudo arrancar el backend: {e}"),
+                        Err(e) => {
+                            eprintln!("[hipot] no se pudo arrancar el backend: {e}");
+                            use std::io::Write;
+                            let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_default();
+                            let _ = writeln!(std::fs::OpenOptions::new().create(true).append(true).open(&log_path).unwrap(), "[{}] error arrancando backend: {}", ts, e);
+                        }
                     }
                 }
                 None => {
@@ -124,6 +132,7 @@ fn main() {
                         .map(|d| std::path::PathBuf::from(d).join("HiPotApp"))
                         .unwrap_or_else(|_| std::path::PathBuf::from("."));
                     let _ = create_dir_all(&log_dir);
+                    use std::io::Write;
                     if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(log_dir.join("backend.log")) {
                         let ts = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
