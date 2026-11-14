@@ -496,7 +496,7 @@ def plc_status():
               if s.query(Configuration).filter_by(config_key="plc_ip").first() else "192.168.1.10")
     finally:
         s.close()
-    plc = PLCManager(ip=ip, simulate=True)
+    plc = PLCManager(ip=ip, simulate=False)
     plc.connect()
     return {"connected": plc.connected, "ip": ip, "simulate": plc.simulate}
 
@@ -504,7 +504,7 @@ def plc_status():
 @router.get("/status/hipot")
 def hipot_status():
     from ..hipot_manager import HipotManager
-    h = HipotManager(simulate=True)
+    h = HipotManager(simulate=False)
     h.connect()
     return {"connected": h.connected, "ports": HipotManager.list_ports()}
 
@@ -888,7 +888,7 @@ def plc_write(body: dict):
 def hipot_cmd(body: dict):
     from ..hipot_manager import HipotManager
     cmd = body.get("command", "STATUS?")
-    h = HipotManager(simulate=True)
+    h = HipotManager(simulate=False)
     h.connect()
     ok = h.send_command(cmd)
     resp = h.read_response(timeout=0.5)
@@ -963,7 +963,7 @@ def _plc():
     global _shared_plc
     if _shared_plc is None:
         from ..plc_manager import PLCManager
-        _shared_plc = PLCManager(simulate=True)
+        _shared_plc = PLCManager(simulate=False)
         _shared_plc.connect()
     return _shared_plc
 
@@ -975,7 +975,7 @@ def _hipot():
     global _shared_hipot
     if _shared_hipot is None:
         from ..hipot_manager import HipotManager
-        _shared_hipot = HipotManager(simulate=True)
+        _shared_hipot = HipotManager(simulate=False)
         _shared_hipot.connect()
     return _shared_hipot
 
