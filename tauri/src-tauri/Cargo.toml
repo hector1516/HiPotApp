@@ -16,6 +16,7 @@ serde_json = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 s7 = "0.1.9"
 serialport = "4.3"
+chrono = "0.4"
 
 [features]
 default = [ "custom-protocol" ]

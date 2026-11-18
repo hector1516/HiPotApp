@@ -152,7 +152,7 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
   const [q,setQ]=useState('');
   const [msg,setMsg]=useState('');
   const [editing,setEditing]=useState<null|{id:number|null,name:string,model:string,product:string,m:any,t:any}>(null);
-  const load=()=>api.get('/recipes').then(setList).catch(()=>setList([]));
+  const load=()=>invoke<any>('list_recipes').then(setList).catch(()=>api.get('/recipes').then(setList).catch(()=>setList([])));
   useEffect(()=>{load();},[]);
   const rows=list.filter(r=>!q||r.model.includes(q));
   const openNew=()=>{
@@ -161,7 +161,7 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
     setEditing({id:null,name:'',model:q||'',product:'',m,t});
   };
   const openEdit=async(r:any)=>{
-    const d=await api.recipeByModel(r.model);
+    const d=await invoke<any>('get_recipe_by_model', { model: r.model });
     const {m,t}=matrixFromDetail(d);
     setEditing({id:d.id,name:d.name,model:d.model,product:d.product||'',m,t});
   };

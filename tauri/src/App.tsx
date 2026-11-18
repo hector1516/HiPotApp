@@ -14,6 +14,7 @@ import { ConfigGatePopup } from './components/ConfigGatePopup';
 import VirtualKeyboard from './components/VirtualKeyboard';
 import { Phase } from './styles/theme';
 import { api } from './api';
+import { invoke } from '@tauri-apps/api/core';
 
 // Router principal: HOME -> TEST -> RESULT + ADMIN (doc 02 flujo operador).
 type View = 'home' | 'test' | 'result' | 'admin' | 'manual';
@@ -161,7 +162,7 @@ export default function App() {
     setError(''); setPhase('SCANNING');
     try {
       await api.scan(code, 'model', 1);
-      const r = await api.recipeByModel(code);
+      const r = await invoke<any>('get_recipe_by_model', { model: code });
       setRecipe(r); setStep(2); setPhase('LOADED');
     } catch { setError(`Receta no encontrada: ${code}`); setPhase('ERROR'); later(() => setPhase('IDLE'), 1500); }
   };
