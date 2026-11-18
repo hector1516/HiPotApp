@@ -822,6 +822,12 @@ function SystemTab() {
               alert(log || 'Sin log');
             } catch (e: any) { alert('Error: ' + (e?.message || e)); }
           }}>Ver log del backend</button>
+          <button className="btn primary" onClick={async () => {
+            try {
+              const r = await (window as any).__TAURI__?.core?.invoke?.('restart_backend');
+              alert(r || 'Reiniciado');
+            } catch (e: any) { alert('Error: ' + (e?.message || e)); }
+          }}>Reiniciar backend</button>
         </div>
         <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>
           Para usar SQL Express local, define USE_SQLITE=0 y DB_LOCAL_SERVER en el entorno.

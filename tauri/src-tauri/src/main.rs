@@ -63,6 +63,51 @@ fn read_backend_log() -> String {
 }
 
 #[tauri::command]
+fn restart_backend(app: tauri::AppHandle) -> String {
+    // Kill existing
+    if let Some(mut child) = app.state::<Backend>().0.lock().unwrap().take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    // Find binary
+    if let Some(path) = backend_path(&app) {
+        use std::fs::{OpenOptions, create_dir_all};
+        use std::io::Write;
+        let log_dir = std::env::var("APPDATA")
+            .map(|d| std::path::PathBuf::from(d).join("HiPotApp"))
+            .unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let _ = create_dir_all(&log_dir);
+        let log_path = log_dir.join("backend.log");
+        let stderr_file = OpenOptions::new().create(true).append(true).open(&log_path).ok();
+        let mut cmd = Command::new(&path);
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(0x08000000);
+        if let Some(f) = stderr_file {
+            cmd.stderr(std::process::Stdio::from(f));
+        }
+        match cmd.spawn() {
+            Ok(child) => {
+                *app.state::<Backend>().0.lock().unwrap() = Some(child);
+                let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_default();
+                if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&log_path) {
+                    let _ = writeln!(f, "[{}] backend reiniciado manualmente: {}", ts, path.display());
+                }
+                "OK: backend reiniciado".to_string()
+            }
+            Err(e) => {
+                let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_default();
+                if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&log_path) {
+                    let _ = writeln!(f, "[{}] error reiniciando backend: {}", ts, e);
+                }
+                format!("Error: {}", e)
+            }
+        }
+    } else {
+        "Error: binario del backend no encontrado".to_string()
+    }
+}
+
+#[tauri::command]
 fn plc_status(ip: String, rack: u16, slot: u16) -> bool {
     use std::net::IpAddr;
     use std::time::Duration;
@@ -71,8 +116,8 @@ fn plc_status(ip: String, rack: u16, slot: u16) -> bool {
         Err(_) => return false,
     };
     let mut opts = s7::tcp::Options::new(addr, rack, slot, s7::transport::Connection::OP);
-    opts.read_timeout = Duration::from_secs(2);
-    opts.write_timeout = Duration::from_secs(2);
+    opts.read_timeout = Duration::from_millis(1000);
+    opts.write_timeout = Duration::from_millis(1000);
     let transport = match s7::tcp::Transport::connect(opts) {
         Ok(t) => t,
         Err(_) => return false,
@@ -232,7 +277,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .invoke_handler(tauri::generate_handler![open_external, read_backend_log, get_config, set_config, plc_status, plc_read_tag, plc_write_tag])
+        .invoke_handler(tauri::generate_handler![open_external, read_backend_log, get_config, set_config, plc_status, restart_backend])
         .manage(Backend(Mutex::new(None)))
         .setup(|app| {
             match backend_path(app.handle()) {

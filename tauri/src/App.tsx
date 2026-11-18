@@ -24,6 +24,22 @@ export default function App() {
   const [step, setStep] = useState(1);
   const [kbVisible, setKbVisible] = useState(false);
   const [kbLayout, setKbLayout] = useState<'numeric' | 'text'>('text');
+
+  // Manejador global de errores para evitar congelamiento
+  React.useEffect(() => {
+    const handler = (e: ErrorEvent) => {
+      console.error('Error global:', e.error);
+    };
+    const rejectionHandler = (e: PromiseRejectionEvent) => {
+      console.error('Promise rejection:', e.reason);
+    };
+    window.addEventListener('error', handler);
+    window.addEventListener('unhandledrejection', rejectionHandler);
+    return () => {
+      window.removeEventListener('error', handler);
+      window.removeEventListener('unhandledrejection', rejectionHandler);
+    };
+  }, []);
   const [recipe, setRecipe] = useState<any>(null);
   const [serial, setSerial] = useState('');
   const [batch, setBatch] = useState('');
