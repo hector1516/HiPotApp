@@ -11,7 +11,7 @@ const TABS = ['Usuarios', 'Recetas', 'PLC', 'Hipot', 'BD', 'Etiquetas', 'Logs', 
 export function AdminPanel({ onBack, adminBatch }: { onBack: () => void; adminBatch?: string }) {
   const [tab, setTab] = useState<(typeof TABS)[number]>('Recetas');
   return (
-    <div style={{ display: 'flex', minHeight: 560, minWidth: 0 }}>
+    <div className="admin-panel" style={{ display: 'flex', minHeight: 560, minWidth: 0 }}>
       <div style={{ width: 176, background: '#141b26', padding: 8, flexShrink: 0, borderRight: '1px solid #2a3a52', display: 'flex', flexDirection: 'column', gap: 4 }}>
         <button className="btn" style={{ width: '100%', background: '#1e2a3a', color: '#fff', borderColor: '#334155', fontSize: 13 }} onClick={onBack}>← Volver</button>
         <div style={{ height: 1, background: '#2a3a52', margin: '4px 0' }} />

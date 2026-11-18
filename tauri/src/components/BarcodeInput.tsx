@@ -24,7 +24,7 @@ export function BarcodeInput({ label, placeholder, onScan, autoFocus }: {
           aria-label="Captura manual de codigo de barras"
           onClick={() => {
             ref.current?.focus();
-            (window as any).__TAURI__?.core?.invoke?.('show_touch_keyboard')?.catch?.(() => {});
+            window.dispatchEvent(new CustomEvent('show-virtual-keyboard', { detail: { layout: 'text' } }));
           }}
           style={{
             flexShrink: 0, width: 36, height: 36, borderRadius: 8,

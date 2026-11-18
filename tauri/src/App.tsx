@@ -86,6 +86,9 @@ export default function App() {
     const onFocus = (e: FocusEvent) => {
       const t = e.target as HTMLInputElement;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) {
+        // Solo mostrar teclado automaticamente en el panel de admin (configuracion)
+        const inAdmin = !!t.closest('.admin-panel');
+        if (!inAdmin) return;
         const mode = t.inputMode || (t.type === 'number' ? 'numeric' : 'text');
         const kbPref = localStorage.getItem('keyboard_mode') || 'integrated';
         if (kbPref === 'windows') {
@@ -96,6 +99,19 @@ export default function App() {
         }
       }
     };
+
+    // Listener para mostrar teclado manualmente (boton en HomeScreen)
+    const onShowKb = (e: any) => {
+      const layout = e?.detail?.layout || 'text';
+      const kbPref = localStorage.getItem('keyboard_mode') || 'integrated';
+      if (kbPref === 'windows') {
+        (window as any).__TAURI__?.core?.invoke?.('show_touch_keyboard')?.catch?.(() => {});
+      } else {
+        setKbLayout(layout === 'numeric' ? 'numeric' : 'text');
+        setKbVisible(true);
+      }
+    };
+    window.addEventListener('show-virtual-keyboard', onShowKb);
     const onBlur = () => {
       setTimeout(() => {
         const ae = document.activeElement;
@@ -106,9 +122,11 @@ export default function App() {
     };
     document.addEventListener('focusin', onFocus);
     document.addEventListener('focusout', onBlur);
+    window.addEventListener('show-virtual-keyboard', onShowKb);
     return () => {
       document.removeEventListener('focusin', onFocus);
       document.removeEventListener('focusout', onBlur);
+      window.removeEventListener('show-virtual-keyboard', onShowKb);
     };
   }, []);
 
