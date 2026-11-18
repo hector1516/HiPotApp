@@ -5,6 +5,8 @@
 use std::process::{Child, Command};
 use std::sync::Mutex;
 use tauri::{Manager, State, WindowEvent};
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 
 const BACKEND_BIN: &str = "hipot-backend-x86_64-pc-windows-msvc.exe";
 
