@@ -18,7 +18,7 @@ export function usePLC(enabled = true) {
   useEffect(() => {
     if (!enabled) return;
     refresh();
-    const id = setInterval(refresh, 2000);
+    const id = setInterval(refresh, 5000);
     return () => clearInterval(id);
   }, [enabled, refresh]);
   return { connected, detail, refresh };

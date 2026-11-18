@@ -2,14 +2,24 @@
 const BASE = (import.meta as any).env?.VITE_API_URL ?? 'http://127.0.0.1:8765';
 
 async function req(path: string, init?: RequestInit, retries = 2) {
-  const r = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' }, ...init,
-  });
-  if (!r.ok) {
-    const t = await r.text().catch(() => '');
-    throw new Error(t || `HTTP ${r.status}`);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 3000);
+  try {
+    const r = await fetch(`${BASE}${path}`, {
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      ...init,
+    });
+    clearTimeout(timeoutId);
+    if (!r.ok) {
+      const t = await r.text().catch(() => '');
+      throw new Error(t || `HTTP ${r.status}`);
+    }
+    return r.json().catch(() => ({}));
+  } catch (err) {
+    clearTimeout(timeoutId);
+    throw err;
   }
-  return r.json().catch(() => ({}));
 }
 
 export const api = {
