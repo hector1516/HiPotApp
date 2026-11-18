@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../api';
+import { invoke } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
@@ -639,7 +640,7 @@ function SystemTab() {
   const loadLog = () => api.get('/admin/import-export-log').then(setImpLog).catch(() => setImpLog([]));
   useEffect(() => {
     loadLog();
-    api.get('/admin/config').then(c => { setHold(String(c?.result_hold_seconds ?? '10')); setCfg(c || {}); }).catch(() => {});
+    invoke<any>('get_config').then(c => { setHold(String(c?.result_hold_seconds ?? '10')); setCfg(c || {}); }).catch(() => { api.get('/admin/config').then(c => { setHold(String(c?.result_hold_seconds ?? '10')); setCfg(c || {}); }).catch(() => {}); });
     api.get('/admin/local-db-config').then(r => setLocalDbCfg(r || { use_sqlite: '1', server: '', name: '', user: '', password: '' })).catch(() => {});
     api.get('/audit/table-names').then(r => setTableNames(r?.tables ?? [])).catch(() => {});
    
@@ -660,7 +661,7 @@ function SystemTab() {
           <input className="input" type="number" inputMode="numeric" min={3} max={60} value={hold} onChange={e => setHold(e.target.value)} style={{ maxWidth: 90 }} />
           <button className="btn primary" onClick={async () => {
             const n = Math.max(3, Math.min(60, parseInt(hold || '10', 10) || 10));
-            await api.post('/admin/config', { result_hold_seconds: String(n) });
+            await invoke('set_config', { values: { result_hold_seconds: String(n) } });
             setHold(String(n)); setHoldMsg(`Guardado: ${n}s`); setTimeout(() => setHoldMsg(''), 2000);
           }}>Guardar</button>
           {holdMsg && <span className="pill on" style={{ fontSize: 12 }}>{holdMsg}</span>}
@@ -806,7 +807,7 @@ function SystemTab() {
           <button className="btn ok" onClick={async () => {
             const vals: any = {};
             ['sql_server', 'sql_database', 'sql_user', 'sql_password'].forEach(k => { if (cfg[k] !== undefined) vals[k] = cfg[k]; });
-            try { await api.post('/admin/config', { values: vals }); alert('Guardado'); } catch (e: any) { alert('Error: ' + (e?.message || e)); }
+            try { await invoke('set_config', { values: vals }); alert('Guardado'); } catch (e: any) { alert('Error: ' + (e?.message || e)); }
           }}>Guardar</button>
           <button className="btn ghost" onClick={async () => {
             try { const r = await api.post('/audit/ensure-table'); alert(r.exists ? 'Tablas creadas/verificadas' : 'No se pudo crear'); } catch (e: any) { alert('Error: ' + (e?.message || e)); }

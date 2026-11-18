@@ -8,6 +8,51 @@ use tauri::{Manager, State, WindowEvent};
 
 const BACKEND_BIN: &str = "hipot-backend-x86_64-pc-windows-msvc.exe";
 
+fn db_path() -> std::path::PathBuf {
+    let base = std::env::var("APPDATA")
+        .map(|d| std::path::PathBuf::from(d).join("HiPotApp"))
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let _ = std::fs::create_dir_all(&base);
+    base.join("hipot_local.db")
+}
+
+#[tauri::command]
+fn get_config() -> serde_json::Value {
+    let conn = match rusqlite::Connection::open(db_path()) {
+        Ok(c) => c,
+        Err(_) => return serde_json::json!({}),
+    };
+    let _ = conn.execute("CREATE TABLE IF NOT EXISTS configuration (config_key TEXT PRIMARY KEY, config_value TEXT)", []);
+    let mut map = serde_json::Map::new();
+    if let Ok(mut stmt) = conn.prepare("SELECT config_key, config_value FROM configuration") {
+        if let Ok(rows) = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))) {
+            for r in rows.flatten() {
+                map.insert(r.0, serde_json::Value::String(r.1));
+            }
+        }
+    }
+    serde_json::Value::Object(map)
+}
+
+#[tauri::command]
+fn set_config(values: serde_json::Value) -> String {
+    let conn = match rusqlite::Connection::open(db_path()) {
+        Ok(c) => c,
+        Err(_) => return "error: cannot open db".to_string(),
+    };
+    let _ = conn.execute("CREATE TABLE IF NOT EXISTS configuration (config_key TEXT PRIMARY KEY, config_value TEXT)", []);
+    if let Some(obj) = values.as_object() {
+        for (k, v) in obj {
+            let val = v.as_str().unwrap_or(&v.to_string()).to_string();
+            let _ = conn.execute(
+                "INSERT INTO configuration (config_key, config_value) VALUES (?1, ?2) ON CONFLICT(config_key) DO UPDATE SET config_value = excluded.config_value",
+                rusqlite::params![k, val],
+            );
+        }
+    }
+    "saved".to_string()
+}
+
 #[tauri::command]
 fn read_backend_log() -> String {
     let log_dir = std::env::var("APPDATA")
@@ -87,7 +132,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .invoke_handler(tauri::generate_handler![open_external, read_backend_log])
+        .invoke_handler(tauri::generate_handler![open_external, read_backend_log, get_config, set_config])
         .manage(Backend(Mutex::new(None)))
         .setup(|app| {
             match backend_path(app.handle()) {
