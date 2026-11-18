@@ -582,7 +582,16 @@ def get_logs(category: str = "", level: str = "", q: str = "", limit: int = 200)
 @router.post("/admin/print-test")
 def print_test():
     from ..label_printer import ZebraPrinter
-    p = ZebraPrinter()
+    from ..models import Configuration
+    s = _sf()()
+    try:
+        ip = (s.query(Configuration).filter_by(config_key="printer_ip").first().config_value
+              if s.query(Configuration).filter_by(config_key="printer_ip").first() else "")
+        port = int((s.query(Configuration).filter_by(config_key="printer_port").first().config_value
+                    if s.query(Configuration).filter_by(config_key="printer_port").first() else "9100"))
+    finally:
+        s.close()
+    p = ZebraPrinter(printer_ip=ip or "", printer_port=port or 9100)
     ok = p.test_print()
     return {"status": "ok" if ok else "error"}
 
@@ -603,7 +612,16 @@ def reprint(eid: int, copies: int = 1):
         data = {"model": "", "serial_number": ex.serial_number,
                 "final_status": ex.final_status or ""}
         zpl = canvas_to_zpl(zpl_json, data)
-        ok = ZebraPrinter().print_zpl(zpl)
+        from ..models import Configuration
+        _s = _sf()()
+        try:
+            _ip = (_s.query(Configuration).filter_by(config_key="printer_ip").first().config_value
+                   if _s.query(Configuration).filter_by(config_key="printer_ip").first() else "")
+            _port = int((_s.query(Configuration).filter_by(config_key="printer_port").first().config_value
+                         if _s.query(Configuration).filter_by(config_key="printer_port").first() else "9100"))
+        finally:
+            _s.close()
+        ok = ZebraPrinter(printer_ip=_ip or "", printer_port=_port or 9100).print_zpl(zpl)
         s.add(LabelPrint(execution_id=eid, printed_by="admin_reprint",
                          zpl_data=zpl, status="success" if ok else "error",
                          copies=copies))

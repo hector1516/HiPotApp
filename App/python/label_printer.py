@@ -5,11 +5,26 @@ import tempfile
 
 
 class ZebraPrinter:
-    def __init__(self, printer_name: str = "Zebra ZT231"):
+    def __init__(self, printer_name: str = "Zebra ZT231", printer_ip: str = "", printer_port: int = 9100):
         self.printer_name = printer_name
+        self.printer_ip = printer_ip
+        self.printer_port = printer_port
         self.connected = False
 
     def connect(self) -> bool:
+        # Si hay IP, usar Ethernet (socket TCP puerto 9100)
+        if self.printer_ip:
+            try:
+                import socket
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(5)
+                s.connect((self.printer_ip, self.printer_port))
+                s.close()
+                self.connected = True
+                return True
+            except Exception:
+                self.connected = False
+                return False
         if os.name != "nt":
             self.connected = True  # dev en linux: simular
             return True
@@ -24,6 +39,29 @@ class ZebraPrinter:
     def print_zpl(self, zpl_data: str) -> bool:
         if not self.connected and not self.connect():
             return False
+        # Ethernet: enviar ZPL por socket TCP
+        if self.printer_ip:
+            try:
+                import socket
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(10)
+                s.connect((self.printer_ip, self.printer_port))
+                s.sendall(zpl_data.encode("ascii"))
+                s.close()
+                try:
+                    from .logger import logger
+                    logger.info("PRINTER", "print_zpl", f"Impresion OK via Ethernet ({len(zpl_data)} chars)")
+                except Exception:
+                    pass
+                return True
+            except Exception as e:
+                try:
+                    from .logger import logger
+                    logger.error("PRINTER", "print_zpl", f"Error imprimiendo via Ethernet: {e}", error_message=str(e))
+                except Exception:
+                    pass
+                return False
+        # USB/Windows: enviar por comando print
         try:
             with tempfile.NamedTemporaryFile(mode="w", suffix=".zpl", delete=False) as f:
                 f.write(zpl_data)

@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import time
+import asyncio
 
 from .database import local_db
 from .logger import AppLogger, logger
@@ -35,8 +36,23 @@ async def lifespan(app: FastAPI):
         s.rollback()
     finally:
         s.close()
+    # Auto-sync local -> remoto cada 5 minutos
+    sync_task = None
+    try:
+        from .sync_manager import SyncManager
+        from .database import get_remote_db
+        mgr = SyncManager(local_db.Session, get_remote_db().Session, interval_minutes=5)
+        sync_task = asyncio.create_task(mgr.start_loop())
+        logger.info("SYSTEM", "startup", "Auto-sync iniciado (cada 5 min)")
+    except Exception as e:
+        print(f"[sync-start] {e}")
+
     logger.info("SYSTEM", "startup", "HiPotApp backend iniciado")
     yield
+
+    # Shutdown
+    if sync_task:
+        sync_task.cancel()
 
 
 app = FastAPI(title="HiPotApp API",
