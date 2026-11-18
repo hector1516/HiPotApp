@@ -63,6 +63,106 @@ fn read_backend_log() -> String {
 }
 
 #[tauri::command]
+fn plc_status(ip: String, rack: u16, slot: u16) -> bool {
+    use std::net::IpAddr;
+    use std::time::Duration;
+    let addr: IpAddr = match ip.parse() {
+        Ok(a) => a,
+        Err(_) => return false,
+    };
+    let mut opts = s7::tcp::Options::new(addr, rack, slot, s7::transport::Connection::OP);
+    opts.read_timeout = Duration::from_secs(2);
+    opts.write_timeout = Duration::from_secs(2);
+    let transport = match s7::tcp::Transport::connect(opts) {
+        Ok(t) => t,
+        Err(_) => return false,
+    };
+    let mut client = match s7::client::Client::new(transport) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let mut buf = vec![0u8; 1];
+    client.ab_read(0, 1, &mut buf).is_ok()
+}
+
+#[tauri::command]
+fn plc_read_tag(ip: String, rack: u16, slot: u16, db: i32, offset: i32, data_type: String, bit: i32) -> Result<serde_json::Value, String> {
+    use std::net::IpAddr;
+    use std::time::Duration;
+    let addr: IpAddr = ip.parse().map_err(|_| "invalid ip".to_string())?;
+    let mut opts = s7::tcp::Options::new(addr, rack, slot, s7::transport::Connection::OP);
+    opts.read_timeout = Duration::from_secs(2);
+    opts.write_timeout = Duration::from_secs(2);
+    let transport = s7::tcp::Transport::connect(opts).map_err(|e| e.to_string())?;
+    let mut client = s7::client::Client::new(transport).map_err(|e| e.to_string())?;
+
+    let dt = data_type.to_uppercase();
+    match dt.as_str() {
+        "BOOL" => {
+            let mut buf = vec![0u8; 1];
+            client.ab_read(offset, 1, &mut buf).map_err(|e| e.to_string())?;
+            let val = (buf[0] >> bit) & 1 == 1;
+            Ok(serde_json::json!(val))
+        }
+        "WORD" | "INT" => {
+            let mut buf = vec![0u8; 2];
+            client.ab_read(offset, 2, &mut buf).map_err(|e| e.to_string())?;
+            let val = u16::from_be_bytes([buf[0], buf[1]]);
+            Ok(serde_json::json!(val))
+        }
+        "REAL" => {
+            let mut buf = vec![0u8; 4];
+            client.ag_read(db, offset, 4, &mut buf).map_err(|e| e.to_string())?;
+            // Parse float from bytes (big-endian)
+            let val = f32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
+            Ok(serde_json::json!(val))
+        }
+        _ => Err("unsupported type".to_string()),
+    }
+}
+
+#[tauri::command]
+fn plc_write_tag(ip: String, rack: u16, slot: u16, db: i32, offset: i32, data_type: String, value: serde_json::Value, bit: i32) -> Result<String, String> {
+    use std::net::IpAddr;
+    use std::time::Duration;
+    let addr: IpAddr = ip.parse().map_err(|_| "invalid ip".to_string())?;
+    let mut opts = s7::tcp::Options::new(addr, rack, slot, s7::transport::Connection::OP);
+    opts.read_timeout = Duration::from_secs(2);
+    opts.write_timeout = Duration::from_secs(2);
+    let transport = s7::tcp::Transport::connect(opts).map_err(|e| e.to_string())?;
+    let mut client = s7::client::Client::new(transport).map_err(|e| e.to_string())?;
+
+    let dt = data_type.to_uppercase();
+    match dt.as_str() {
+        "BOOL" => {
+            let val = value.as_bool().unwrap_or(false);
+            let mut buf = vec![0u8; 1];
+            client.ab_read(offset, 1, &mut buf).map_err(|e| e.to_string())?;
+            if val {
+                buf[0] |= 1 << bit;
+            } else {
+                buf[0] &= !(1 << bit);
+            }
+            client.ab_write(offset, 1, &mut buf).map_err(|e| e.to_string())?;
+            Ok("written".to_string())
+        }
+        "WORD" | "INT" => {
+            let val = value.as_i64().unwrap_or(0) as u16;
+            let mut buf = val.to_be_bytes().to_vec();
+            client.ab_write(offset, 2, &mut buf).map_err(|e| e.to_string())?;
+            Ok("written".to_string())
+        }
+        "REAL" => {
+            let val = value.as_f64().unwrap_or(0.0) as f32;
+            let mut bytes = val.to_be_bytes().to_vec();
+            client.ag_write(db, offset, 4, &mut bytes).map_err(|e| e.to_string())?;
+            Ok("written".to_string())
+        }
+        _ => Err("unsupported type".to_string()),
+    }
+}
+
+#[tauri::command]
 fn show_touch_keyboard() {
     #[cfg(target_os = "windows")]
     {
@@ -132,7 +232,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .invoke_handler(tauri::generate_handler![open_external, read_backend_log, get_config, set_config])
+        .invoke_handler(tauri::generate_handler![open_external, read_backend_log, get_config, set_config, plc_status, plc_read_tag, plc_write_tag])
         .manage(Backend(Mutex::new(None)))
         .setup(|app| {
             match backend_path(app.handle()) {
