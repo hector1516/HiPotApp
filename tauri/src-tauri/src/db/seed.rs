@@ -11,6 +11,8 @@ pub const DEFAULT_CONFIGS: &[(&str, &str)] = &[
     ("plc_ip", "192.168.1.10"),
     ("plc_rack", "0"),
     ("plc_slot", "1"),
+    ("estop_input", "I0.0"),
+    ("estop_nc", "1"),
     // Hipot
     ("hipot_port", "COM3"),
     ("hipot_baud", "9600"),

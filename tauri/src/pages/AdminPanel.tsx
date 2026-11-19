@@ -797,6 +797,8 @@ function SystemTab() {
   const [previewStatus, setPreviewStatus] = useState<'GOOD' | 'BAD' | null>(null);
   const [kbMode, setKbMode] = useState(() => localStorage.getItem('keyboard_mode') || 'integrated');
   const [contrast, setContrast] = useState(() => localStorage.getItem('contrast_mode') === '1');
+  const [estopInput, setEstopInput] = useState('I0.0');
+  const [estopNc, setEstopNc] = useState('1');
   const remoteConnStr = () => {
     const driver = 'ODBC Driver 17 for SQL Server';
     const server = cfg?.sql_server || '192.168.1.200';
@@ -810,7 +812,12 @@ function SystemTab() {
   const loadLog = () => invoke<any[]>('import_export_log_list', { limit: 20 }).then(setImpLog).catch(() => setImpLog([]));
   useEffect(() => {
     loadLog();
-    invoke<any>('get_config').then(c => { setHold(String(c?.result_hold_seconds ?? '10')); setCfg(c || {}); }).catch(() => {});
+    invoke<any>('get_config').then(c => {
+      setHold(String(c?.result_hold_seconds ?? '10'));
+      setCfg(c || {});
+      setEstopInput(String(c?.estop_input ?? 'I0.0'));
+      setEstopNc(String(c?.estop_nc ?? '1'));
+    }).catch(() => {});
     invoke<any>('local_db_config_get').then(r => setLocalDbCfg(r || { use_sqlite: '0', server: '.\\SQLEXPRESS', name: 'HiPotDB', user: '', password: '' })).catch(() => {});
     invoke<any>('audit_table_names').then(r => setTableNames(r?.tables ?? [])).catch(() => {});
    
@@ -1050,6 +1057,31 @@ function SystemTab() {
         </div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
           {kbMode === 'integrated' ? 'Se usa el teclado virtual de la app.' : 'Se usa el teclado tactil de Windows (TabTip).'}
+        </div>
+      </div>
+      <div className="card" style={{ marginBottom: 10 }}>
+        <h3>Paro de emergencia</h3>
+        <div className="row" style={{ alignItems: 'flex-end', gap: 10 }}>
+          <div className="field" style={{ flex: '0 1 160px' }}>
+            <label>Entrada PLC</label>
+            <input className="input" value={estopInput} onChange={e => setEstopInput(e.target.value.toUpperCase())} placeholder="I0.0" />
+          </div>
+          <div className="field" style={{ flex: '0 1 240px' }}>
+            <label>Tipo de contacto</label>
+            <select className="input" value={estopNc} onChange={e => setEstopNc(e.target.value)}>
+              <option value="1">NC — normalmente cerrado</option>
+              <option value="0">NO — normalmente abierto</option>
+            </select>
+          </div>
+          <button className="btn primary" onClick={async () => {
+            try {
+              await invoke('set_config', { values: { estop_input: estopInput, estop_nc: estopNc } });
+              notify('Paro de emergencia guardado', 'ok');
+            } catch (e: any) { notify('Error: ' + (e?.message || e), 'error'); }
+          }}>Guardar</button>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
+          Por defecto se asume NC: la entrada debe estar en 1 para indicar “sin paro”.
         </div>
       </div>
       <div className="card" style={{ marginBottom: 10 }}>

@@ -1,6 +1,6 @@
 // Pasos del modo automático. Editar aquí cambia el stepper, los prompts y
 // los números de paso que usa App.tsx.
-export type AutoStepId = 'model' | 'serial' | 'batch' | 'plc' | 'hipot' | 'result';
+export type AutoStepId = 'model' | 'serial' | 'batch' | 'hipot' | 'plc' | 'result';
 
 export type AutoStep = {
   id: AutoStepId;
@@ -13,8 +13,8 @@ export const AUTO_STEPS: AutoStep[] = [
   {
     id: 'model',
     label: 'Modelo',
-    prompt: 'Escanea el modelo',
-    description: 'Busca la receta por modelo.',
+    prompt: 'Selecciona el modelo',
+    description: 'Elige la receta de la lista. Se recuerda el último modelo usado.',
   },
   {
     id: 'serial',
@@ -29,16 +29,16 @@ export const AUTO_STEPS: AutoStep[] = [
     description: 'Crea la ejecución y arranca la prueba.',
   },
   {
+    id: 'hipot',
+    label: 'Hipot',
+    prompt: 'Prueba Hipot en curso',
+    description: 'El Hipot mide aislamiento y detecta cortos.',
+  },
+  {
     id: 'plc',
     label: 'Eléctrica',
     prompt: 'Prueba eléctrica en curso',
     description: 'El PLC mide consumo por componente.',
-  },
-  {
-    id: 'hipot',
-    label: 'Hipot',
-    prompt: 'Prueba Hipot en curso',
-    description: 'El Hipot mide aislamiento.',
   },
   {
     id: 'result',

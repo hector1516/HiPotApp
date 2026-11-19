@@ -136,6 +136,49 @@ fn plc_status_info() -> serde_json::Value {
 }
 
 #[tauri::command]
+fn plc_emergency_stop() -> serde_json::Value {
+    let cfg = plc_cfg();
+    let config = get_config();
+    let address = config
+        .get("estop_input")
+        .and_then(|v| v.as_str())
+        .unwrap_or("I0.0")
+        .to_string();
+    // Por defecto se asume NC (normalmente cerrado): true = sano, false = presionado.
+    let nc = config
+        .get("estop_nc")
+        .and_then(|v| v.as_str())
+        .unwrap_or("1")
+        != "0";
+    match plc::connect(&cfg, 800) {
+        Ok(mut client) => {
+            let raw = plc::read_i(&mut client, &address);
+            let active = if nc { !raw } else { raw };
+            serde_json::json!({
+                "active": active,
+                "raw": raw,
+                "address": address,
+                "connected": true,
+                "inverted": nc,
+            })
+        }
+        Err(e) => serde_json::json!({
+            "active": false,
+            "raw": null,
+            "address": address,
+            "connected": false,
+            "error": e,
+        }),
+    }
+}
+
+#[tauri::command]
+fn resolve_model_by_serial(_serial: String) -> Option<String> {
+    // Placeholder hasta tener acceso a la BD externa serial -> modelo.
+    None
+}
+
+#[tauri::command]
 fn plc_tags_list() -> serde_json::Value {
     let mut rows = db::repo::plc_tags_list();
     let cfg = plc_cfg();
@@ -438,11 +481,92 @@ fn run_test_cycle(
 ) -> serde_json::Value {
     let started = std::time::Instant::now();
     let mut errors: Vec<String> = Vec::new();
+    let mut hipot_parsed = serde_json::json!({});
+    let mut hipot_pass = false;
     let mut plc_pass = false;
     let mut plc_values = serde_json::json!({});
     let mut plc_component_values = serde_json::json!({});
 
-    // --- PLC ---
+    // --- Hipot primero: detecta cortos antes de energizar la prueba eléctrica ---
+    let _ = app.emit("test-phase", "HIPOT_RUNNING");
+    let hipot_cfg = hipot::config_from(&get_config());
+
+    match hipot::test_action(&hipot_cfg, "START") {
+        Ok(v) => {
+            hipot_parsed = v
+                .get("parsed")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}));
+            if hipot_parsed
+                .get("pass")
+                .and_then(|p| p.as_bool())
+                .is_none()
+            {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(1000));
+                    match hipot::command(&hipot_cfg, "STATUS?") {
+                        Ok(s) => {
+                            let parsed = s
+                                .get("parsed")
+                                .cloned()
+                                .unwrap_or_else(|| serde_json::json!({}));
+                            if parsed.get("pass").and_then(|p| p.as_bool()).is_some() {
+                                hipot_parsed = parsed;
+                                break;
+                            }
+                            hipot_parsed = parsed;
+                        }
+                        Err(e) => errors.push(format!("Hipot status: {}", e)),
+                    }
+                    if std::time::Instant::now() >= deadline {
+                        errors.push("Hipot: timeout esperando PASS/FAIL".to_string());
+                        break;
+                    }
+                }
+            }
+            hipot_pass = hipot_parsed
+                .get("pass")
+                .and_then(|p| p.as_bool())
+                .unwrap_or(false);
+        }
+        Err(e) => errors.push(format!("Hipot start: {}", e)),
+    }
+
+    let hipot_duration = started.elapsed().as_secs_f64();
+    let _ = save_hipot_result(
+        execution_id,
+        serde_json::json!({
+            "pass": hipot_pass,
+            "voltage": hipot_parsed.get("voltage"),
+            "current": hipot_parsed.get("current"),
+            "resistance": hipot_parsed.get("resistance"),
+            "insulation": hipot_parsed.get("insulation"),
+            "duration": hipot_duration,
+        }),
+    );
+
+    if !hipot_pass {
+        let _ = db::repo::set_final_status(execution_id, "BAD");
+        let duration = started.elapsed().as_secs_f64();
+        return serde_json::json!({
+            "execution_id": execution_id,
+            "recipe_id": recipe_id,
+            "voltage": voltage,
+            "plc": false,
+            "hipot": false,
+            "final": "BAD",
+            "values": {},
+            "plc_results": {},
+            "hipot_data": hipot_parsed,
+            "duration": duration,
+            "errors": errors,
+            "skipped_electrical": true,
+        });
+    }
+
+    // --- Prueba eléctrica (solo si Hipot pasó) ---
+    let _ = app.emit("test-phase", "PLC_RUNNING");
     let cfg = plc_cfg();
     match plc::connect(&cfg, 2000) {
         Ok(mut client) => {
@@ -545,69 +669,11 @@ fn run_test_cycle(
         }
     }
 
-    let _ = app.emit("test-phase", "HIPOT_RUNNING");
-
-    // --- Hipot ---
-    let hipot_cfg = hipot::config_from(&get_config());
-    let mut hipot_parsed = serde_json::json!({});
-    let mut hipot_pass = false;
-
-    match hipot::test_action(&hipot_cfg, "START") {
-        Ok(v) => {
-            hipot_parsed = v
-                .get("parsed")
-                .cloned()
-                .unwrap_or_else(|| serde_json::json!({}));
-            if hipot_parsed
-                .get("pass")
-                .and_then(|p| p.as_bool())
-                .is_none()
-            {
-                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-                loop {
-                    std::thread::sleep(std::time::Duration::from_millis(1000));
-                    match hipot::command(&hipot_cfg, "STATUS?") {
-                        Ok(s) => {
-                            let parsed = s
-                                .get("parsed")
-                                .cloned()
-                                .unwrap_or_else(|| serde_json::json!({}));
-                            if parsed.get("pass").and_then(|p| p.as_bool()).is_some() {
-                                hipot_parsed = parsed;
-                                break;
-                            }
-                            hipot_parsed = parsed;
-                        }
-                        Err(e) => errors.push(format!("Hipot status: {}", e)),
-                    }
-                    if std::time::Instant::now() >= deadline {
-                        errors.push("Hipot: timeout esperando PASS/FAIL".to_string());
-                        break;
-                    }
-                }
-            }
-            hipot_pass = hipot_parsed
-                .get("pass")
-                .and_then(|p| p.as_bool())
-                .unwrap_or(false);
-        }
-        Err(e) => errors.push(format!("Hipot start: {}", e)),
-    }
-
-    let duration = started.elapsed().as_secs_f64();
-    let _ = save_hipot_result(
-        execution_id,
-        serde_json::json!({
-            "pass": hipot_pass,
-            "voltage": hipot_parsed.get("voltage"),
-            "current": hipot_parsed.get("current"),
-            "resistance": hipot_parsed.get("resistance"),
-            "insulation": hipot_parsed.get("insulation"),
-            "duration": duration,
-        }),
-    );
-
     let final_status = if plc_pass && hipot_pass { "GOOD" } else { "BAD" };
+    let _ = db::repo::set_final_status(execution_id, final_status);
+    let duration = started.elapsed().as_secs_f64();
+    let _ = db::repo::set_total_duration(execution_id, duration);
+
     serde_json::json!({
         "execution_id": execution_id,
         "recipe_id": recipe_id,
@@ -620,6 +686,7 @@ fn run_test_cycle(
         "hipot_data": hipot_parsed,
         "duration": duration,
         "errors": errors,
+        "skipped_electrical": false,
     })
 }
 
@@ -1185,6 +1252,8 @@ fn main() {
             show_touch_keyboard,
             plc_status,
             plc_status_info,
+            plc_emergency_stop,
+            resolve_model_by_serial,
             plc_config_get,
             plc_config_set,
             plc_tags_list,

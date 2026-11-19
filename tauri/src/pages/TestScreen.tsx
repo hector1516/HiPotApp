@@ -60,12 +60,12 @@ export function TestScreen({ phase, recipe, values, limits, onStop }: {
       <div className="stack" style={{ gap: 8 }}>
         <div className="rail-eyebrow">Estado</div>
         <div className="rail-status">
-          <span className={`dot ${isPlc ? 'warn' : 'ok'}`} />
-          <span>Eléctrica {isPlc ? 'midiendo' : 'completada'}</span>
+          <span className={`dot ${isPlc ? 'warn' : ''}`} />
+          <span>Eléctrica {isPlc ? 'midiendo' : 'pendiente'}</span>
         </div>
         <div className="rail-status">
-          <span className={`dot ${!isPlc ? 'warn' : ''}`} />
-          <span>Hipot {!isPlc ? 'midiendo' : 'pendiente'}</span>
+          <span className={`dot ${!isPlc ? 'warn' : 'ok'}`} />
+          <span>Hipot {!isPlc ? 'midiendo' : 'completada'}</span>
         </div>
         <div className="rail-status">
           <span className={`dot ${plc.connected ? 'ok' : 'bad'}`} />
@@ -91,7 +91,7 @@ export function TestScreen({ phase, recipe, values, limits, onStop }: {
   return (
     <SplitLayout aside={aside}>
       <PageHeader
-        eyebrow={isPlc ? 'Fase 1 de 2' : 'Fase 2 de 2'}
+        eyebrow={isPlc ? 'Fase 2 de 2' : 'Fase 1 de 2'}
         title={title}
         subtitle="Lecturas en vivo. Los valores fuera de límite se marcan en rojo."
         actions={<span className="pill accent mono">{mm}:{ss}</span>}
@@ -111,8 +111,8 @@ export function TestScreen({ phase, recipe, values, limits, onStop }: {
           />
         </div>
         <div className="row" style={{ marginTop: 10, gap: 8 }}>
-          <span className={`pill ${isPlc ? 'warn' : 'on'}`}>Eléctrica {isPlc ? 'midiendo' : 'completada'}</span>
-          <span className={`pill ${!isPlc ? 'warn' : ''}`}>Hipot {!isPlc ? 'midiendo' : 'pendiente'}</span>
+          <span className={`pill ${isPlc ? 'warn' : ''}`}>Eléctrica {isPlc ? 'midiendo' : 'pendiente'}</span>
+          <span className={`pill ${!isPlc ? 'warn' : 'on'}`}>Hipot {!isPlc ? 'midiendo' : 'completada'}</span>
         </div>
       </div>
 

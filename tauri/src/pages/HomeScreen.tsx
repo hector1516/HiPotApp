@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { BarcodeInput } from '../components/BarcodeInput';
 import { SplitLayout } from '../components/SplitLayout';
@@ -28,28 +28,44 @@ function EquipmentRow({ label, on, detail }: { label: string; on: boolean | null
 }
 
 export function HomeScreen({
-  step, recipe, serial, batch, error, onScanModel, onScanSerial, onScanBatch,
+  step, recipe, models, selectedModel, serial, batch, error,
+  onSelectModel, onChangeModel, onScanSerial, onScanBatch,
 }: {
   step: number;
   recipe: any;
+  models: any[];
+  selectedModel: string;
   serial: string;
   batch: string;
   error: string;
-  onScanModel: (c: string) => void;
-  onScanSerial: (c: string) => void;
-  onScanBatch: (c: string) => void;
+  onSelectModel: (model: string) => void;
+  onChangeModel: () => void;
+  onScanSerial: (code: string) => void;
+  onScanBatch: (code: string) => void;
 }) {
   const plc = usePLC();
   const hipot = useHipot();
-  const handler = step === 1 ? onScanModel : step === 2 ? onScanSerial : onScanBatch;
+  const [modelChoice, setModelChoice] = useState(selectedModel || models[0]?.model || '');
   const prompt = stepAt(step - 1).prompt;
+
+  useEffect(() => {
+    if (selectedModel && models.some((m: any) => m.model === selectedModel)) setModelChoice(selectedModel);
+  }, [selectedModel, models]);
+
+  useEffect(() => {
+    if ((!modelChoice || !models.some((m: any) => m.model === modelChoice)) && models[0]) {
+      setModelChoice(models[0].model);
+    }
+  }, [models]);
 
   const aside = (
     <>
       <div>
         <div className="rail-eyebrow">Estación de pruebas</div>
         <h2 className="rail-title">Nueva unidad</h2>
-        <p className="rail-sub">Escanea modelo, serie y batch. La prueba inicia automáticamente al leer el batch.</p>
+        <p className="rail-sub">
+          Selecciona el modelo, escanea serie y batch. La prueba inicia automáticamente con el batch.
+        </p>
       </div>
 
       <div className="rail-divider" />
@@ -65,9 +81,14 @@ export function HomeScreen({
       <div className="rail-divider" />
 
       <div className="rail-kpi">
-        <span className="label">Receta</span>
-        <span className="value">{recipe?.model ?? '—'}</span>
+        <span className="label">Modelo</span>
+        <span className="value">{recipe?.model ?? selectedModel ?? '—'}</span>
       </div>
+      {step > 1 && (
+        <button className="btn sm" style={{ width: '100%' }} onClick={onChangeModel}>
+          Cambiar modelo
+        </button>
+      )}
       <div className="rail-kpi">
         <span className="label">Serie</span>
         <span className="value">{serial || '—'}</span>
@@ -103,21 +124,54 @@ export function HomeScreen({
     <SplitLayout aside={aside}>
       <PageHeader
         eyebrow={`Paso ${Math.min(step, AUTO_STEPS.length)} de ${AUTO_STEPS.length}`}
-        title={prompt || 'Procesando unidad'}
-        subtitle="El lector es keyboard-wedge: escanea o usa el teclado en pantalla."
+        title={prompt}
+        subtitle={
+          step === 1
+            ? 'Elige el modelo de la lista de recetas. Se recordará el último usado.'
+            : 'El lector es keyboard-wedge: escanea o usa el teclado en pantalla.'
+        }
       />
 
       {error && <div className="alert">{error}</div>}
 
-      {step <= 3 ? (
-        <motion.div
-          className="card"
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
-        >
+      {step === 1 ? (
+        <motion.div className="card" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+          <div className="field">
+            <label>Modelo / receta</label>
+            <select
+              className="input"
+              value={modelChoice}
+              onChange={e => setModelChoice(e.target.value)}
+              disabled={!models.length}
+            >
+              {models.map((m: any) => (
+                <option key={m.id} value={m.model}>{m.model} — {m.name}</option>
+              ))}
+              {!models.length && <option value="">Sin recetas</option>}
+            </select>
+          </div>
+          <button
+            className="btn primary lg"
+            style={{ marginTop: 14 }}
+            disabled={!modelChoice}
+            onClick={() => onSelectModel(modelChoice)}
+          >
+            Continuar con {modelChoice || 'modelo'}
+          </button>
+          {!models.length && (
+            <div className="alert warn" style={{ marginTop: 14 }}>
+              No hay recetas dadas de alta. Cree una en Configuración → Recetas.
+            </div>
+          )}
+        </motion.div>
+      ) : step <= 3 ? (
+        <motion.div className="card" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
           <div className="scan-zone">
-            <BarcodeInput label="" onScan={handler} autoFocus />
+            <BarcodeInput
+              label=""
+              onScan={step === 2 ? onScanSerial : onScanBatch}
+              autoFocus
+            />
           </div>
           <div className="row" style={{ marginTop: 14, color: 'var(--muted)', fontSize: 12 }}>
             <span className="pill">Enter para confirmar</span>

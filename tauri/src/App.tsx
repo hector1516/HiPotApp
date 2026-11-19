@@ -12,6 +12,8 @@ import { LogPopup } from './components/LogPopup';
 import { HistoryPopup } from './components/HistoryPopup';
 import { ConfigGatePopup } from './components/ConfigGatePopup';
 import { FeedbackHost } from './components/Feedback';
+import { EmergencyStopOverlay } from './components/EmergencyStopOverlay';
+import { useEmergencyStop } from './hooks/useEmergencyStop';
 import VirtualKeyboard from './components/VirtualKeyboard';
 import { Phase } from './styles/theme';
 import { invoke } from '@tauri-apps/api/core';
@@ -45,10 +47,13 @@ export default function App() {
     };
   }, []);
   const [recipe, setRecipe] = useState<any>(null);
+  const [models, setModels] = useState<any[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string>(() => localStorage.getItem('last_model') || '');
   const [serial, setSerial] = useState('');
   const [batch, setBatch] = useState('');
   const [error, setError] = useState('');
   const [execId, setExecId] = useState<number | null>(null);
+  const [testDetail, setTestDetail] = useState<any>(null);
   const [values, setValues] = useState<Record<string, number>>({});
   const [final, setFinal] = useState<'GOOD' | 'BAD'>('GOOD');
   const [t0, setT0] = useState<number>(0);
@@ -59,10 +64,11 @@ export default function App() {
   const [showReprint, setShowReprint] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
-  const [showConfigGate, setShowConfigGate] = useState(false);
+  const [gateTarget, setGateTarget] = useState<'config' | 'manual' | null>(null);
   const [godActive, setGodActive] = useState(false);
   const [adminBatch, setAdminBatch] = useState<string>('');
   const [clock, setClock] = useState('');
+  const estop = useEmergencyStop();
   const timers = useRef<number[]>([]);
 
   React.useEffect(() => {
@@ -74,7 +80,7 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
-  // Fase del ciclo real emitida por Rust (PLC -> Hipot)
+  // Listeners de fase y valores en vivo
   React.useEffect(() => {
     let unlistenPhase: (() => void) | undefined;
     let unlistenValues: (() => void) | undefined;
@@ -83,11 +89,34 @@ export default function App() {
         setPhase('HIPOT_RUNNING');
         setStep(stepNumber('hipot'));
       }
+      if (event.payload === 'PLC_RUNNING') {
+        setPhase('PLC_RUNNING');
+        setStep(stepNumber('plc'));
+      }
     }).then(fn => { unlistenPhase = fn; }).catch(() => {});
     listen<Record<string, number>>('test-values', event => {
       if (event.payload) setValues(event.payload);
     }).then(fn => { unlistenValues = fn; }).catch(() => {});
     return () => { unlistenPhase?.(); unlistenValues?.(); };
+  }, []);
+
+  // Modelos/recetas disponibles y último modelo recordado.
+  React.useEffect(() => {
+    invoke<any[]>('list_recipes').then(list => {
+      const arr = (Array.isArray(list) ? list : []).filter((r: any) => r.is_active !== false);
+      setModels(arr);
+      const last = localStorage.getItem('last_model') || '';
+      if (last && arr.some((r: any) => r.model === last)) {
+        invoke<any>('get_recipe_by_model', { model: last }).then(r => {
+          if (r && r.model) {
+            setRecipe(r);
+            setSelectedModel(last);
+            setStep(stepNumber('serial'));
+            setPhase('LOADED');
+          }
+        }).catch(() => {});
+      }
+    }).catch(() => {});
   }, []);
 
   // Health check del núcleo Rust (sin backend HTTP)
@@ -179,17 +208,35 @@ export default function App() {
   };
   const clearTimers = () => { timers.current.forEach(clearTimeout); timers.current = []; };
 
-  const scanModel = async (code: string) => {
+  const selectModel = async (model: string) => {
     setError(''); setPhase('SCANNING');
     try {
-      await invoke('barcode_scan', { code, barcodeType: 'model', scanOrder: 1 });
-      const r = await invoke<any>('get_recipe_by_model', { model: code });
-      setRecipe(r); setStep(stepNumber('serial')); setPhase('LOADED');
-    } catch { setError(`Receta no encontrada: ${code}`); setPhase('ERROR'); later(() => setPhase('IDLE'), 1500); }
+      const r = await invoke<any>('get_recipe_by_model', { model });
+      if (!r || !r.model) throw new Error('Receta no encontrada');
+      localStorage.setItem('last_model', model);
+      setSelectedModel(model);
+      setRecipe(r);
+      setStep(stepNumber('serial'));
+      setPhase('LOADED');
+    } catch {
+      setError(`Receta no encontrada: ${model}`);
+      setPhase('ERROR');
+      later(() => setPhase('IDLE'), 1500);
+    }
+  };
+  const changeModel = () => {
+    setRecipe(null);
+    setStep(stepNumber('model'));
+    setPhase('IDLE');
   };
   const scanSerial = async (code: string) => {
     setSerial(code);
     await invoke('barcode_scan', { code, barcodeType: 'serial', scanOrder: 2 }).catch(() => {});
+    // Cuando exista la BD externa serial -> modelo, esto lo resolverá solo.
+    const resolved = await invoke<string | null>('resolve_model_by_serial', { serial: code }).catch(() => null);
+    if (resolved && resolved !== recipe?.model) {
+      await selectModel(resolved);
+    }
     setStep(stepNumber('batch')); setPhase('READY');
   };
   const scanBatch = async (code: string) => {
@@ -215,7 +262,7 @@ export default function App() {
       return;
     }
 
-    setStep(stepNumber('plc')); setPhase('PLC_RUNNING'); setView('test');
+    setStep(stepNumber('hipot')); setPhase('HIPOT_RUNNING'); setView('test');
 
     // Voltaje de prueba: primer nivel de la receta (o 120 V).
     const voltage = (() => {
@@ -245,6 +292,7 @@ export default function App() {
       if (r?.error) throw new Error(r.error);
 
       setValues(r?.values ?? {});
+      setTestDetail(r);
       const s = Math.round((Date.now() - start) / 1000);
       setElapsed(`${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`);
       setFinal(r?.final === 'GOOD' ? 'GOOD' : 'BAD');
@@ -272,6 +320,7 @@ export default function App() {
       const s = Math.round((Date.now() - start) / 1000);
       setElapsed(`${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`);
       setError(`Error en prueba: ${String(e?.message ?? e)}`);
+      setTestDetail(null);
       setFinal('BAD');
       setPhase('COMPLETE_BAD');
       setStep(stepNumber('result')); setView('result');
@@ -286,9 +335,10 @@ export default function App() {
       const v = parseInt(c?.result_hold_seconds ?? '10', 10);
       if (!Number.isNaN(v) && v >= 3 && v <= 60) setHoldSeconds(v);
     }).catch(() => {});
-    setView('home'); setStep(stepNumber('model')); setRecipe(null); setSerial(''); setBatch('');
-    setError(''); setPhase('IDLE'); setExecId(null);
-    setValues({});
+    setView('home'); setSerial(''); setBatch('');
+    setError(''); setExecId(null); setValues({}); setTestDetail(null);
+    if (recipe) { setStep(stepNumber('serial')); setPhase('LOADED'); }
+    else { setStep(stepNumber('model')); setPhase('IDLE'); }
   };
 
   const limits: Record<string, { min: number; max: number }> = {};
@@ -327,6 +377,9 @@ export default function App() {
       <Backdrop phase={phase} />
       <UpdateNotification />
       <FeedbackHost />
+      <AnimatePresence>
+        {estop.active && <EmergencyStopOverlay />}
+      </AnimatePresence>
       <VirtualKeyboard visible={kbVisible} layout={kbLayout} onClose={() => setKbVisible(false)} />
 
       <header className="app-topbar">
@@ -346,8 +399,8 @@ export default function App() {
         <button className="btn" onClick={() => setShowHistory(true)}>Historial</button>
         <button className="btn" onClick={() => setShowReprint(true)}>Reimprimir</button>
         <button className="btn" onClick={() => setShowLog(true)}>Log</button>
-        <button className="btn" onClick={() => setView('manual')}>Manual</button>
-        <button className="btn accent" onClick={() => setShowConfigGate(true)} title="Escanea gafete o Ctrl+Shift+K">Configurar</button>
+        <button className="btn" onClick={() => setGateTarget('manual')}>Manual</button>
+        <button className="btn accent" onClick={() => setGateTarget('config')} title="Escanea gafete o Ctrl+Shift+K">Configurar</button>
       </header>
 
       <AnimatePresence>
@@ -378,8 +431,10 @@ export default function App() {
             transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
           >
         {view === 'home' && (
-          <HomeScreen step={step} recipe={recipe} serial={serial} batch={batch} error={error}
-            onScanModel={scanModel} onScanSerial={scanSerial} onScanBatch={scanBatch} />
+          <HomeScreen step={step} recipe={recipe} models={models} selectedModel={selectedModel}
+            serial={serial} batch={batch} error={error}
+            onSelectModel={selectModel} onChangeModel={changeModel}
+            onScanSerial={scanSerial} onScanBatch={scanBatch} />
         )}
         {view === 'test' && (
           <TestScreen phase={phase === 'HIPOT_RUNNING' ? 'HIPOT_RUNNING' : 'PLC_RUNNING'}
@@ -391,8 +446,8 @@ export default function App() {
               { label: 'Modelo', value: recipe?.model ?? '-', ok: null },
               { label: 'Serie', value: serial || '-', ok: null },
               { label: 'Batch', value: batch || '-', ok: null },
-              { label: `Exec #${execId ?? '-'} · PLC`, value: 'PASS', ok: final === 'GOOD' ? true : null },
-              { label: 'Hipot', value: 'PASS', ok: final === 'GOOD' ? true : null },
+              { label: `Exec #${execId ?? '-'} · Hipot`, value: testDetail?.hipot === true ? 'PASS' : testDetail?.hipot === false ? 'FAIL' : '—', ok: testDetail?.hipot ?? null },
+              { label: 'Eléctrica', value: testDetail?.skipped_electrical ? 'OMITIDA' : testDetail?.plc === true ? 'PASS' : testDetail?.plc === false ? 'FAIL' : '—', ok: testDetail?.skipped_electrical ? false : (testDetail?.plc ?? null) },
             ]}
             onNext={reset} onReprint={reprintCurrent} />
         )}
@@ -410,6 +465,9 @@ export default function App() {
           <span className={`dot ${health ? 'ok' : 'bad'}`} />
           {health ? 'SQL Express conectado' : 'SQL Express sin conexión'}
         </span>
+        {estop.connected === false && (
+          <span className="pill warn" style={{ fontSize: 11 }}>Paro de emergencia no disponible</span>
+        )}
         <span className="spacer" />
         <span style={{ color: 'var(--muted-2)', fontSize: 11 }}>Offline-first · Windows 11 · v1.0.31 · Ctrl+Shift+K → GodMode</span>
       </footer>
@@ -417,7 +475,25 @@ export default function App() {
       <ReprintPopup open={showReprint} onClose={() => setShowReprint(false)} />
       <LogPopup open={showLog} onClose={() => setShowLog(false)} />
       <HistoryPopup open={showHistory} onClose={() => setShowHistory(false)} />
-      <ConfigGatePopup open={showConfigGate} onClose={() => setShowConfigGate(false)} onAdmin={(b)=>{ setAdminBatch(b); setView('admin'); }} />
+      <ConfigGatePopup
+        open={gateTarget !== null}
+        target={gateTarget ?? 'config'}
+        onClose={() => setGateTarget(null)}
+        onAdmin={(b) => {
+          const target = gateTarget;
+          setAdminBatch(b);
+          setGateTarget(null);
+          if (target === 'manual') {
+            setView('manual');
+            invoke('log_action', {
+              level: 'INFO', category: 'UI', action: 'manual_access',
+              detail: `Admin ${b}`, success: true,
+            }).catch(() => {});
+          } else {
+            setView('admin');
+          }
+        }}
+      />
 
       <AnimatePresence>
         {godActive && (

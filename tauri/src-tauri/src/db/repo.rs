@@ -709,29 +709,43 @@ pub fn save_hipot_result(execution_id: i64, body: &Value) -> Result<String, Stri
             .get("recipe_id")
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
-        let plc_pass = execution
-            .get("plc_pass_fail")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        let plc_pass = execution.get("plc_pass_fail").and_then(|v| v.as_bool());
         let hipot_pass = body.get("pass").and_then(|v| v.as_bool()).unwrap_or(false);
         let duration = body.get("duration").and_then(|v| v.as_f64()).unwrap_or(0.0);
-        let final_status = if plc_pass && hipot_pass { "GOOD" } else { "BAD" };
 
-        execute(
-            conn,
-            &format!(
-                "UPDATE executions SET hipot_start_time = {}, hipot_end_time = {}, \
-                 hipot_pass_fail = {}, hipot_duration = {}, final_status = {}, total_duration = {} \
-                 WHERE id = {}",
-                now,
-                now,
-                sql_bool(hipot_pass),
-                sql_num(duration),
-                sql_text(final_status),
-                sql_num(duration),
-                execution_id
-            ),
-        )?;
+        let final_status = plc_pass.map(|p| if p && hipot_pass { "GOOD" } else { "BAD" });
+
+        if let Some(status) = final_status {
+            execute(
+                conn,
+                &format!(
+                    "UPDATE executions SET hipot_start_time = {}, hipot_end_time = {}, \
+                     hipot_pass_fail = {}, hipot_duration = {}, final_status = {}, total_duration = {} \
+                     WHERE id = {}",
+                    now,
+                    now,
+                    sql_bool(hipot_pass),
+                    sql_num(duration),
+                    sql_text(status),
+                    sql_num(duration),
+                    execution_id
+                ),
+            )?;
+        } else {
+            execute(
+                conn,
+                &format!(
+                    "UPDATE executions SET hipot_start_time = {}, hipot_end_time = {}, \
+                     hipot_pass_fail = {}, hipot_duration = {}, total_duration = {} WHERE id = {}",
+                    now,
+                    now,
+                    sql_bool(hipot_pass),
+                    sql_num(duration),
+                    sql_num(duration),
+                    execution_id
+                ),
+            )?;
+        }
 
         execute(
             conn,
@@ -751,7 +765,34 @@ pub fn save_hipot_result(execution_id: i64, body: &Value) -> Result<String, Stri
                 now
             ),
         )?;
-        Ok(final_status.to_string())
+
+        Ok(final_status.unwrap_or("PENDING").to_string())
+    })
+}
+
+pub fn set_final_status(execution_id: i64, status: &str) -> Result<(), String> {
+    with_connection(|conn| {
+        execute(
+            conn,
+            &format!(
+                "UPDATE executions SET final_status = {} WHERE id = {}",
+                sql_text(status),
+                execution_id
+            ),
+        )
+    })
+}
+
+pub fn set_total_duration(execution_id: i64, duration: f64) -> Result<(), String> {
+    with_connection(|conn| {
+        execute(
+            conn,
+            &format!(
+                "UPDATE executions SET total_duration = {} WHERE id = {}",
+                sql_num(duration),
+                execution_id
+            ),
+        )
     })
 }
 
