@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { Gauge } from '../components/Gauge';
 import { SplitLayout } from '../components/SplitLayout';
 import { PageHeader } from '../components/PageHeader';
+import { SafetyNote } from '../components/SafetyNote';
 import { usePLC } from '../hooks/usePLC';
 import { useHipot } from '../hooks/useHipot';
 
@@ -96,6 +97,8 @@ export function TestScreen({ phase, recipe, values, limits, onStop }: {
         subtitle="Lecturas en vivo. Los valores fuera de límite se marcan en rojo."
         actions={<span className="pill accent mono">{mm}:{ss}</span>}
       />
+
+      {!isPlc && <SafetyNote />}
 
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>

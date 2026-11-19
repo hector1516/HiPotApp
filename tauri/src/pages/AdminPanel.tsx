@@ -6,6 +6,7 @@ import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { LabelEditor, LObj, objsToTemplate, templateToObjs } from '../components/LabelEditor';
 import { askConfirm, notify } from '../components/Feedback';
+import { SafetyNote } from '../components/SafetyNote';
 
 const TABS = ['Usuarios', 'Recetas', 'PLC', 'Hipot', 'BD', 'Etiquetas', 'Logs', 'IO', 'Manual', 'Sistema'] as const;
 type Tab = (typeof TABS)[number];
@@ -585,7 +586,8 @@ function HipotTab() {
 
   return (
     <div style={{ minWidth: 0 }}>
-      <h2 className="page-title" style={{ marginBottom: 14 }}>Hipot 3865 — RS-232</h2>
+      <h2 className="page-title" style={{ marginBottom: 14 }}>Hipot 3865 - RS-232</h2>
+      <SafetyNote compact />
       {msg && <div className="toast-err" style={{ background: msg.startsWith('Configuración') ? '#e6f4ea' : undefined, borderColor: msg.startsWith('Configuración') ? '#a8d0b4' : undefined, color: msg.startsWith('Configuración') ? 'var(--ok)' : undefined }}>{msg}</div>}
 
       <div className="card" style={{ marginBottom: 10 }}>

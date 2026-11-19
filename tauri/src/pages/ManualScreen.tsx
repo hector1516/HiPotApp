@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { Gauge } from '../components/Gauge';
 import { SplitLayout } from '../components/SplitLayout';
 import { PageHeader } from '../components/PageHeader';
+import { SafetyNote } from '../components/SafetyNote';
 import { useHipot } from '../hooks/useHipot';
 
 type PendingAction = 'START' | 'STOP' | null;
@@ -133,6 +134,7 @@ export function ManualScreen({ onBack }: { onBack: () => void }) {
             <span className="mono" style={{ wordBreak: 'break-all' }}>{hipot.raw || '—'}</span>
           </div>
         )}
+        <SafetyNote compact />
       </div>
 
       <div className="rail-divider" />
