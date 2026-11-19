@@ -113,36 +113,33 @@ El esquema válido para SQL Server está en `tauri/src-tauri/schema.sql`. `docs/
 ### P0-1 — Comandos no registrados (CORREGIDO)
 `main.rs` registraba solo 18 comandos. Faltaban 19, incluidos todos los de recetas, impresión y sync. Se amplió `generate_handler!` a los 37 comandos y `cargo build` compila.
 
-### P0-2 — Nombre de tabla de configuración inconsistente
-- Rust: `configuration` (`main.rs` líneas 27, 45).
-- Python/SQLAlchemy: `configurations` (`models.py` línea 130).
-- `schema.sql`: `configurations`.
+### P0-2 — Nombre de tabla de configuración inconsistente (CORREGIDO)
+- Rust usaba `configuration` (singular).
+- Python/SQLAlchemy y `schema.sql` usan `configurations` (plural).
 
-**Acción:** unificar en `configurations` y crear un módulo único de acceso a datos.
+Se creó `db/schema.rs` con `configurations` como tabla canónica y migración automática `INSERT OR IGNORE ... SELECT ... FROM configuration`. `get_config`/`set_config` ya leen y escriben `configurations`.
 
-### P0-3 — Ruta de BD local inconsistente
+### P0-3 — Ruta de BD local inconsistente (CORREGIDO en Rust)
 - Rust: `%APPDATA%\HiPotApp\hipot_local.db`.
 - Python: junto al `.exe` o `App/python/hipot_local.db`.
-- `db_config.json` solo lo lee Python.
+- `db_config.json` solo lo leía Python.
 
-**Acción:** una sola ruta administrada por Rust (`%APPDATA%\HiPotApp\hipot_local.db`), y `db_config.json` leído por Rust.
+Ahora `db/paths.rs` es la única fuente de rutas. Queda pendiente migrar los datos del sidecar antiguo (Fase 7).
 
-### P0-4 — DDL duplicado
-Cada comando Rust hace `CREATE TABLE IF NOT EXISTS` de sus tablas. Hay ~20 copias del mismo DDL. Si se cambia una columna, hay que cambiarla en 20 sitios.
+### P0-4 — DDL duplicado (CORREGIDO)
+Había ~20 copias del mismo DDL en los comandos. Ahora `db::open()` llama una sola vez a `db::schema::ensure_schema()`.
 
-**Acción:** un módulo `db/schema.rs` con una sola función `ensure_schema(conn)`.
+### P0-5 — `delete_recipe` migrado pero no usado (CORREGIDO)
+`AdminPanel.tsx` ya usa `invoke('delete_recipe')`.
 
-### P0-5 — `delete_recipe` migrado pero no usado
-`AdminPanel.tsx` línea 169 sigue usando `api.del('/recipes/{id}')`.
-
-### P0-6 — `add_user` guarda password vacío
-`AdminPanel.tsx` llama `add_user` con `password: ''`. Hoy el login no usa password, pero si se activa bcrypt hay que corregir el flujo.
+### P0-6 — `add_user` guarda password vacío (ACLARADO)
+El login es **sin contraseña** (solo gafete/batch). Guardar `''` es el comportamiento previsto. Si se activa bcrypt, se hará en Fase 4.
 
 ### P0-7 — Sync incompleto
-`sync_pending` solo copia `executions` y no escribe `sync_log` ni `synced_at`. Python sincroniza 9 tablas (`SyncManager.SYNC_TABLES`).
+`sync_pending` solo copia `executions` y no escribe `sync_log` ni `synced_at`. Python sincroniza 9 tablas (`SyncManager.SYNC_TABLES`). Pendiente en Fase 7.
 
-### P0-8 — Health basado en HTTP
-`App.tsx` marca "Sin conexión" si `GET /health` falla. Al eliminar el sidecar, el indicador debe pasar a un comando Rust `app_health`.
+### P0-8 — Health basado en HTTP (CORREGIDO)
+`App.tsx` y el panel de admin ya usan `invoke('app_health')`; el indicador no depende del sidecar.
 
 ---
 
@@ -191,42 +188,45 @@ Implicaciones que deben quedar explícitas:
 
 > Orden pensado para **no reescribir dos veces**. Primero se estabiliza la base de datos, luego se migran las features sobre esa base, y al final se elimina el sidecar.
 
-### Fase 0 — Fundaciones y correcciones P0 (1–2 sesiones)
+### Fase 0 — Fundaciones y correcciones P0 (COMPLETADA)
 
 - [x] Registrar los 37 comandos en `generate_handler!`.
-- [ ] Crear módulo `db/`:
-  - [ ] `db/mod.rs`: ruta única `%APPDATA%\HiPotApp\hipot_local.db` + `db_config.json`.
-  - [ ] `db/schema.rs`: un solo `ensure_schema()` con el DDL de `schema.sql`.
-  - [ ] `db/config.rs`: `get_config` / `set_config` sobre `configurations`.
-  - [ ] `db/seed.rs`: valores por defecto (`DEFAULT_CONFIGS`), usuario `ADMIN`, plantilla por defecto.
-- [ ] Eliminar los ~20 `CREATE TABLE IF NOT EXISTS` dispersos.
-- [ ] Unificar `configuration` → `configurations`.
-- [ ] Corregir `AdminPanel.tsx` para usar `invoke('delete_recipe')`.
-- [ ] Corregir `add_user` para recibir password real.
-- [ ] Regenerar `docs/schema_mssql.sql` desde `schema.sql`.
+- [x] Crear módulo `db/`:
+  - [x] `db/mod.rs`: `open()` / `init()`.
+  - [x] `db/paths.rs`: ruta única `%APPDATA%\HiPotApp\hipot_local.db` + `db_config.json`.
+  - [x] `db/schema.rs`: un solo `ensure_schema()` con el DDL de 18 tablas.
+  - [x] `db/config.rs`: `get_all` / `get` / `set_many` sobre `configurations`.
+  - [x] `db/seed.rs`: `DEFAULT_CONFIGS`, usuario `ADMIN`, plantilla por defecto.
+- [x] Eliminar los ~20 `CREATE TABLE IF NOT EXISTS` dispersos.
+- [x] Unificar `configuration` → `configurations` con migración automática.
+- [x] Corregir `AdminPanel.tsx` para usar `invoke('delete_recipe')`.
+- [x] Aclarar que el login es sin contraseña (no se requiere bcrypt todavía).
+- [x] Regenerar `docs/schema_mssql.sql` desde `schema.sql`.
+- [x] Test unitario: esquema completo + roundtrip de configuración.
 
-**Criterio de aceptación:** `cargo test` y la app arrancan con una BD vacía, crean las 18 tablas, siembran configuración y el panel de admin lee la misma BD que los comandos.
+**Criterio de aceptación:** `cargo test` y la app arrancan con una BD vacía, crean las 18 tablas, siembran configuración y el panel de admin lee la misma BD que los comandos. **Cumplido.**
 
 ---
 
-### Fase 1 — Salud, estado y fin del "Sin conexión" (1 sesión)
+### Fase 1 — Salud, estado y fin del "Sin conexión" (EN CURSO)
 
 Comandos nuevos:
 
-| Comando | Reemplaza |
-|---|---|
-| `app_health` | `GET /health` |
-| `plc_status` (ya existe) | `GET /status/plc` |
-| `hipot_status` | `GET /status/hipot` |
-| `app_info` | versión, rutas, uptime, estado BD |
+| Comando | Reemplaza | Estado |
+|---|---|---|
+| `app_health` | `GET /health` | ✅ |
+| `plc_status` (ya existe) | `GET /status/plc` | ✅ |
+| `hipot_status` | `GET /status/hipot` | ⏳ Fase 3 |
+| `app_info` | versión, rutas, uptime, estado BD | ⏳ |
 
 Cambios frontend:
 
-- `App.tsx`: health check con `invoke('app_health')` cada 3 s.
-- `useHipot.ts`: `invoke('hipot_status')`.
-- Indicadores de PLC/Hipot/BD con estados `ok / warn / error` y detalle.
+- [x] `App.tsx`: health check con `invoke('app_health')` cada 3 s.
+- [x] `AdminPanel.tsx`: botón "Estado" y "Ver estado completo" usan `app_health`.
+- [ ] `useHipot.ts`: `invoke('hipot_status')` (Fase 3).
+- [ ] Indicadores de PLC/Hipot/BD con estados `ok / warn / error` y detalle.
 
-**Criterio de aceptación:** con el sidecar apagado, la app muestra "Sistema OK" (o el error real de hardware), no "Sin conexión".
+**Criterio de aceptación:** con el sidecar apagado, la app muestra "Sistema OK" (o el error real de hardware), no "Sin conexión". **Cumplido para BD/Rust; Hipot queda en Fase 3.**
 
 ---
 

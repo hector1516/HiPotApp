@@ -2,6 +2,9 @@
 // empaquetado como recurso (todo-en-uno, offline-first).
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod db;
+
+use db::paths::db_path;
 use std::process::{Child, Command};
 use std::sync::Mutex;
 use tauri::{Manager, State, WindowEvent};
@@ -10,39 +13,20 @@ use std::os::windows::process::CommandExt;
 
 const BACKEND_BIN: &str = "hipot-backend-x86_64-pc-windows-msvc.exe";
 
-fn db_path() -> std::path::PathBuf {
-    let base = std::env::var("APPDATA")
-        .map(|d| std::path::PathBuf::from(d).join("HiPotApp"))
-        .unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let _ = std::fs::create_dir_all(&base);
-    base.join("hipot_local.db")
-}
-
 #[tauri::command]
 fn get_config() -> serde_json::Value {
-    let conn = match rusqlite::Connection::open(db_path()) {
-        Ok(c) => c,
-        Err(_) => return serde_json::json!({}),
-    };
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS configuration (config_key TEXT PRIMARY KEY, config_value TEXT)", []);
-    let mut map = serde_json::Map::new();
-    if let Ok(mut stmt) = conn.prepare("SELECT config_key, config_value FROM configuration") {
-        if let Ok(rows) = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))) {
-            for r in rows.flatten() {
-                map.insert(r.0, serde_json::Value::String(r.1));
-            }
-        }
+    match db::open() {
+        Ok(conn) => db::config::get_all(&conn),
+        Err(_) => serde_json::json!({}),
     }
-    serde_json::Value::Object(map)
 }
 
 #[tauri::command]
 fn app_health() -> serde_json::Value {
     // Salud del núcleo Rust (sin HTTP). No sondea hardware para no bloquear la UI.
-    let db_ok = match rusqlite::Connection::open(db_path()) {
-        Ok(c) => c.execute("SELECT 1", []).is_ok(),
-        Err(_) => false,
-    };
+    let db_ok = rusqlite::Connection::open(db_path())
+        .and_then(|conn| conn.query_row("SELECT 1", [], |row| row.get::<_, i64>(0)))
+        .is_ok();
     let cfg = get_config();
     let plc_ip = cfg
         .get("plc_ip")
@@ -66,30 +50,19 @@ fn app_health() -> serde_json::Value {
 
 #[tauri::command]
 fn set_config(values: serde_json::Value) -> String {
-    let conn = match rusqlite::Connection::open(db_path()) {
-        Ok(c) => c,
-        Err(_) => return "error: cannot open db".to_string(),
-    };
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS configuration (config_key TEXT PRIMARY KEY, config_value TEXT)", []);
-    if let Some(obj) = values.as_object() {
-        for (k, v) in obj {
-            let val = v.as_str().unwrap_or(&v.to_string()).to_string();
-            let _ = conn.execute(
-                "INSERT INTO configuration (config_key, config_value) VALUES (?1, ?2) ON CONFLICT(config_key) DO UPDATE SET config_value = excluded.config_value",
-                rusqlite::params![k, val],
-            );
-        }
+    match db::open() {
+        Ok(conn) => match db::config::set_many(&conn, &values) {
+            Ok(_) => "saved".to_string(),
+            Err(e) => format!("error: {}", e),
+        },
+        Err(e) => format!("error: {}", e),
     }
-    "saved".to_string()
 }
 
 #[tauri::command]
 fn read_backend_log() -> String {
-    let log_dir = std::env::var("APPDATA")
-        .map(|d| std::path::PathBuf::from(d).join("HiPotApp"))
-        .unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let log_path = log_dir.join("backend.log");
-    std::fs::read_to_string(&log_path).unwrap_or_else(|_| "No hay log disponible.".to_string())
+    std::fs::read_to_string(db::paths::backend_log_path())
+        .unwrap_or_else(|_| "No hay log disponible.".to_string())
 }
 
 #[tauri::command]
@@ -101,13 +74,9 @@ fn restart_backend(app: tauri::AppHandle) -> String {
     }
     // Find binary
     if let Some(path) = backend_path(&app) {
-        use std::fs::{OpenOptions, create_dir_all};
+        use std::fs::OpenOptions;
         use std::io::Write;
-        let log_dir = std::env::var("APPDATA")
-            .map(|d| std::path::PathBuf::from(d).join("HiPotApp"))
-            .unwrap_or_else(|_| std::path::PathBuf::from("."));
-        let _ = create_dir_all(&log_dir);
-        let log_path = log_dir.join("backend.log");
+        let log_path = db::paths::backend_log_path();
         let stderr_file = OpenOptions::new().create(true).append(true).open(&log_path).ok();
         let mut cmd = Command::new(&path);
         #[cfg(target_os = "windows")]
@@ -329,11 +298,10 @@ fn write_plc_tag(ip: String, rack: u16, slot: u16, db: i64, offset: i64, data_ty
 // --- Recipes (SQLite) ---
 #[tauri::command]
 fn list_recipes() -> serde_json::Value {
-    let conn = match rusqlite::Connection::open(db_path()) {
+    let conn = match db::open() {
         Ok(c) => c,
         Err(_) => return serde_json::json!([]),
     };
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS recipes (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, model TEXT UNIQUE NOT NULL, type TEXT DEFAULT 'current_consumption', product TEXT, voltage_levels TEXT, is_active INTEGER DEFAULT 1, created_at TEXT, updated_at TEXT, modified_by TEXT)", []);
     let mut stmt = match conn.prepare("SELECT id, name, model, type, product, voltage_levels, is_active, created_at, updated_at, modified_by FROM recipes ORDER BY id DESC") {
         Ok(s) => s,
         Err(_) => return serde_json::json!([]),
@@ -363,13 +331,10 @@ fn list_recipes() -> serde_json::Value {
 
 #[tauri::command]
 fn get_recipe_by_model(model: String) -> serde_json::Value {
-    let conn = match rusqlite::Connection::open(db_path()) {
+    let conn = match db::open() {
         Ok(c) => c,
         Err(_) => return serde_json::json!(null),
     };
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS recipes (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, model TEXT UNIQUE NOT NULL, type TEXT DEFAULT 'current_consumption', product TEXT, voltage_levels TEXT, is_active INTEGER DEFAULT 1, created_at TEXT, updated_at TEXT, modified_by TEXT)", []);
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS recipe_components (id INTEGER PRIMARY KEY AUTOINCREMENT, recipe_id INTEGER NOT NULL, name TEXT NOT NULL, voltage TEXT NOT NULL, enabled INTEGER DEFAULT 1, min_value REAL DEFAULT 0, max_value REAL DEFAULT 0, unit TEXT DEFAULT 'A')", []);
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS recipe_totals (id INTEGER PRIMARY KEY AUTOINCREMENT, recipe_id INTEGER NOT NULL, voltage TEXT NOT NULL, min_total REAL NOT NULL, max_total REAL NOT NULL)", []);
 
     // Get recipe
     let recipe = conn.query_row(
@@ -439,13 +404,10 @@ fn get_recipe_by_model(model: String) -> serde_json::Value {
 
 #[tauri::command]
 fn create_recipe(name: String, model: String, type_: String, product: Option<String>, voltage_levels: String, components: serde_json::Value, totals: serde_json::Value, modified_by: Option<String>) -> i64 {
-    let conn = match rusqlite::Connection::open(db_path()) {
+    let conn = match db::open() {
         Ok(c) => c,
         Err(_) => return -1,
     };
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS recipes (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, model TEXT UNIQUE NOT NULL, type TEXT DEFAULT 'current_consumption', product TEXT, voltage_levels TEXT, is_active INTEGER DEFAULT 1, created_at TEXT, updated_at TEXT, modified_by TEXT)", []);
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS recipe_components (id INTEGER PRIMARY KEY AUTOINCREMENT, recipe_id INTEGER NOT NULL, name TEXT NOT NULL, voltage TEXT NOT NULL, enabled INTEGER DEFAULT 1, min_value REAL DEFAULT 0, max_value REAL DEFAULT 0, unit TEXT DEFAULT 'A')", []);
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS recipe_totals (id INTEGER PRIMARY KEY AUTOINCREMENT, recipe_id INTEGER NOT NULL, voltage TEXT NOT NULL, min_total REAL NOT NULL, max_total REAL NOT NULL)", []);
 
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     conn.execute(
@@ -488,7 +450,7 @@ fn create_recipe(name: String, model: String, type_: String, product: Option<Str
 
 #[tauri::command]
 fn delete_recipe(id: i64) -> String {
-    let conn = match rusqlite::Connection::open(db_path()) {
+    let conn = match db::open() {
         Ok(c) => c,
         Err(_) => return "error".to_string(),
     };
@@ -501,11 +463,10 @@ fn delete_recipe(id: i64) -> String {
 // --- Operators & Users (SQLite) ---
 #[tauri::command]
 fn list_operators() -> serde_json::Value {
-    let conn = match rusqlite::Connection::open(db_path()) {
+    let conn = match db::open() {
         Ok(c) => c,
         Err(_) => return serde_json::json!([]),
     };
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS operators (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, employee_id TEXT UNIQUE NOT NULL, is_active INTEGER DEFAULT 1, created_at TEXT)", []);
     let mut stmt = match conn.prepare("SELECT id, name, employee_id, is_active, created_at FROM operators ORDER BY id DESC") {
         Ok(s) => s,
         Err(_) => return serde_json::json!([]),
@@ -526,11 +487,10 @@ fn list_operators() -> serde_json::Value {
 
 #[tauri::command]
 fn add_operator(name: String, employee_id: String) -> i64 {
-    let conn = match rusqlite::Connection::open(db_path()) {
+    let conn = match db::open() {
         Ok(c) => c,
         Err(_) => return -1,
     };
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS operators (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, employee_id TEXT UNIQUE NOT NULL, is_active INTEGER DEFAULT 1, created_at TEXT)", []);
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_default();
     conn.execute(
         "INSERT INTO operators (name, employee_id, is_active, created_at) VALUES (?1, ?2, 1, ?3)",
@@ -541,11 +501,10 @@ fn add_operator(name: String, employee_id: String) -> i64 {
 
 #[tauri::command]
 fn list_users() -> serde_json::Value {
-    let conn = match rusqlite::Connection::open(db_path()) {
+    let conn = match db::open() {
         Ok(c) => c,
         Err(_) => return serde_json::json!([]),
     };
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT DEFAULT 'operator', is_active INTEGER DEFAULT 1, created_at TEXT)", []);
     let mut stmt = match conn.prepare("SELECT id, username, role, is_active, created_at FROM users ORDER BY id DESC") {
         Ok(s) => s,
         Err(_) => return serde_json::json!([]),
@@ -566,11 +525,10 @@ fn list_users() -> serde_json::Value {
 
 #[tauri::command]
 fn add_user(username: String, password: String, role: String) -> i64 {
-    let conn = match rusqlite::Connection::open(db_path()) {
+    let conn = match db::open() {
         Ok(c) => c,
         Err(_) => return -1,
     };
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT DEFAULT 'operator', is_active INTEGER DEFAULT 1, created_at TEXT)", []);
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_default();
     // password hashing skipped for now (use bcrypt crate later)
     let hash = password.clone();
@@ -583,7 +541,7 @@ fn add_user(username: String, password: String, role: String) -> i64 {
 
 #[tauri::command]
 fn delete_user(id: i64) -> String {
-    let conn = match rusqlite::Connection::open(db_path()) {
+    let conn = match db::open() {
         Ok(c) => c,
         Err(_) => return "error".to_string(),
     };
@@ -594,12 +552,10 @@ fn delete_user(id: i64) -> String {
 // --- Executions (SQLite) ---
 #[tauri::command]
 fn start_execution(recipe_id: i64, operator_id: Option<i64>, batch: Option<String>, serial_number: Option<String>) -> i64 {
-    let conn = match rusqlite::Connection::open(db_path()) {
+    let conn = match db::open() {
         Ok(c) => c,
         Err(_) => return -1,
     };
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS executions (id INTEGER PRIMARY KEY AUTOINCREMENT, recipe_id INTEGER, operator_id INTEGER, batch_id INTEGER, serial_number TEXT, plc_start_time TEXT, plc_end_time TEXT, plc_pass_fail INTEGER, plc_duration REAL, hipot_start_time TEXT, hipot_end_time TEXT, hipot_pass_fail INTEGER, hipot_duration REAL, final_status TEXT, total_duration REAL, created_at TEXT, synced_to_remote INTEGER DEFAULT 0)", []);
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS batches (id INTEGER PRIMARY KEY AUTOINCREMENT, batch_number TEXT UNIQUE NOT NULL, operator_id INTEGER, scanned_at TEXT)", []);
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_default();
     let mut batch_id: Option<i64> = None;
     if let Some(b) = batch {
@@ -625,12 +581,10 @@ fn start_execution(recipe_id: i64, operator_id: Option<i64>, batch: Option<Strin
 
 #[tauri::command]
 fn save_plc_result(eid: i64, passed: bool, readings: serde_json::Value) -> String {
-    let conn = match rusqlite::Connection::open(db_path()) {
+    let conn = match db::open() {
         Ok(c) => c,
         Err(_) => return "error".to_string(),
     };
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS executions (id INTEGER PRIMARY KEY AUTOINCREMENT, recipe_id INTEGER, operator_id INTEGER, batch_id INTEGER, serial_number TEXT, plc_start_time TEXT, plc_end_time TEXT, plc_pass_fail INTEGER, plc_duration REAL, hipot_start_time TEXT, hipot_end_time TEXT, hipot_pass_fail INTEGER, hipot_duration REAL, final_status TEXT, total_duration REAL, created_at TEXT, synced_to_remote INTEGER DEFAULT 0)", []);
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS plc_readings (id INTEGER PRIMARY KEY AUTOINCREMENT, execution_id INTEGER, recipe_id INTEGER, component_name TEXT, voltage TEXT, tag_name TEXT, value REAL, min_limit REAL, max_limit REAL, is_pass INTEGER)", []);
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_default();
     // update execution
     let ex = conn.query_row("SELECT plc_start_time FROM executions WHERE id = ?1", rusqlite::params![eid], |row| row.get::<_, Option<String>>(0));
@@ -666,12 +620,10 @@ fn save_plc_result(eid: i64, passed: bool, readings: serde_json::Value) -> Strin
 
 #[tauri::command]
 fn save_hipot_result(eid: i64, body: serde_json::Value) -> String {
-    let conn = match rusqlite::Connection::open(db_path()) {
+    let conn = match db::open() {
         Ok(c) => c,
         Err(_) => return "error".to_string(),
     };
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS executions (id INTEGER PRIMARY KEY AUTOINCREMENT, recipe_id INTEGER, operator_id INTEGER, batch_id INTEGER, serial_number TEXT, plc_start_time TEXT, plc_end_time TEXT, plc_pass_fail INTEGER, plc_duration REAL, hipot_start_time TEXT, hipot_end_time TEXT, hipot_pass_fail INTEGER, hipot_duration REAL, final_status TEXT, total_duration REAL, created_at TEXT, synced_to_remote INTEGER DEFAULT 0)", []);
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS hipot_results (id INTEGER PRIMARY KEY AUTOINCREMENT, execution_id INTEGER, recipe_id INTEGER, voltage REAL, current REAL, resistance REAL, insulation_resistance REAL, test_duration REAL, is_pass INTEGER)", []);
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_default();
     let hipot_pass = body.get("pass").and_then(|v| v.as_bool()).unwrap_or(false);
     let voltage = body.get("voltage").and_then(|v| v.as_f64());
@@ -695,11 +647,10 @@ fn save_hipot_result(eid: i64, body: serde_json::Value) -> String {
 
 #[tauri::command]
 fn list_executions(limit: i64) -> serde_json::Value {
-    let conn = match rusqlite::Connection::open(db_path()) {
+    let conn = match db::open() {
         Ok(c) => c,
         Err(_) => return serde_json::json!([]),
     };
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS executions (id INTEGER PRIMARY KEY AUTOINCREMENT, recipe_id INTEGER, operator_id INTEGER, batch_id INTEGER, serial_number TEXT, plc_start_time TEXT, plc_end_time TEXT, plc_pass_fail INTEGER, plc_duration REAL, hipot_start_time TEXT, hipot_end_time TEXT, hipot_pass_fail INTEGER, hipot_duration REAL, final_status TEXT, total_duration REAL, created_at TEXT, synced_to_remote INTEGER DEFAULT 0)", []);
     let mut stmt = match conn.prepare("SELECT id, recipe_id, serial_number, plc_pass_fail, hipot_pass_fail, final_status, created_at FROM executions ORDER BY id DESC LIMIT ?1") {
         Ok(s) => s,
         Err(_) => return serde_json::json!([]),
@@ -722,13 +673,10 @@ fn list_executions(limit: i64) -> serde_json::Value {
 
 #[tauri::command]
 fn update_recipe(id: i64, name: String, model: String, type_: String, product: Option<String>, voltage_levels: String, components: serde_json::Value, totals: serde_json::Value, modified_by: Option<String>) -> String {
-    let conn = match rusqlite::Connection::open(db_path()) {
+    let conn = match db::open() {
         Ok(c) => c,
         Err(_) => return "error".to_string(),
     };
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS recipes (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, model TEXT UNIQUE NOT NULL, type TEXT DEFAULT 'current_consumption', product TEXT, voltage_levels TEXT, is_active INTEGER DEFAULT 1, created_at TEXT, updated_at TEXT, modified_by TEXT)", []);
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS recipe_components (id INTEGER PRIMARY KEY AUTOINCREMENT, recipe_id INTEGER NOT NULL, name TEXT NOT NULL, voltage TEXT NOT NULL, enabled INTEGER DEFAULT 1, min_value REAL DEFAULT 0, max_value REAL DEFAULT 0, unit TEXT DEFAULT 'A')", []);
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS recipe_totals (id INTEGER PRIMARY KEY AUTOINCREMENT, recipe_id INTEGER NOT NULL, voltage TEXT NOT NULL, min_total REAL NOT NULL, max_total REAL NOT NULL)", []);
 
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_default();
     conn.execute(
@@ -827,7 +775,7 @@ fn ensure_remote_tables(conn_str: String) -> String {
 fn sync_pending(remote_conn_str: String) -> String {
     use odbc_api::Environment;
     // Read pending executions from local SQLite
-    let local_conn = match rusqlite::Connection::open(db_path()) {
+    let local_conn = match db::open() {
         Ok(c) => c,
         Err(_) => return "error: cannot open local db".to_string(),
     };
@@ -917,11 +865,10 @@ fn print_zpl_windows(printer_name: String, zpl: String) -> String {
 // --- Logs (SQLite) ---
 #[tauri::command]
 fn list_logs(category: Option<String>, level: Option<String>, q: Option<String>, limit: i64) -> serde_json::Value {
-    let conn = match rusqlite::Connection::open(db_path()) {
+    let conn = match db::open() {
         Ok(c) => c,
         Err(_) => return serde_json::json!([]),
     };
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS app_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, level TEXT, category TEXT, action TEXT, detail TEXT, execution_id INTEGER, user_id INTEGER, value_sent TEXT, value_received TEXT, duration_ms INTEGER, success INTEGER, error_message TEXT)", []);
     let mut sql = "SELECT id, timestamp, level, category, action, detail, execution_id, value_sent, value_received, duration_ms, success, error_message FROM app_logs WHERE 1=1".to_string();
     if let Some(c) = &category { if !c.is_empty() { sql.push_str(&format!(" AND category = '{}'", c.replace("'", "''"))); } }
     if let Some(l) = &level { if !l.is_empty() { sql.push_str(&format!(" AND level = '{}'", l.replace("'", "''"))); } }
@@ -954,11 +901,10 @@ fn list_logs(category: Option<String>, level: Option<String>, q: Option<String>,
 
 #[tauri::command]
 fn log_action(level: String, category: String, action: String, detail: Option<String>, execution_id: Option<i64>, value_sent: Option<String>, value_received: Option<String>, duration_ms: Option<i64>, success: Option<bool>, error_message: Option<String>) -> i64 {
-    let conn = match rusqlite::Connection::open(db_path()) {
+    let conn = match db::open() {
         Ok(c) => c,
         Err(_) => return -1,
     };
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS app_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, level TEXT, category TEXT, action TEXT, detail TEXT, execution_id INTEGER, user_id INTEGER, value_sent TEXT, value_received TEXT, duration_ms INTEGER, success INTEGER, error_message TEXT)", []);
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_default();
     conn.execute(
         "INSERT INTO app_logs (timestamp, level, category, action, detail, execution_id, value_sent, value_received, duration_ms, success, error_message) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
@@ -1042,7 +988,6 @@ fn canvas_to_zpl(template_json: String, data: serde_json::Value) -> String {
     format!("{}\n^XZ", zpl)
 }
 
-const DEFAULT_TEMPLATE_JSON: &str = r##"{"label":{"width_mm":100,"height_mm":60,"bg_color":"#FFFFFF"},"objects":[{"id":"t1","type":"text","x":50,"y":20,"content":"HIPOT - RESULTADO","font_size":28,"bold":true},{"id":"t2","type":"text","x":50,"y":60,"content":"Modelo: {modelo}","font_size":18},{"id":"t3","type":"text","x":50,"y":85,"content":"Serie: {serie}","font_size":18},{"id":"t4","type":"text","x":50,"y":115,"content":"Estado: {estado}","font_size":20,"bold":true},{"id":"b1","type":"barcode","x":50,"y":300,"data_source":"{modelo}-{serie}-{batch}","height":80},{"id":"q1","type":"qrcode","x":400,"y":280,"size":100,"data_source":"{modelo}|{serie}|{batch}|{estado}"}]}"##;
 
 #[tauri::command]
 fn print_test_zebra(printer_ip: String, printer_port: u16, printer_name: String) -> String {
@@ -1050,7 +995,7 @@ fn print_test_zebra(printer_ip: String, printer_port: u16, printer_name: String)
         "model": "TEST", "serial_number": "12345", "batch_number": "B001",
         "final_status": "GOOD", "date": "", "time": ""
     });
-    let zpl = canvas_to_zpl(DEFAULT_TEMPLATE_JSON.to_string(), data);
+    let zpl = canvas_to_zpl(db::seed::DEFAULT_TEMPLATE_JSON.to_string(), data);
     if !printer_ip.is_empty() {
         print_zpl_ethernet(printer_ip, printer_port, zpl)
     } else {
@@ -1060,7 +1005,7 @@ fn print_test_zebra(printer_ip: String, printer_port: u16, printer_name: String)
 
 #[tauri::command]
 fn reprint_zebra(eid: i64, printer_ip: String, printer_port: u16, printer_name: String) -> String {
-    let conn = match rusqlite::Connection::open(db_path()) {
+    let conn = match db::open() {
         Ok(c) => c,
         Err(_) => return "error: cannot open db".to_string(),
     };
@@ -1078,7 +1023,7 @@ fn reprint_zebra(eid: i64, printer_ip: String, printer_port: u16, printer_name: 
         "batch_number": "", "final_status": status.unwrap_or_default(),
         "date": "", "time": ""
     });
-    let zpl = canvas_to_zpl(DEFAULT_TEMPLATE_JSON.to_string(), data);
+    let zpl = canvas_to_zpl(db::seed::DEFAULT_TEMPLATE_JSON.to_string(), data);
     if !printer_ip.is_empty() {
         print_zpl_ethernet(printer_ip, printer_port, zpl)
     } else {
@@ -1088,7 +1033,7 @@ fn reprint_zebra(eid: i64, printer_ip: String, printer_port: u16, printer_name: 
 
 #[tauri::command]
 fn duplicate_recipe(id: i64, new_model: String) -> i64 {
-    let conn = match rusqlite::Connection::open(db_path()) {
+    let conn = match db::open() {
         Ok(c) => c,
         Err(_) => return -1,
     };
@@ -1231,16 +1176,14 @@ fn main() {
         ])
         .manage(Backend(Mutex::new(None)))
         .setup(|app| {
+            // Esquema + seed una sola vez, antes de que la UI llame comandos.
+            db::init();
             match backend_path(app.handle()) {
                 Some(path) => {
                     // Redirigir stderr a un archivo de log para diagnóstico
-                    use std::fs::{OpenOptions, create_dir_all};
+                    use std::fs::OpenOptions;
                     use std::io::Write;
-                    let log_dir = std::env::var("APPDATA")
-                        .map(|d| std::path::PathBuf::from(d).join("HiPotApp"))
-                        .unwrap_or_else(|_| std::path::PathBuf::from("."));
-                    let _ = create_dir_all(&log_dir);
-                    let log_path = log_dir.join("backend.log");
+                    let log_path = db::paths::backend_log_path();
                     let stderr_file = OpenOptions::new()
                         .create(true).append(true).open(&log_path).ok();
                     let mut cmd = Command::new(&path);
@@ -1268,13 +1211,9 @@ fn main() {
                         "[hipot] backend no encontrado; arráncalo manual: uvicorn App.python.main:app"
                     );
                     // Escribir en log
-                    use std::fs::{OpenOptions, create_dir_all};
-                    let log_dir = std::env::var("APPDATA")
-                        .map(|d| std::path::PathBuf::from(d).join("HiPotApp"))
-                        .unwrap_or_else(|_| std::path::PathBuf::from("."));
-                    let _ = create_dir_all(&log_dir);
+                    use std::fs::OpenOptions;
                     use std::io::Write;
-                    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(log_dir.join("backend.log")) {
+                    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(db::paths::backend_log_path()) {
                         let ts = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
                             .map(|d| d.as_secs().to_string())
@@ -1290,14 +1229,14 @@ fn main() {
                     let cfg = get_config();
                     let server = cfg.get("sql_server").and_then(|v| v.as_str()).unwrap_or("");
                     if !server.is_empty() {
-                        let db = cfg.get("sql_database").and_then(|v| v.as_str()).unwrap_or("HiPotDB_Central");
+                        let db_name = cfg.get("sql_database").and_then(|v| v.as_str()).unwrap_or("HiPotDB_Central");
                         let user = cfg.get("sql_user").and_then(|v| v.as_str()).unwrap_or("");
                         let pwd = cfg.get("sql_password").and_then(|v| v.as_str()).unwrap_or("");
                         let driver = "ODBC Driver 17 for SQL Server";
                         let conn_str = if user.is_empty() {
-                            format!("Driver={{{}}};Server={};Database={};Trusted_Connection=yes;", driver, server, db)
+                            format!("Driver={{{}}};Server={};Database={};Trusted_Connection=yes;", driver, server, db_name)
                         } else {
-                            format!("Driver={{{}}};Server={};Database={};Uid={};Pwd={};", driver, server, db, user, pwd)
+                            format!("Driver={{{}}};Server={};Database={};Uid={};Pwd={};", driver, server, db_name, user, pwd)
                         };
                         let _ = sync_pending(conn_str);
                     }

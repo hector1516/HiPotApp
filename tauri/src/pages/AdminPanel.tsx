@@ -166,7 +166,7 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
   };
   const doDelete=async(r:any)=>{
     if(!confirm(`Borrar receta ${r.model} — ${r.name}?`)) return;
-    await api.del(`/recipes/${r.id}`); setMsg(`Borrada ${r.model}`); load();
+    await invoke('delete_recipe', { id: r.id }); setMsg(`Borrada ${r.model}`); load();
   };
   const doDup=async(r:any)=>{
     const model=prompt(`Modelo para la copia de ${r.model}:`, `${r.model}-COPIA`);
