@@ -274,15 +274,15 @@ pub fn write_q(c: &mut PlcClient, q: &str, value: bool) -> Result<(), String> {
     c.ab_write(off, 1, &mut buf).map_err(|e| e.to_string())
 }
 
-pub fn read_i(c: &mut PlcClient, i: &str) -> bool {
-    let (off, bit) = match parse_i(i) {
-        Ok(v) => v,
-        Err(_) => return false,
-    };
+pub fn read_i_checked(c: &mut PlcClient, i: &str) -> Result<bool, String> {
+    let (off, bit) = parse_i(i)?;
     let mut buf = vec![0u8; 1];
-    c.eb_read(off, 1, &mut buf)
-        .map(|_| ((buf[0] >> bit) & 1) == 1)
-        .unwrap_or(false)
+    c.eb_read(off, 1, &mut buf).map_err(|e| e.to_string())?;
+    Ok(((buf[0] >> bit) & 1) == 1)
+}
+
+pub fn read_i(c: &mut PlcClient, i: &str) -> bool {
+    read_i_checked(c, i).unwrap_or(false)
 }
 
 pub fn read_ia(c: &mut PlcClient, ia: &str) -> f64 {

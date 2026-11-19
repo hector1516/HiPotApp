@@ -206,12 +206,19 @@ fn plc_status_info() -> serde_json::Value {
         });
     }
     match plc::connect(&cfg, 1500) {
-        Ok(_) => serde_json::json!({
-            "connected": true, "enabled": true, "configured": true,
-            "ip": cfg.ip, "rack": cfg.rack, "slot": cfg.slot
-        }),
+        Ok(mut client) => match plc::read_i_checked(&mut client, "I0.0") {
+            Ok(_) => serde_json::json!({
+                "connected": true, "enabled": true, "configured": true, "read_ok": true,
+                "ip": cfg.ip, "rack": cfg.rack, "slot": cfg.slot
+            }),
+            Err(e) => serde_json::json!({
+                "connected": false, "enabled": true, "configured": true, "read_ok": false,
+                "ip": cfg.ip, "rack": cfg.rack, "slot": cfg.slot,
+                "error": format!("Conectó al PLC pero no pudo leer I0.0: {}", e)
+            }),
+        },
         Err(e) => serde_json::json!({
-            "connected": false, "enabled": true, "configured": true,
+            "connected": false, "enabled": true, "configured": true, "read_ok": false,
             "ip": cfg.ip, "rack": cfg.rack, "slot": cfg.slot, "error": e
         }),
     }
@@ -222,13 +229,20 @@ fn plc_probe() -> serde_json::Value {
     let cfg = plc_cfg();
     let enabled = config_flag("plc_enabled");
     match plc::connect(&cfg, 1500) {
-        Ok(_) => serde_json::json!({
-            "connected": true, "enabled": enabled, "ip": cfg.ip,
-            "rack": cfg.rack, "slot": cfg.slot
-        }),
+        Ok(mut client) => match plc::read_i_checked(&mut client, "I0.0") {
+            Ok(raw) => serde_json::json!({
+                "connected": true, "enabled": enabled, "read_ok": true,
+                "ip": cfg.ip, "rack": cfg.rack, "slot": cfg.slot, "raw_i0_0": raw
+            }),
+            Err(e) => serde_json::json!({
+                "connected": false, "enabled": enabled, "read_ok": false,
+                "ip": cfg.ip, "rack": cfg.rack, "slot": cfg.slot,
+                "error": format!("Conectó al PLC pero no pudo leer I0.0: {}", e)
+            }),
+        },
         Err(e) => serde_json::json!({
-            "connected": false, "enabled": enabled, "ip": cfg.ip,
-            "rack": cfg.rack, "slot": cfg.slot, "error": e
+            "connected": false, "enabled": enabled, "read_ok": false,
+            "ip": cfg.ip, "rack": cfg.rack, "slot": cfg.slot, "error": e
         }),
     }
 }
@@ -260,17 +274,26 @@ fn plc_emergency_stop() -> serde_json::Value {
         });
     }
     match plc::connect(&cfg, 800) {
-        Ok(mut client) => {
-            let raw = plc::read_i(&mut client, &address);
-            let active = if nc { !raw } else { raw };
-            serde_json::json!({
-                "active": active,
-                "raw": raw,
+        Ok(mut client) => match plc::read_i_checked(&mut client, &address) {
+            Ok(raw) => {
+                let active = if nc { !raw } else { raw };
+                serde_json::json!({
+                    "active": active,
+                    "raw": raw,
+                    "address": address,
+                    "connected": true,
+                    "inverted": nc,
+                })
+            }
+            Err(e) => serde_json::json!({
+                "active": false,
+                "raw": null,
                 "address": address,
-                "connected": true,
+                "connected": false,
                 "inverted": nc,
-            })
-        }
+                "error": format!("No se pudo leer {}: {}", address, e),
+            }),
+        },
         Err(e) => serde_json::json!({
             "active": false,
             "raw": null,
@@ -392,9 +415,17 @@ fn plc_io_status() -> serde_json::Value {
     }
     match plc::connect(&cfg, 1500) {
         Ok(mut c) => {
+            let read_test = plc::read_i_checked(&mut c, "I0.0");
             let mut v = plc::read_io(&mut c);
             if let Some(obj) = v.as_object_mut() {
                 obj.insert("connected".to_string(), serde_json::json!(true));
+                obj.insert("read_ok".to_string(), serde_json::json!(read_test.is_ok()));
+                if let Err(e) = read_test {
+                    obj.insert(
+                        "error".to_string(),
+                        serde_json::json!(format!("Conectó pero no pudo leer I0.0: {}", e)),
+                    );
+                }
             }
             v
         }

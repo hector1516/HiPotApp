@@ -278,6 +278,16 @@ export default function App() {
       setPhase('ERROR');
       return;
     }
+    if (estop.enabled === false) {
+      setError('PLC deshabilitado. Habilítelo en Configuración → PLC antes de iniciar una prueba.');
+      setPhase('ERROR');
+      return;
+    }
+    if (estop.connected !== true) {
+      setError('PLC sin conexión o sin lectura de entradas. Revise Configuración → PLC y el Monitor IO.');
+      setPhase('ERROR');
+      return;
+    }
     if (!recipe?.id) {
       setError('No hay receta cargada. Escanea el modelo primero.');
       setPhase('ERROR');
@@ -551,7 +561,7 @@ export default function App() {
           <span className="pill warn" style={{ fontSize: 11 }}>Paro de emergencia no disponible</span>
         )}
         <span className="spacer" />
-        <span style={{ color: 'var(--muted-2)', fontSize: 11 }}>Offline-first · Windows 11 · v1.0.37 · Ctrl+Shift+K → GodMode</span>
+        <span style={{ color: 'var(--muted-2)', fontSize: 11 }}>Offline-first · Windows 11 · v1.0.38 · Ctrl+Shift+K → GodMode</span>
       </footer>
 
       <ReprintPopup open={showReprint} onClose={() => setShowReprint(false)} />
