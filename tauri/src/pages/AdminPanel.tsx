@@ -43,12 +43,12 @@ function UsersTab(){
   const [q,setQ]=useState('');
   const [editing,setEditing]=useState<null|{id:number|null,username:string,role:'operator'|'admin',is_active:boolean}>(null);
   const [viewPerm,setViewPerm]=useState<any|null>(null);
-  const load=()=>api.get('/users').then(setUsers).catch(()=>setUsers([]));
+  const load=()=>invoke<any>('list_users').then(setUsers).catch(()=>api.get('/users').then(setUsers).catch(()=>setUsers([])));
   useEffect(()=>{load();},[]);
   const rows=users.filter(u=>!q||u.username.includes(q.toUpperCase()));
   const doDelete=async(u:any)=>{
     if(!confirm(`Borrar usuario ${u.username}?`)) return;
-    try{ await api.del(`/users/${u.id}`); setMsg(`Borrado ${u.username}`); load(); }catch(e:any){ setMsg(String(e?.message??e)); }
+    try{ await invoke('delete_user', { id: u.id }); setMsg(`Borrado ${u.username}`); load(); }catch(e:any){ setMsg(String(e?.message??e)); }
   };
   const doSave=async()=>{
     if(!editing) return;
@@ -57,9 +57,8 @@ function UsersTab(){
     try{
       if(editing.id){ await api.put(`/users/${editing.id}`,payload); setMsg('Usuario actualizado'); }
       else {
-        await api.post('/auth/register',{username:payload.username,password:'',role:payload.role});
-        if(!payload.is_active) await api.put(`/users/${(await api.get('/users')).find((x:any)=>x.username===payload.username)?.id}`,{is_active:false});
-        setMsg('Usuario creado — gafete listo');
+        await invoke('add_user', { username: payload.username, password: '', role: payload.role });
+        setMsg('Usuario creado - gafete listo');
       }
       setEditing(null); load();
     }catch(e:any){ setMsg(String(e?.message??e)); }
