@@ -523,7 +523,18 @@ function DbTab() {
       <h2 style={{ margin: '0 0 10px 0', fontSize: 16 }}>Base de datos</h2>
       <div className="card" style={{ marginBottom: 10 }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button className="btn primary" onClick={() => api.post('/admin/sync-now').then(r => { setLog(JSON.stringify(r)); load(); })}>Sync ahora</button>
+          <button className="btn primary" onClick={async () => {
+            try {
+              const driver = 'ODBC Driver 17 for SQL Server';
+              const server = cfg.sql_server || '192.168.1.200';
+              const db = cfg.sql_database || 'HiPotDB_Central';
+              const user = cfg.sql_user || '';
+              const pwd = cfg.sql_password || '';
+              const connStr = user ? `Driver={${driver}};Server=${server};Database=${db};Uid=${user};Pwd=${pwd};` : `Driver={${driver}};Server=${server};Database=${db};Trusted_Connection=yes;`;
+              const r = await invoke<string>('sync_pending', { remoteConnStr: connStr });
+              setLog(r); load();
+            } catch (e: any) { setLog(String(e?.message || e)); }
+          }}>Sync ahora (Rust)</button>
           <button className="btn" onClick={() => api.get('/health').then(r => setLog(JSON.stringify(r, null, 2)))}>Estado</button>
         </div>
         {log && <pre style={{ marginTop: 8, fontSize: 12, background: '#f1f5f9', padding: 8, borderRadius: 6, overflow: 'auto' }}>{log}</pre>}
