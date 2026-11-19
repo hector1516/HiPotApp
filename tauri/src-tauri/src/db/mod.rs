@@ -36,6 +36,7 @@ pub fn init() {
     if let Err(e) = seed_express() {
         eprintln!("[db] seed SQL Express: {}", e);
     }
+    let _ = repo::logs_prune(30, 5000);
 }
 
 fn seed_express() -> Result<(), String> {

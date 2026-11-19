@@ -675,6 +675,14 @@ function LogsTab() {
           <select className="input" style={{ maxWidth: 130, flex: '1 1 110px' }} value={level} onChange={e => setLevel(e.target.value)}><option value="">Todos</option>{['DEBUG','INFO','WARN','ERROR'].map(c => <option key={c} value={c}>{c}</option>)}</select>
           <input className="input" placeholder="Buscar…" value={q} onChange={e => setQ(e.target.value)} style={{ flex: '1 1 160px', minWidth: 0 }} />
           <button className="btn primary" style={{ flexShrink: 0 }} onClick={load}>Buscar</button>
+          <button className="btn" style={{ flexShrink: 0 }} onClick={async () => {
+            if (!confirm('¿Eliminar logs con más de 30 días y conservar solo los últimos 5000?')) return;
+            try {
+              const r = await invoke<any>('logs_prune', { days: 30, keep: 5000 });
+              alert(`Logs restantes: ${r.remaining ?? '?'}`);
+              load();
+            } catch (e: any) { alert('Error: ' + (e?.message || e)); }
+          }}>Limpiar antiguos</button>
         </div>
       </div>
       <div className="card" style={{ maxHeight: 420, overflow: 'auto', fontSize: 12, minWidth: 0 }}>

@@ -1034,6 +1034,11 @@ fn log_action(level: String, category: String, action: String, detail: Option<St
 }
 
 #[tauri::command]
+fn logs_prune(days: Option<i64>, keep: Option<i64>) -> Result<serde_json::Value, String> {
+    db::repo::logs_prune(days.unwrap_or(30), keep.unwrap_or(5000))
+}
+
+#[tauri::command]
 fn canvas_to_zpl(template_json: String, data: serde_json::Value) -> String {
     let t: serde_json::Value = match serde_json::from_str(&template_json) {
         Ok(v) => v,
@@ -1166,6 +1171,12 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .invoke_handler(tauri::generate_handler![
             open_external,
             get_config,
@@ -1222,6 +1233,7 @@ fn main() {
             list_executions,
             list_logs,
             log_action,
+            logs_prune,
             template_list,
             template_get,
             template_create,
@@ -1285,10 +1297,18 @@ fn main() {
             // Splash -> main: temporizado en Rust para que nunca se atore.
             let handle = app.handle().clone();
             std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(2600));
-                if let Some(main) = handle.get_webview_window("main") {
-                    let _ = main.show();
-                    let _ = main.set_focus();
+                let mut shown = false;
+                for _ in 0..12 {
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                    if let Some(main) = handle.get_webview_window("main") {
+                        let _ = main.show();
+                        let _ = main.set_focus();
+                        shown = true;
+                        break;
+                    }
+                }
+                if !shown {
+                    eprintln!("[hipot] no se encontró la ventana principal tras 3s");
                 }
                 if let Some(splash) = handle.get_webview_window("splash") {
                     let _ = splash.close();

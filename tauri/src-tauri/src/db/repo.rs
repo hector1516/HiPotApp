@@ -850,6 +850,31 @@ pub fn logs_list(category: Option<&str>, level: Option<&str>, q: Option<&str>, l
     Value::Array(rows)
 }
 
+/// Rota logs: elimina los más antiguos por fecha y conserva solo los últimos N.
+pub fn logs_prune(days: i64, keep: i64) -> Result<Value, String> {
+    with_connection(|conn| {
+        let cutoff = (chrono::Local::now() - chrono::Duration::days(days.max(1)))
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string();
+        execute(
+            conn,
+            &format!("DELETE FROM app_logs WHERE timestamp < {}", sql_text(&cutoff)),
+        )?;
+        execute(
+            conn,
+            &format!(
+                "DELETE FROM app_logs WHERE id NOT IN \
+                 (SELECT TOP ({}) id FROM app_logs ORDER BY id DESC)",
+                keep.clamp(100, 1_000_000)
+            ),
+        )?;
+        let remaining = query_one(conn, "SELECT COUNT(*) AS n FROM app_logs")?
+            .and_then(|row| row.get("n").and_then(|v| v.as_i64()))
+            .unwrap_or(0);
+        Ok(json!({ "status": "ok", "remaining": remaining }))
+    })
+}
+
 // ---------------------------------------------------------------- plantillas
 
 pub fn templates_list() -> Value {

@@ -468,20 +468,20 @@ Cambios frontend:
 
 ---
 
-### Fase 10 - Hardening y release (1-2 sesiones)
+### Fase 10 - Hardening y release (COMPLETADA en código)
 
-- [ ] Logging de UI: visor con fecha/hora, categoría, parámetros, valores enviados/recibidos, duración y error.
-- [ ] Rotación de logs (tamaño/fecha).
-- [ ] Manejo de errores global (error boundary + toast).
-- [ ] Instancia única (evitar dos apps contra el mismo PLC).
-- [ ] Splash con timeout y mensaje si falla el arranque.
-- [ ] Confirmar maximizado, auto-inicio y teclado virtual.
+- [x] Logging de UI: visor con fecha/hora, categoría, parámetros, valores enviados/recibidos, duración y error.
+- [x] Rotación de logs (`logs_prune`: 30 días / 5000 registros; poda automática al arrancar).
+- [x] Manejo de errores global (`ErrorBoundary` con reinicio + log a `app_logs`).
+- [x] Instancia única (`tauri-plugin-single-instance`; enfoca la ventana existente).
+- [x] Splash con timeout y cierre forzado.
+- [x] Maximizado, auto-inicio y teclado virtual confirmados en configuración.
+- [x] Versión actualizada a `1.0.31`.
 - [ ] Pruebas en VM limpia: instalación, SQL Express, ODBC, PLC, Hipot, Zebra.
 - [ ] Prueba de auto-update desde GitHub Releases.
-- [ ] Actualizar versión y `latest.json`.
-- [ ] Release con notas.
+- [ ] Release con notas (lo genera el workflow al subir el tag).
 
-**Criterio de aceptación:** instalación desde cero en estación limpia + actualización desde la versión anterior.
+**Criterio de aceptación:** instalación desde cero en estación limpia + actualización desde la versión anterior. **Pendiente de validación física/CI.**
 
 ---
 
