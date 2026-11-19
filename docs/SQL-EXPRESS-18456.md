@@ -24,7 +24,36 @@ Significa que SQL Server está encendido, pero **no acepta el usuario de Windows
 
 Si `sa` no tiene permiso para crear la base, usa una cuenta con `dbcreator`/`sysadmin` o crea la base manualmente (ver abajo).
 
-## Solución con SSMS / sqlcmd
+## Script automático (recomendado)
+
+En la PC donde está SQL Express, abre **PowerShell** (no necesita estar elevado) y pega:
+
+```powershell
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$dir = "$env:TEMP\hipot-sql-fix"
+New-Item -ItemType Directory -Force $dir | Out-Null
+Invoke-WebRequest "https://raw.githubusercontent.com/hector1516/HiPotApp/main/scripts/fix-sql-login.ps1" -OutFile "$dir\fix-sql-login.ps1"
+Start-Process powershell -Verb RunAs -ArgumentList "-NoExit -NoProfile -ExecutionPolicy Bypass -File `"$dir\fix-sql-login.ps1`""
+```
+
+Acepta el UAC. El script:
+
+1. Prueba la conexión con el usuario de Windows actual.
+2. Si no tiene permisos, inicia SQL Server en modo single-user.
+3. Crea el login `DESKTOP-GNJRVIS\Administrator` y lo agrega a `sysadmin`.
+4. Crea `HiPotDB` si no existe.
+5. Reinicia el servicio normal.
+6. Muestra el resultado y la ruta del log.
+
+Al terminar, en la app usa **Windows**, servidor `.\SQLEXPRESS`, base `HiPotDB`, sin usuario ni contraseña.
+
+También puedes descargar el `.cmd` que abre el script elevado:
+
+```text
+https://raw.githubusercontent.com/hector1516/HiPotApp/main/scripts/fix-sql-login.cmd
+```
+
+## Solución manual con SSMS / sqlcmd
 
 Abre SQL Server Management Studio conectándote como un usuario que sí tenga permisos (por ejemplo `sa`) y ejecuta:
 
