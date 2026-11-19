@@ -4,14 +4,17 @@ import { invoke } from '@tauri-apps/api/core';
 
 export function LogPopup({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [logs, setLogs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
   const [q, setQ] = useState('');
   const [cat, setCat] = useState('');
   const [level, setLevel] = useState('');
   const load = async () => {
+    setLoading(true);
     try {
       const r = await invoke<any[]>('list_logs', { category: cat, level, q, limit: 120 });
       setLogs(Array.isArray(r) ? r : []);
     } catch { setLogs([]); }
+    finally { setLoading(false); }
   };
   useEffect(() => { if (open) load(); }, [open]);
 
@@ -25,7 +28,7 @@ export function LogPopup({ open, onClose }: { open: boolean; onClose: () => void
             onClick={e => e.stopPropagation()}
             className="card" style={{ width: 'min(860px,96vw)', maxHeight: '88vh', display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <h3 style={{ margin: 0, flex: 1 }}>📋 Log de la app</h3>
+              <h3 style={{ margin: 0, flex: 1 }}> Log de la app</h3>
               <button className="btn sm" onClick={onClose}>Cerrar</button>
             </div>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8, minWidth: 0 }}>
@@ -47,7 +50,7 @@ export function LogPopup({ open, onClose }: { open: boolean; onClose: () => void
                       <td><span className={`pill ${l.level==='ERROR'?'off':l.level==='WARN'?'warn':''}`} style={{ fontSize: 10 }}>{l.level}</span></td>
                       <td>{l.cat}</td><td style={{ wordBreak: 'break-word' }}>{l.detail}</td></tr>
                   ))}
-                  {!logs.length && <tr><td colSpan={5} style={{ textAlign:'center', color:'#64748b' }}>Sin registros</td></tr>}
+                  {!logs.length && <tr><td colSpan={5} style={{ textAlign:'center', color:'var(--muted)' }}>{loading ? 'Cargando…' : 'Sin registros'}</td></tr>}
                 </tbody>
               </table>
             </div>

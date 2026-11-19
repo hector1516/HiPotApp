@@ -1,36 +1,103 @@
 import React, { useEffect, useState } from 'react';
+import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { LabelEditor, LObj, objsToTemplate, templateToObjs } from '../components/LabelEditor';
+import { askConfirm, notify } from '../components/Feedback';
 
 const TABS = ['Usuarios', 'Recetas', 'PLC', 'Hipot', 'BD', 'Etiquetas', 'Logs', 'IO', 'Manual', 'Sistema'] as const;
+type Tab = (typeof TABS)[number];
+
+const NAV_GROUPS: { label: string; tabs: Tab[] }[] = [
+  { label: 'Operación', tabs: ['Recetas', 'Etiquetas'] },
+  { label: 'Hardware', tabs: ['PLC', 'IO', 'Hipot', 'Manual'] },
+  { label: 'Datos', tabs: ['BD'] },
+  { label: 'Sistema', tabs: ['Usuarios', 'Logs', 'Sistema'] },
+];
 
 export function AdminPanel({ onBack, adminBatch }: { onBack: () => void; adminBatch?: string }) {
-  const [tab, setTab] = useState<(typeof TABS)[number]>('Recetas');
+  const [tab, setTab] = useState<Tab>('Recetas');
   return (
-    <div className="admin-panel" style={{ display: 'flex', minHeight: 560, minWidth: 0 }}>
-      <div style={{ width: 176, background: '#141b26', padding: 8, flexShrink: 0, borderRight: '1px solid #2a3a52', display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <button className="btn" style={{ width: '100%', background: '#1e2a3a', color: '#fff', borderColor: '#334155', fontSize: 13 }} onClick={onBack}>← Volver</button>
-        <div style={{ height: 1, background: '#2a3a52', margin: '4px 0' }} />
-        {TABS.map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            className="btn" style={{ width: '100%', justifyContent: 'flex-start', fontSize: 13,
-              background: tab === t ? '#b7790f' : '#1e2a3a', color: '#fff', borderColor: tab === t ? '#b7790f' : '#334155' }}>{t}</button>
-        ))}
-      </div>
-      <div style={{ flex: 1, padding: 12, overflow: 'auto', minWidth: 0, background: '#eef2f6' }}>
-        {tab === 'Usuarios' && <UsersTab />}
-        {tab === 'Recetas' && <RecipesTab adminBatch={adminBatch} />}
-        {tab === 'PLC' && <PlcTab />}
-        {tab === 'Hipot' && <HipotTab />}
-        {tab === 'BD' && <DbTab />}
-        {tab === 'Etiquetas' && <LabelsTab />}
-        {tab === 'Logs' && <LogsTab />}
-        {tab === 'IO' && <PlcIoTab />}
-        {tab === 'Manual' && <ManualTab />}
-        {tab === 'Sistema' && <SystemTab />}
+    <div className="admin-panel" style={{ display: 'flex', minHeight: 'calc(100vh - 58px)', minWidth: 0 }}>
+      <aside style={{
+        width: 232, flexShrink: 0, background: 'linear-gradient(180deg, var(--rail) 0%, var(--rail-2) 100%)',
+        borderRight: '1px solid rgba(255,255,255,.08)', padding: 12, display: 'flex', flexDirection: 'column', gap: 4,
+        boxShadow: 'var(--shadow-rail)', position: 'relative', zIndex: 2,
+      }}>
+        <div style={{ padding: '4px 6px 12px 6px' }}>
+          <div className="row" style={{ gap: 8, marginBottom: 6 }}>
+            <img src="logo.png" alt="HiPotApp" style={{ height: 30, objectFit: 'contain' }} />
+            <div className="rail-eyebrow" style={{ margin: 0 }}>Configuración</div>
+          </div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 800, color: '#fff', marginTop: 2 }}>
+            Panel de control
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--on-rail-muted)', marginTop: 4 }}>
+            {adminBatch ? `Admin: ${adminBatch}` : 'Acceso administrador'}
+          </div>
+        </div>
+
+        <button className="btn" style={{ width: '100%', justifyContent: 'flex-start', background: 'rgba(255,255,255,.06)', borderColor: 'rgba(255,255,255,.1)', color: 'var(--on-rail)', minHeight: 42 }} onClick={onBack}>
+          ← Volver al inicio
+        </button>
+
+        <div style={{ flex: 1, overflow: 'auto', marginTop: 8 }}>
+          {NAV_GROUPS.map(group => (
+            <div key={group.label} style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '.14em', textTransform: 'uppercase', color: 'var(--on-rail-muted)', padding: '8px 8px 4px 8px' }}>
+                {group.label}
+              </div>
+              {group.tabs.map(t => {
+                const active = tab === t;
+                return (
+                  <button
+                    key={t}
+                    onClick={() => setTab(t)}
+                    style={{
+                      width: '100%', minHeight: 40, display: 'flex', alignItems: 'center', gap: 8,
+                      padding: '0 10px', marginBottom: 2, borderRadius: 8, cursor: 'pointer',
+                      border: '1px solid transparent',
+                      background: active ? 'rgba(180,83,9,.18)' : 'transparent',
+                      color: active ? '#fff' : 'var(--on-rail-muted)',
+                      fontWeight: active ? 800 : 600, fontSize: 13,
+                      borderLeft: active ? '3px solid var(--accent-2)' : '3px solid transparent',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <span style={{ width: 6, height: 6, borderRadius: 999, background: active ? 'var(--accent-2)' : 'rgba(255,255,255,.2)', flexShrink: 0 }} />
+                    {t}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+
+        <div style={{ borderTop: '1px solid rgba(255,255,255,.1)', paddingTop: 8, fontSize: 12, color: 'var(--on-rail-muted)' }}>
+          Los cambios se guardan en SQL Express.
+        </div>
+      </aside>
+
+      <div className="admin-content" style={{ flex: 1, padding: 20, overflow: 'auto', minWidth: 0, background: 'var(--bg)' }}>
+        <motion.div
+          key={tab}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.28 }}
+        >
+          {tab === 'Usuarios' && <UsersTab />}
+          {tab === 'Recetas' && <RecipesTab adminBatch={adminBatch} />}
+          {tab === 'PLC' && <PlcTab />}
+          {tab === 'Hipot' && <HipotTab />}
+          {tab === 'BD' && <DbTab />}
+          {tab === 'Etiquetas' && <LabelsTab />}
+          {tab === 'Logs' && <LogsTab />}
+          {tab === 'IO' && <PlcIoTab />}
+          {tab === 'Manual' && <ManualTab />}
+          {tab === 'Sistema' && <SystemTab />}
+        </motion.div>
       </div>
     </div>
   );
@@ -46,7 +113,7 @@ function UsersTab(){
   useEffect(()=>{load();},[]);
   const rows=users.filter(u=>!q||u.username.includes(q.toUpperCase()));
   const doDelete=async(u:any)=>{
-    if(!confirm(`Borrar usuario ${u.username}?`)) return;
+    if(!await askConfirm(`Borrar usuario ${u.username}?`)) return;
     try{
       const r = await invoke<string>('delete_user', { id: u.id });
       if (r !== 'deleted') throw new Error(r);
@@ -72,7 +139,7 @@ function UsersTab(){
   return (
     <div style={{ minWidth:0 }}>
       <h2 style={{ margin:'0 0 10px 0', fontSize:16 }}>Usuarios — solo batch + permisos</h2>
-      {msg && <div className="toast-err" style={{ background: msg.startsWith('Usuario')||msg.startsWith('Borrado')?'#e6f4ea':undefined, borderColor: msg.startsWith('Usuario')?'#a8d0b4':undefined, color: msg.startsWith('Usuario')?'#166534':undefined }}>{msg}</div>}
+      {msg && <div className="toast-err" style={{ background: msg.startsWith('Usuario')||msg.startsWith('Borrado')?'#e6f4ea':undefined, borderColor: msg.startsWith('Usuario')?'#a8d0b4':undefined, color: msg.startsWith('Usuario')?'var(--ok)':undefined }}>{msg}</div>}
       <div className="card" style={{ marginBottom:10 }}>
         <div style={{ display:'flex', gap:8, minWidth:0, flexWrap:'wrap' }}>
           <input className="input" placeholder="Buscar batch/usuario" value={q} onChange={e=>setQ(e.target.value.toUpperCase())} style={{ flex:'1 1 200px', minWidth:0 }} />
@@ -91,7 +158,7 @@ function UsersTab(){
                   <button className="btn sm danger" onClick={()=>doDelete(u)}>Borrar</button>
                 </div>
               </td></tr>
-          ))}{!rows.length && <tr><td colSpan={4} style={{ textAlign:'center', color:'#64748b' }}>Sin usuarios</td></tr>}</tbody>
+          ))}{!rows.length && <tr><td colSpan={4} style={{ textAlign:'center', color:'var(--muted)' }}>Sin usuarios</td></tr>}</tbody>
         </table>
       </div>
 
@@ -99,9 +166,9 @@ function UsersTab(){
         <div style={{ position:'fixed', inset:0, background:'rgba(20,27,38,.55)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:4000, padding:12 }} onClick={()=>setViewPerm(null)}>
           <div className="card" style={{ width:'min(420px,96vw)', minWidth:0 }} onClick={e=>e.stopPropagation()}>
             <h3 style={{ margin:'0 0 8px 0' }}>{viewPerm.username} — {viewPerm.role==='admin'?'Admin':'Operador'}</h3>
-            <div style={{ fontSize:12, color: viewPerm.is_active?'#166534':'#991b1b', fontWeight:700, marginBottom:8 }}>{viewPerm.is_active?'Activo':'Inactivo'}</div>
+            <div style={{ fontSize:12, color: viewPerm.is_active?'var(--ok)':'var(--bad)', fontWeight:700, marginBottom:8 }}>{viewPerm.is_active?'Activo':'Inactivo'}</div>
             <div style={{ fontSize:13, fontWeight:700, marginBottom:4 }}>Permisos:</div>
-            <ul style={{ margin:0, paddingLeft:18, fontSize:13, color:'#334155' }}>{(viewPerm.permissions??[]).map((p:string,i:number)=><li key={i}>{p}</li>)}</ul>
+            <ul style={{ margin:0, paddingLeft:18, fontSize:13, color:'var(--text-2)' }}>{(viewPerm.permissions??[]).map((p:string,i:number)=><li key={i}>{p}</li>)}</ul>
             <div style={{ display:'flex', justifyContent:'flex-end', marginTop:12 }}><button className="btn" onClick={()=>setViewPerm(null)}>Cerrar</button></div>
           </div>
         </div>
@@ -112,14 +179,14 @@ function UsersTab(){
           <div className="card" style={{ width:'min(420px,96vw)', minWidth:0 }} onClick={e=>e.stopPropagation()}>
             <h3 style={{ margin:'0 0 10px 0' }}>{editing.id?'Editar usuario':'Alta de usuario'}</h3>
             <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-              <label style={{ fontSize:12, fontWeight:700, color:'#475569' }}>Batch / Usuario — gafete (mayúsculas)</label>
+              <label style={{ fontSize:12, fontWeight:700, color:'var(--text-2)' }}>Batch / Usuario — gafete (mayúsculas)</label>
               <input className="input" placeholder="Ej. BATCH-001" value={editing.username} onChange={e=>setEditing({...editing,username:e.target.value.toUpperCase()})} />
-              <label style={{ fontSize:12, fontWeight:700, color:'#475569' }}>Permiso</label>
+              <label style={{ fontSize:12, fontWeight:700, color:'var(--text-2)' }}>Permiso</label>
               <select className="input" value={editing.role} onChange={e=>setEditing({...editing,role:e.target.value as any})}>
                 <option value="operator">Operador — gafete</option>
                 <option value="admin">Admin — acceso a configuración</option>
               </select>
-              <div style={{ fontSize:12, color:'#64748b', background:'#f1f5f9', padding:'6px 8px', borderRadius:6 }}>Todos entran con gafete (sin contraseña). El permiso define qué puede hacer.</div>
+              <div style={{ fontSize:12, color:'var(--muted)', background:'var(--surface-2)', padding:'6px 8px', borderRadius:6 }}>Todos entran con gafete (sin contraseña). El permiso define qué puede hacer.</div>
               <label style={{ display:'flex', gap:8, alignItems:'center', fontSize:13, fontWeight:600 }}>
                 <input type="checkbox" checked={editing.is_active} onChange={e=>setEditing({...editing,is_active:e.target.checked})} style={{ width:18, height:18 }} /> Activo
               </label>
@@ -171,7 +238,7 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
     setEditing({id:d.id,name:d.name,model:d.model,product:d.product||'',m,t});
   };
   const doDelete=async(r:any)=>{
-    if(!confirm(`Borrar receta ${r.model} — ${r.name}?`)) return;
+    if(!await askConfirm(`Borrar receta ${r.model} — ${r.name}?`)) return;
     await invoke('delete_recipe', { id: r.id }); setMsg(`Borrada ${r.model}`); load();
   };
   const doDup=async(r:any)=>{
@@ -214,7 +281,7 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
   return (
     <div style={{ minWidth:0 }}>
       <h2 style={{ margin:'0 0 10px 0', fontSize:16 }}>Recetas — altas / bajas / cambios</h2>
-      {msg && <div className="toast-err" style={{ background: msg.startsWith('Receta')||msg.startsWith('Duplicada')||msg.startsWith('Borrada')?'#e6f4ea':undefined, borderColor: msg.startsWith('Receta')?'#a8d0b4':undefined, color: msg.startsWith('Receta')?'#166534':undefined }}>{msg}</div>}
+      {msg && <div className="toast-err" style={{ background: msg.startsWith('Receta')||msg.startsWith('Duplicada')||msg.startsWith('Borrada')?'#e6f4ea':undefined, borderColor: msg.startsWith('Receta')?'#a8d0b4':undefined, color: msg.startsWith('Receta')?'var(--ok)':undefined }}>{msg}</div>}
       <div className="card" style={{ marginBottom:10 }}>
         <div style={{ display:'flex', gap:8, minWidth:0, flexWrap:'wrap' }}>
           <input className="input" placeholder="Buscar modelo" value={q} onChange={e=>setQ(e.target.value.toUpperCase())} style={{ flex:'1 1 200px', minWidth:0 }} />
@@ -225,7 +292,7 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
       <div className="card" style={{ overflow:'auto', minWidth:0 }}>
         <table className="grid"><thead><tr><th>Modelo</th><th>Nombre</th><th>Guardado</th><th style={{ minWidth:220 }}>Acciones</th></tr></thead>
           <tbody>{rows.map(r=>(
-            <tr key={r.id}><td><b>{r.model}</b></td><td>{r.name}</td><td style={{ fontSize:11, color:'#64748b' }}>{r.modified_by?`${r.modified_by} · `:''}{r.updated_at?new Date(r.updated_at).toLocaleString('es-MX'):(r.created_at?new Date(r.created_at).toLocaleString('es-MX'):'—')}</td>
+            <tr key={r.id}><td><b>{r.model}</b></td><td>{r.name}</td><td style={{ fontSize:11, color:'var(--muted)' }}>{r.modified_by?`${r.modified_by} · `:''}{r.updated_at?new Date(r.updated_at).toLocaleString('es-MX'):(r.created_at?new Date(r.created_at).toLocaleString('es-MX'):'—')}</td>
               <td>
                 <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
                   <button className="btn sm primary" onClick={()=>openEdit(r)}>Editar</button>
@@ -233,7 +300,7 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
                   <button className="btn sm danger" onClick={()=>doDelete(r)}>Borrar</button>
                 </div>
               </td></tr>
-          ))}{!rows.length && <tr><td colSpan={4} style={{ textAlign:'center', color:'#64748b' }}>Sin recetas — use + Alta</td></tr>}</tbody>
+          ))}{!rows.length && <tr><td colSpan={4} style={{ textAlign:'center', color:'var(--muted)' }}>Sin recetas — use + Alta</td></tr>}</tbody>
         </table>
       </div>
 
@@ -250,8 +317,8 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
             <div style={{ overflow:'auto', border:'1px solid var(--line)', borderRadius:8 }}>
               <table className="grid" style={{ minWidth:980, fontSize:12 }}>
                 <thead>
-                  <tr><th style={{ minWidth:60, background:'#1e293b', color:'#fff' }}>V</th>{COMPS.map(c=><th key={c} colSpan={3} style={{ textAlign:'center', background:'#1e293b', color:'#fff', minWidth:138 }}>{c}</th>)}<th colSpan={2} style={{ textAlign:'center', background:'#b7790f', color:'#fff', minWidth:138 }}>TOTAL</th></tr>
-                  <tr><th style={{ background:'#f1f5f9' }}></th>{COMPS.map(c=><React.Fragment key={c}><th style={{ background:'#f1f5f9', fontSize:11 }}>MIN</th><th style={{ background:'#f1f5f9', fontSize:11 }}>MAX</th><th style={{ background:'#fdf1d0', fontSize:11, minWidth:36 }}>✓</th></React.Fragment>)}<th style={{ background:'#fdf1d0', fontSize:11 }}>MIN</th><th style={{ background:'#fdf1d0', fontSize:11 }}>MAX</th></tr>
+                  <tr><th style={{ minWidth:60, background:'var(--text)', color:'#fff' }}>V</th>{COMPS.map(c=><th key={c} colSpan={3} style={{ textAlign:'center', background:'var(--text)', color:'#fff', minWidth:138 }}>{c}</th>)}<th colSpan={2} style={{ textAlign:'center', background:'var(--accent)', color:'#fff', minWidth:138 }}>TOTAL</th></tr>
+                  <tr><th style={{ background:'var(--surface-2)' }}></th>{COMPS.map(c=><React.Fragment key={c}><th style={{ background:'var(--surface-2)', fontSize:11 }}>MIN</th><th style={{ background:'var(--surface-2)', fontSize:11 }}>MAX</th><th style={{ background:'#fdf1d0', fontSize:11, minWidth:36 }}></th></React.Fragment>)}<th style={{ background:'#fdf1d0', fontSize:11 }}>MIN</th><th style={{ background:'#fdf1d0', fontSize:11 }}>MAX</th></tr>
                 </thead>
                 <tbody>
                   {VOLTS.map(v=>{
@@ -262,21 +329,21 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
                       {COMPS.map(c=>{
                         const cell=editing.m[vs][c];
                         return <React.Fragment key={c}>
-                          <td style={{ padding:3 }}><input disabled={!cell.enabled} value={cell.min} onChange={e=>setEditing({ ...editing, m:{...editing.m,[vs]:{...editing.m[vs],[c]:{...cell,min:e.target.value}}} })} placeholder="—" style={{ width:56, height:30, border:`1px solid ${cell.enabled?'#b7790f':'#d8e0ea'}`, borderRadius:6, textAlign:'center', fontSize:12, background: cell.enabled?'#fff':'#f1f5f9' }} /></td>
-                          <td style={{ padding:3 }}><input disabled={!cell.enabled} value={cell.max} onChange={e=>setEditing({ ...editing, m:{...editing.m,[vs]:{...editing.m[vs],[c]:{...cell,max:e.target.value}}} })} placeholder="—" style={{ width:56, height:30, border:`1px solid ${cell.enabled?'#b7790f':'#d8e0ea'}`, borderRadius:6, textAlign:'center', fontSize:12, background: cell.enabled?'#fff':'#f1f5f9' }} /></td>
+                          <td style={{ padding:3 }}><input disabled={!cell.enabled} value={cell.min} onChange={e=>setEditing({ ...editing, m:{...editing.m,[vs]:{...editing.m[vs],[c]:{...cell,min:e.target.value}}} })} placeholder="—" style={{ width:56, height:30, border:`1px solid ${cell.enabled?'var(--accent)':'var(--line)'}`, borderRadius:6, textAlign:'center', fontSize:12, background: cell.enabled?'#fff':'var(--surface-2)' }} /></td>
+                          <td style={{ padding:3 }}><input disabled={!cell.enabled} value={cell.max} onChange={e=>setEditing({ ...editing, m:{...editing.m,[vs]:{...editing.m[vs],[c]:{...cell,max:e.target.value}}} })} placeholder="—" style={{ width:56, height:30, border:`1px solid ${cell.enabled?'var(--accent)':'var(--line)'}`, borderRadius:6, textAlign:'center', fontSize:12, background: cell.enabled?'#fff':'var(--surface-2)' }} /></td>
                           <td style={{ padding:3, textAlign:'center' }}><input type="checkbox" checked={cell.enabled} onChange={e=>setEditing({...editing,m:{...editing.m,[vs]:{...editing.m[vs],[c]:{...cell,enabled:e.target.checked}}}})} style={{ width:18, height:18 }} title="Activar/desactivar este componente en este voltaje" /></td>
                         </React.Fragment>;
                       })}
-                      <td style={{ padding:3 }}><input value={editing.t[vs].min} onChange={e=>setEditing({...editing,t:{...editing.t,[vs]:{...editing.t[vs],min:e.target.value}}})} placeholder="—" style={{ width:56, height:30, border:'1px solid #d8e0ea', borderRadius:6, textAlign:'center', fontSize:12 }} /></td>
-                      <td style={{ padding:3 }}><input value={editing.t[vs].max} onChange={e=>setEditing({...editing,t:{...editing.t,[vs]:{...editing.t[vs],max:e.target.value}}})} placeholder="—" style={{ width:56, height:30, border:'1px solid #d8e0ea', borderRadius:6, textAlign:'center', fontSize:12 }} /></td>
+                      <td style={{ padding:3 }}><input value={editing.t[vs].min} onChange={e=>setEditing({...editing,t:{...editing.t,[vs]:{...editing.t[vs],min:e.target.value}}})} placeholder="—" style={{ width:56, height:30, border:'1px solid var(--line)', borderRadius:6, textAlign:'center', fontSize:12 }} /></td>
+                      <td style={{ padding:3 }}><input value={editing.t[vs].max} onChange={e=>setEditing({...editing,t:{...editing.t,[vs]:{...editing.t[vs],max:e.target.value}}})} placeholder="—" style={{ width:56, height:30, border:'1px solid var(--line)', borderRadius:6, textAlign:'center', fontSize:12 }} /></td>
                     </tr>
                     );
                   })}
                 </tbody>
               </table>
             </div>
-            <div style={{ fontSize:11, color:'#64748b', marginTop:6 }}>Marque ✓ para incluir ese componente en ese voltaje. Desmarcado = esa parte no se prueba.</div>
-            <div style={{ fontSize:11, color:'#64748b' }}>Se guarda con fecha/hora y usuario: <b>{(adminBatch||'ADMIN').toUpperCase()}</b></div>
+            <div style={{ fontSize:11, color:'var(--muted)', marginTop:6 }}>Marque  para incluir ese componente en ese voltaje. Desmarcado = esa parte no se prueba.</div>
+            <div style={{ fontSize:11, color:'var(--muted)' }}>Se guarda con fecha/hora y usuario: <b>{(adminBatch||'ADMIN').toUpperCase()}</b></div>
             <div style={{ display:'flex', gap:8, marginTop:12, flexWrap:'wrap', justifyContent:'flex-end' }}>
               <button className="btn" onClick={()=>setEditing(null)}>Cancelar</button>
               <button className="btn primary" onClick={doSave}>{editing.id?'Guardar cambios':'Crear receta'}</button>
@@ -347,7 +414,7 @@ function PlcTab() {
   };
 
   const doDeleteTag = async (tag: any) => {
-    if (!confirm(`¿Eliminar variable ${tag.name}?`)) return;
+    if (!await askConfirm(`¿Eliminar variable ${tag.name}?`)) return;
     try {
       const r = await invoke<string>('plc_tags_delete', { id: tag.id });
       if (r !== 'deleted') throw new Error(r);
@@ -360,9 +427,9 @@ function PlcTab() {
 
   return (
     <div style={{ minWidth: 0 }}>
-      <h2 style={{ margin: '0 0 10px 0', fontSize: 16 }}>PLC Siemens S7-1200 — Red, Lectura en Vivo y Escritura</h2>
+      <h2 className="page-title" style={{ marginBottom: 14 }}>PLC Siemens S7-1200 — Red, Lectura en Vivo y Escritura</h2>
       {msg && (
-        <div className="toast-err" style={{ background: msg.startsWith('Configuración') || msg.startsWith('Escrito') || msg.startsWith('Variable') ? '#e6f4ea' : undefined, borderColor: msg.startsWith('Configuración') || msg.startsWith('Escrito') ? '#a8d0b4' : undefined, color: msg.startsWith('Configuración') || msg.startsWith('Escrito') ? '#166534' : undefined }}>
+        <div className="toast-err" style={{ background: msg.startsWith('Configuración') || msg.startsWith('Escrito') || msg.startsWith('Variable') ? '#e6f4ea' : undefined, borderColor: msg.startsWith('Configuración') || msg.startsWith('Escrito') ? '#a8d0b4' : undefined, color: msg.startsWith('Configuración') || msg.startsWith('Escrito') ? 'var(--ok)' : undefined }}>
           {msg}
         </div>
       )}
@@ -372,15 +439,15 @@ function PlcTab() {
         <h3 style={{ margin: '0 0 10px 0', fontSize: 14 }}>Parámetros de Conexión de Red</h3>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <label style={{ fontSize: 11, fontWeight: 700, color: '#475569' }}>IP del PLC</label>
+            <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)' }}>IP del PLC</label>
             <input className="input" placeholder="192.168.1.10" value={cfg.ip} onChange={e => setCfg({ ...cfg, ip: e.target.value })} style={{ width: 140 }} />
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <label style={{ fontSize: 11, fontWeight: 700, color: '#475569' }}>Rack</label>
+            <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)' }}>Rack</label>
             <input className="input" type="number" inputMode="numeric" value={cfg.rack} onChange={e => setCfg({ ...cfg, rack: parseInt(e.target.value) || 0 })} style={{ width: 64 }} />
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <label style={{ fontSize: 11, fontWeight: 700, color: '#475569' }}>Slot</label>
+            <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)' }}>Slot</label>
             <input className="input" type="number" inputMode="numeric" value={cfg.slot} onChange={e => setCfg({ ...cfg, slot: parseInt(e.target.value) || 1 })} style={{ width: 64 }} />
           </div>
           <div style={{ display: 'flex', gap: 6, marginTop: 16 }}>
@@ -388,14 +455,14 @@ function PlcTab() {
             <button className="btn" onClick={() => invoke<any>('plc_status_info').then(setSt).catch(() => {})}>Probar Conexión</button>
           </div>
         </div>
-        {st && <pre style={{ marginTop: 8, fontSize: 12, background: '#f1f5f9', padding: 8, borderRadius: 6, overflow: 'auto' }}>{JSON.stringify(st, null, 2)}</pre>}
+        {st && <pre style={{ marginTop: 8, fontSize: 12, background: 'var(--surface-2)', padding: 8, borderRadius: 6, overflow: 'auto' }}>{JSON.stringify(st, null, 2)}</pre>}
       </div>
 
       {/* Tabla de Variables PLC */}
       <div className="card" style={{ overflow: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
           <h3 style={{ margin: 0, fontSize: 14 }}>Variables Configuradas (Lectura y Escritura por Renglón)</h3>
-          <button className="btn sm" onClick={loadTags}>🔄 Actualizar Valores</button>
+          <button className="btn sm" onClick={loadTags}>Actualizar valores</button>
         </div>
 
         <table className="grid">
@@ -416,7 +483,7 @@ function PlcTab() {
                 <td><b>{t.name}</b></td>
                 <td>DB{t.db}</td>
                 <td>{t.offset}</td>
-                <td><span className="pill" style={{ fontSize: 11 }}>{t.type}</span></td>
+                <td><span className="pill" style={{ fontSize: 12 }}>{t.type}</span></td>
                 <td>
                   <span style={{ fontWeight: 800, color: '#0f172a', background: '#e2e8f0', padding: '4px 8px', borderRadius: 4, fontFamily: 'monospace' }}>
                     {t.value !== null && t.value !== undefined ? String(t.value) : '—'}
@@ -441,7 +508,7 @@ function PlcTab() {
             ))}
             {!tags.length && (
               <tr>
-                <td colSpan={7} style={{ textAlign: 'center', color: '#64748b' }}>
+                <td colSpan={7} style={{ textAlign: 'center', color: 'var(--muted)' }}>
                   No hay variables de PLC configuradas. Agregue una abajo.
                 </td>
               </tr>
@@ -518,21 +585,21 @@ function HipotTab() {
 
   return (
     <div style={{ minWidth: 0 }}>
-      <h2 style={{ margin: '0 0 10px 0', fontSize: 16 }}>Hipot 3865 — RS-232</h2>
-      {msg && <div className="toast-err" style={{ background: msg.startsWith('Configuración') ? '#e6f4ea' : undefined, borderColor: msg.startsWith('Configuración') ? '#a8d0b4' : undefined, color: msg.startsWith('Configuración') ? '#166534' : undefined }}>{msg}</div>}
+      <h2 className="page-title" style={{ marginBottom: 14 }}>Hipot 3865 — RS-232</h2>
+      {msg && <div className="toast-err" style={{ background: msg.startsWith('Configuración') ? '#e6f4ea' : undefined, borderColor: msg.startsWith('Configuración') ? '#a8d0b4' : undefined, color: msg.startsWith('Configuración') ? 'var(--ok)' : undefined }}>{msg}</div>}
 
       <div className="card" style={{ marginBottom: 10 }}>
         <h3 style={{ margin: '0 0 8px 0', fontSize: 14 }}>Puerto serie</h3>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <label style={{ fontSize: 11, fontWeight: 700, color: '#475569' }}>Puerto</label>
+            <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)' }}>Puerto</label>
             <select className="input" value={cfg.port} onChange={e => setCfg({ ...cfg, port: e.target.value })} style={{ width: 140 }}>
               {ports.map(p => <option key={p} value={p}>{p}</option>)}
               {!ports.includes(cfg.port) && <option value={cfg.port}>{cfg.port}</option>}
             </select>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <label style={{ fontSize: 11, fontWeight: 700, color: '#475569' }}>Baudios</label>
+            <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)' }}>Baudios</label>
             <input className="input" type="number" inputMode="numeric" value={cfg.baud} onChange={e => setCfg({ ...cfg, baud: parseInt(e.target.value) || 9600 })} style={{ width: 100 }} />
           </div>
           <div style={{ display: 'flex', gap: 6, marginTop: 16, flexWrap: 'wrap' }}>
@@ -545,11 +612,11 @@ function HipotTab() {
               const port = parseInt(c?.printer_port || '9100', 10);
               const name = c?.printer_name || 'Zebra ZT231';
               const r = await invoke<string>('print_test_zebra', { printerIp: ip, printerPort: port, printerName: name });
-              alert(r);
-            }}>Test Zebra (Rust)</button>
+              notify(r, r === 'OK' ? 'ok' : 'error');
+            }}>Probar Zebra</button>
           </div>
         </div>
-        {st && <pre style={{ marginTop: 8, fontSize: 12, background: '#f1f5f9', padding: 8, borderRadius: 6, overflow: 'auto' }}>{JSON.stringify(st, null, 2)}</pre>}
+        {st && <pre style={{ marginTop: 8, fontSize: 12, background: 'var(--surface-2)', padding: 8, borderRadius: 6, overflow: 'auto' }}>{JSON.stringify(st, null, 2)}</pre>}
       </div>
 
       <div className="card">
@@ -558,7 +625,7 @@ function HipotTab() {
           <input className="input" value={cmd} onChange={e => setCmd(e.target.value.toUpperCase())} style={{ flex: 1, minWidth: 0 }} />
           <button className="btn primary" style={{ flexShrink: 0 }} onClick={send}>Enviar</button>
         </div>
-        {resp && <pre style={{ marginTop: 8, fontSize: 12, background: '#f1f5f9', padding: 8, borderRadius: 6, overflow: 'auto' }}>{JSON.stringify(resp, null, 2)}</pre>}
+        {resp && <pre style={{ marginTop: 8, fontSize: 12, background: 'var(--surface-2)', padding: 8, borderRadius: 6, overflow: 'auto' }}>{JSON.stringify(resp, null, 2)}</pre>}
       </div>
     </div>
   );
@@ -572,7 +639,7 @@ function DbTab() {
   useEffect(() => { load(); }, []);
   return (
     <div style={{ minWidth: 0 }}>
-      <h2 style={{ margin: '0 0 10px 0', fontSize: 16 }}>Base de datos</h2>
+      <h2 className="page-title" style={{ marginBottom: 14 }}>Base de datos</h2>
       <div className="card" style={{ marginBottom: 10 }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn primary" onClick={async () => {
@@ -586,11 +653,11 @@ function DbTab() {
               const r = await invoke<string>('sync_pending', { remoteConnStr: connStr });
               setLog(r); load();
             } catch (e: any) { setLog(String(e?.message || e)); }
-          }}>Sync ahora (Rust)</button>
-          <button className="btn" onClick={() => invoke<any>('app_health').then(r => setLog(JSON.stringify(r, null, 2))).catch(e => setLog(String(e?.message || e)))}>Estado</button>
+          }}>Sincronizar ahora</button>
+          <button className="btn" onClick={() => invoke<any>('app_health').then(r => setLog(JSON.stringify(r, null, 2))).catch(e => setLog(String(e?.message || e)))}>Consultar estado</button>
         </div>
-        {log && <pre style={{ marginTop: 8, fontSize: 12, background: '#f1f5f9', padding: 8, borderRadius: 6, overflow: 'auto' }}>{log}</pre>}
-        <details style={{ marginTop: 8 }}><summary style={{ cursor: 'pointer', fontSize: 13 }}>Config actual</summary><pre style={{ fontSize: 12, background: '#f1f5f9', padding: 8, borderRadius: 6, overflow: 'auto' }}>{JSON.stringify(cfg, null, 2)}</pre></details>
+        {log && <pre style={{ marginTop: 8, fontSize: 12, background: 'var(--surface-2)', padding: 8, borderRadius: 6, overflow: 'auto' }}>{log}</pre>}
+        <details style={{ marginTop: 8 }}><summary style={{ cursor: 'pointer', fontSize: 13 }}>Config actual</summary><pre style={{ fontSize: 12, background: 'var(--surface-2)', padding: 8, borderRadius: 6, overflow: 'auto' }}>{JSON.stringify(cfg, null, 2)}</pre></details>
       </div>
       <div className="card" style={{ overflow: 'auto' }}>
         <h3>Sync log</h3>
@@ -640,8 +707,8 @@ function LabelsTab() {
   };
   return (
     <div style={{ minWidth: 0 }}>
-      <h2 style={{ margin: '0 0 10px 0', fontSize: 16 }}>Etiquetas Zebra</h2>
-      {msg && <div className="toast-err" style={{ background: msg.startsWith('Plantilla') ? '#e6f4ea' : undefined, borderColor: msg.startsWith('Plantilla') ? '#a8d0b4' : undefined, color: msg.startsWith('Plantilla') ? '#166534' : undefined }}>{msg}</div>}
+      <h2 className="page-title" style={{ marginBottom: 14 }}>Etiquetas Zebra</h2>
+      {msg && <div className="toast-err" style={{ background: msg.startsWith('Plantilla') ? '#e6f4ea' : undefined, borderColor: msg.startsWith('Plantilla') ? '#a8d0b4' : undefined, color: msg.startsWith('Plantilla') ? 'var(--ok)' : undefined }}>{msg}</div>}
       <div className="card" style={{ marginBottom: 10 }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', minWidth: 0 }}>
           <select className="input" style={{ maxWidth: 260, flex: '1 1 200px' }} value={selId ?? ''} onChange={e => e.target.value ? openTpl(+e.target.value) : openNew()}>
@@ -668,7 +735,7 @@ function LogsTab() {
   useEffect(() => { load(); }, []);
   return (
     <div style={{ minWidth: 0 }}>
-      <h2 style={{ margin: '0 0 10px 0', fontSize: 16 }}>Logs</h2>
+      <h2 className="page-title" style={{ marginBottom: 14 }}>Logs</h2>
       <div className="card" style={{ marginBottom: 10 }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
           <select className="input" style={{ maxWidth: 150, flex: '1 1 130px' }} value={cat} onChange={e => setCat(e.target.value)}><option value="">Todas CAT</option>{['UI','PLC','HIPOT','DB','SYNC','BARCODE','SYSTEM'].map(c => <option key={c} value={c}>{c}</option>)}</select>
@@ -676,12 +743,12 @@ function LogsTab() {
           <input className="input" placeholder="Buscar…" value={q} onChange={e => setQ(e.target.value)} style={{ flex: '1 1 160px', minWidth: 0 }} />
           <button className="btn primary" style={{ flexShrink: 0 }} onClick={load}>Buscar</button>
           <button className="btn" style={{ flexShrink: 0 }} onClick={async () => {
-            if (!confirm('¿Eliminar logs con más de 30 días y conservar solo los últimos 5000?')) return;
+            if (!await askConfirm('¿Eliminar logs con más de 30 días y conservar solo los últimos 5000?')) return;
             try {
               const r = await invoke<any>('logs_prune', { days: 30, keep: 5000 });
-              alert(`Logs restantes: ${r.remaining ?? '?'}`);
+              notify(`Logs restantes: ${r.remaining ?? '?'}`);
               load();
-            } catch (e: any) { alert('Error: ' + (e?.message || e)); }
+            } catch (e: any) { notify('Error: ' + (e?.message || e), 'error'); }
           }}>Limpiar antiguos</button>
         </div>
       </div>
@@ -690,22 +757,22 @@ function LogsTab() {
           <div key={l.id} style={{ borderBottom: '1px solid #e8edf3', padding: '6px 0', minWidth: 0 }}>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
               <b>#{l.id}</b>
-              <span style={{ color: '#64748b' }}>{l.ts}</span>
-              <span className={`pill ${l.level === 'ERROR' ? 'off' : l.level === 'WARN' ? 'accent' : ''}`} style={{ fontSize: 10 }}>{l.level}</span>
-              <span className="pill" style={{ fontSize: 10 }}>{l.cat}</span>
+              <span style={{ color: 'var(--muted)' }}>{l.ts}</span>
+              <span className={`pill ${l.level === 'ERROR' ? 'off' : l.level === 'WARN' ? 'accent' : ''}`} style={{ fontSize: 12 }}>{l.level}</span>
+              <span className="pill" style={{ fontSize: 12 }}>{l.cat}</span>
               <b>{l.action}</b>
-              {l.execution_id && <span style={{ fontSize: 10, color: '#64748b' }}>Exec #{l.execution_id}</span>}
-              {l.duration_ms != null && <span style={{ fontSize: 10, color: '#64748b' }}>{l.duration_ms}ms</span>}
-              {l.success === 0 && <span className="pill off" style={{ fontSize: 10 }}>FAIL</span>}
+              {l.execution_id && <span style={{ fontSize: 12, color: 'var(--muted)' }}>Exec #{l.execution_id}</span>}
+              {l.duration_ms != null && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{l.duration_ms}ms</span>}
+              {l.success === 0 && <span className="pill off" style={{ fontSize: 12 }}>FAIL</span>}
             </div>
-            {l.detail && <div style={{ fontSize: 11, color: '#334155', marginTop: 2, wordBreak: 'break-word' }}>{l.detail}</div>}
+            {l.detail && <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2, wordBreak: 'break-word' }}>{l.detail}</div>}
             {(l.value_sent || l.value_received) && (
-              <div style={{ fontSize: 10, color: '#64748b', marginTop: 2, fontFamily: 'monospace' }}>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2, fontFamily: 'monospace' }}>
                 {l.value_sent && <span>Enviado: {l.value_sent} </span>}
                 {l.value_received && <span>Recibido: {l.value_received}</span>}
               </div>
             )}
-            {l.error_message && <div style={{ fontSize: 11, color: '#991b1b', marginTop: 2 }}>{l.error_message}</div>}
+            {l.error_message && <div style={{ fontSize: 12, color: 'var(--bad)', marginTop: 2 }}>{l.error_message}</div>}
           </div>
         ))}
       </div>
@@ -729,6 +796,7 @@ function SystemTab() {
   const [tableNames, setTableNames] = useState<string[]>([]);
   const [previewStatus, setPreviewStatus] = useState<'GOOD' | 'BAD' | null>(null);
   const [kbMode, setKbMode] = useState(() => localStorage.getItem('keyboard_mode') || 'integrated');
+  const [contrast, setContrast] = useState(() => localStorage.getItem('contrast_mode') === '1');
   const remoteConnStr = () => {
     const driver = 'ODBC Driver 17 for SQL Server';
     const server = cfg?.sql_server || '192.168.1.200';
@@ -769,12 +837,12 @@ function SystemTab() {
   };
   return (
     <div style={{ minWidth: 0 }}>
-      <h2 style={{ margin: '0 0 10px 0', fontSize: 16 }}>Sistema</h2>
+      <h2 className="page-title" style={{ marginBottom: 14 }}>Sistema</h2>
       {msg && <div className="toast-err" style={{ background: msg.startsWith('Import OK') ? '#e6f4ea' : undefined }}>{msg}</div>}
       <div className="card" style={{ marginBottom: 10 }}>
         <h3>Espera en resultado</h3>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', minWidth: 0 }}>
-          <span style={{ fontSize: 13, color: '#475569' }}>Segundos antes de volver al inicio:</span>
+          <span style={{ fontSize: 13, color: 'var(--text-2)' }}>Segundos antes de volver al inicio:</span>
           <input className="input" type="number" inputMode="numeric" min={3} max={60} value={hold} onChange={e => setHold(e.target.value)} style={{ maxWidth: 90 }} />
           <button className="btn primary" onClick={async () => {
             const n = Math.max(3, Math.min(60, parseInt(hold || '10', 10) || 10));
@@ -786,7 +854,7 @@ function SystemTab() {
       </div>
       <div className="card" style={{ marginBottom: 10 }}>
         <h3>Actualizacion y version</h3>
-        <div style={{ fontSize: 12, color: '#475569', marginBottom: 8 }}>
+        <div style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 8 }}>
           Version de la app: <span className="font-mono">{appVersion || '1.0.0'}</span>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -809,17 +877,17 @@ function SystemTab() {
               setCheckingUpdate(false);
             }
           }}>{checkingUpdate ? 'Buscando...' : 'Buscar actualizaciones'}</button>
-          {updateStatus && <span style={{ fontSize: 12, color: '#64748b' }}>{updateStatus}</span>}
+          {updateStatus && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{updateStatus}</span>}
         </div>
       </div>
       <div className="card" style={{ marginBottom: 10 }}>
         <h3>Datos de debug</h3>
-        <div style={{ fontSize: 12, color: '#475569', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ fontSize: 12, color: 'var(--text-2)', display: 'flex', flexDirection: 'column', gap: 4 }}>
           <div>Núcleo: <span className="font-mono">Rust (sin HTTP)</span></div>
           <div>PLC: <span className="font-mono">{plcStatus?.ip || cfg?.plc_ip || '-'}</span> ({plcStatus?.connected ? 'conectado' : 'desconectado'})</div>
           <div>Hipot: <span className="font-mono">{hipotStatus?.port || '-'}</span></div>
           <div>SQL: <span className="font-mono">{cfg?.sql_server || '-'}</span> / {cfg?.sql_database || '-'}</div>
-          <button className="btn ghost" style={{ fontSize: 11, marginTop: 4 }} onClick={async () => {
+          <button className="btn ghost" style={{ fontSize: 12, marginTop: 4 }} onClick={async () => {
             try {
               const h = await invoke<any>('app_health');
               let p: any = { connected: false };
@@ -833,53 +901,51 @@ function SystemTab() {
               } catch {}
               let hp: any = { connected: false };
               try { hp = await invoke<any>('hipot_status'); } catch {}
-              alert(`Health: ${JSON.stringify(h)}\nPLC: ${JSON.stringify(p)}\nHipot: ${JSON.stringify(hp)}`);
-            } catch (e: any) { alert('Error: ' + (e?.message || e)); }
+              notify(`Health: ${JSON.stringify(h)}\nPLC: ${JSON.stringify(p)}\nHipot: ${JSON.stringify(hp)}`);
+            } catch (e: any) { notify('Error: ' + (e?.message || e), 'error'); }
           }}>Ver estado completo</button>
         </div>
       </div>
       <div className="card" style={{ marginBottom: 10 }}>
         <h3>Previsualizacion de resultado</h3>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button className="btn" title="Previsualizar OK" aria-label="Previsualizar OK" onClick={() => setPreviewStatus('GOOD')}
-            style={{ fontSize: 20, padding: '4px 10px' }}>✅</button>
-          <button className="btn" title="Previsualizar NO OK" aria-label="Previsualizar NO OK" onClick={() => setPreviewStatus('BAD')}
-            style={{ fontSize: 20, padding: '4px 10px' }}>❌</button>
+          <button className="btn ok" onClick={() => setPreviewStatus('GOOD')}>Previsualizar OK</button>
+          <button className="btn danger" onClick={() => setPreviewStatus('BAD')}>Previsualizar MALO</button>
           {previewStatus && (
             <div style={{
               marginLeft: 12, padding: '6px 14px', borderRadius: 8, fontWeight: 700, fontSize: 14,
               background: previewStatus === 'GOOD' ? '#dcfce7' : '#fee2e2',
-              color: previewStatus === 'GOOD' ? '#166534' : '#991b1b',
+              color: previewStatus === 'GOOD' ? 'var(--ok)' : 'var(--bad)',
               border: `1px solid ${previewStatus === 'GOOD' ? '#86efac' : '#fca5a5'}`,
             }}>
-              {previewStatus === 'GOOD' ? '✓ RESULTADO: BUENO' : '✗ RESULTADO: MALO'}
+              {previewStatus === 'GOOD' ? ' RESULTADO: BUENO' : ' RESULTADO: MALO'}
             </div>
           )}
         </div>
-        <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
           Solo previsualizacion. No se guarda ni se registra.
         </div>
       </div>
       <div className="card" style={{ marginBottom: 10 }}>
         <h3>Base de datos local</h3>
-        <div style={{ fontSize: 12, color: '#475569', marginBottom: 8 }}>
+        <div style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 8 }}>
           Motor: <b>SQL Server Express</b> (obligatorio en producción)
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
           <div>
-            <label style={{ fontSize: 12, color: '#475569' }}>Servidor</label>
+            <label style={{ fontSize: 12, color: 'var(--text-2)' }}>Servidor</label>
             <input className="input" value={localDbCfg.server ?? ''} onChange={e => setLocalDbCfg({ ...localDbCfg, use_sqlite: '0', server: e.target.value })} placeholder=".\\SQLEXPRESS" inputMode="text" />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#475569' }}>Base de datos</label>
+            <label style={{ fontSize: 12, color: 'var(--text-2)' }}>Base de datos</label>
             <input className="input" value={localDbCfg.name ?? ''} onChange={e => setLocalDbCfg({ ...localDbCfg, use_sqlite: '0', name: e.target.value })} placeholder="HiPotDB" inputMode="text" />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#475569' }}>Usuario</label>
+            <label style={{ fontSize: 12, color: 'var(--text-2)' }}>Usuario</label>
             <input className="input" value={localDbCfg.user ?? ''} onChange={e => setLocalDbCfg({ ...localDbCfg, use_sqlite: '0', user: e.target.value })} placeholder="(vacío = trusted)" inputMode="text" />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#475569' }}>Contraseña</label>
+            <label style={{ fontSize: 12, color: 'var(--text-2)' }}>Contraseña</label>
             <input className="input" type="password" value={localDbCfg.password ?? ''} onChange={e => setLocalDbCfg({ ...localDbCfg, use_sqlite: '0', password: e.target.value })} placeholder="****" inputMode="text" />
           </div>
         </div>
@@ -887,61 +953,61 @@ function SystemTab() {
           <button className="btn ok" onClick={async () => {
             try {
               const r = await invoke<string>('local_db_config_set', { config: localDbCfg });
-              alert(r === 'saved' ? 'Guardado. Reinicia la app para aplicar.' : r);
-            } catch (e: any) { alert('Error: ' + (e?.message || e)); }
+              notify(r === 'saved' ? 'Guardado. Reinicia la app para aplicar.' : r);
+            } catch (e: any) { notify('Error: ' + (e?.message || e), 'error'); }
           }}>Guardar</button>
           <button className="btn" onClick={async () => {
             try {
               const r = await invoke<string>('local_db_test_connection');
-              alert(`SQL Express: ${r}`);
-            } catch (e: any) { alert('Error: ' + (e?.message || e)); }
+              notify(`SQL Express: ${r}`, 'ok');
+            } catch (e: any) { notify('Error: ' + (e?.message || e), 'error'); }
           }}>Probar SQL Express</button>
           <button className="btn" onClick={async () => {
             try {
               const r = await invoke<any>('local_db_ensure_tables');
-              alert(`Tablas locales verificadas. Creadas: ${r.created ?? 0}`);
-            } catch (e: any) { alert('Error: ' + (e?.message || e)); }
+              notify(`Tablas locales verificadas. Creadas: ${r.created ?? 0}`, 'ok');
+            } catch (e: any) { notify('Error: ' + (e?.message || e), 'error'); }
           }}>Crear tablas locales</button>
           <button className="btn" onClick={async () => {
-            if (!confirm('¿Migrar los datos de hipot_local.db (SQLite) a SQL Express? Se omite lo que ya exista.')) return;
+            if (!await askConfirm('¿Migrar los datos de hipot_local.db (SQLite) a SQL Express? Se omite lo que ya exista.')) return;
             try {
               const r = await invoke<any>('local_db_migrate');
-              alert(`Migración completada:\n${JSON.stringify(r, null, 2)}`);
-            } catch (e: any) { alert('Error: ' + (e?.message || e)); }
+              notify(`Migración completada:\n${JSON.stringify(r, null, 2)}`, 'ok');
+            } catch (e: any) { notify('Error: ' + (e?.message || e), 'error'); }
           }}>Migrar SQLite → SQL Express</button>
           <button className="btn ghost" onClick={() => (window as any).__TAURI__?.core?.invoke?.('open_external', { url: 'https://www.microsoft.com/es-es/sql-server/sql-server-downloads' }).catch?.(() => window.open('https://www.microsoft.com/es-es/sql-server/sql-server-downloads', '_blank'))}>Descargar SQL Express 2025</button>
         </div>
-        <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
           Fase 7: prepara SQL Express, crea las tablas y migra los datos. La app seguirá usando SQLite hasta completar la migración de comandos (7B/7C).
         </div>
       </div>
       <div className="card" style={{ marginBottom: 10 }}>
         <h3>Tablas de la base de datos</h3>
-        <div style={{ fontSize: 12, color: '#475569', marginBottom: 6 }}>
+        <div style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 6 }}>
           Tablas que se crean automaticamente (local y remota):
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-          {tableNames.map(t => <span key={t} className="pill" style={{ fontSize: 11 }}>{t}</span>)}
-          {!tableNames.length && <span style={{ fontSize: 12, color: '#64748b' }}>Cargando...</span>}
+          {tableNames.map(t => <span key={t} className="pill" style={{ fontSize: 12 }}>{t}</span>)}
+          {!tableNames.length && <span style={{ fontSize: 12, color: 'var(--muted)' }}>Cargando...</span>}
         </div>
       </div>
       <div className="card" style={{ marginBottom: 10 }}>
         <h3>Base de datos remota (SQL Server)</h3>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
           <div>
-            <label style={{ fontSize: 12, color: '#475569' }}>Servidor</label>
+            <label style={{ fontSize: 12, color: 'var(--text-2)' }}>Servidor</label>
             <input className="input" value={cfg.sql_server ?? ''} onChange={e => setCfg({ ...cfg, sql_server: e.target.value })} placeholder="192.168.1.200" inputMode="text" />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#475569' }}>Base de datos</label>
+            <label style={{ fontSize: 12, color: 'var(--text-2)' }}>Base de datos</label>
             <input className="input" value={cfg.sql_database ?? ''} onChange={e => setCfg({ ...cfg, sql_database: e.target.value })} placeholder="HiPotDB_Central" inputMode="text" />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#475569' }}>Usuario</label>
+            <label style={{ fontSize: 12, color: 'var(--text-2)' }}>Usuario</label>
             <input className="input" value={cfg.sql_user ?? ''} onChange={e => setCfg({ ...cfg, sql_user: e.target.value })} placeholder="sa" inputMode="text" />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#475569' }}>Contraseña</label>
+            <label style={{ fontSize: 12, color: 'var(--text-2)' }}>Contraseña</label>
             <input className="input" type="password" value={cfg.sql_password ?? ''} onChange={e => setCfg({ ...cfg, sql_password: e.target.value })} placeholder="****" inputMode="text" />
           </div>
         </div>
@@ -949,30 +1015,30 @@ function SystemTab() {
           <button className="btn ok" onClick={async () => {
             const vals: any = {};
             ['sql_server', 'sql_database', 'sql_user', 'sql_password'].forEach(k => { if (cfg[k] !== undefined) vals[k] = cfg[k]; });
-            try { await invoke('set_config', { values: vals }); alert('Guardado'); } catch (e: any) { alert('Error: ' + (e?.message || e)); }
+            try { await invoke('set_config', { values: vals }); notify('Guardado', 'ok'); } catch (e: any) { notify('Error: ' + (e?.message || e), 'error'); }
           }}>Guardar</button>
           <button className="btn ghost" onClick={async () => {
             try {
               const r = await invoke<any>('audit_ensure_tables', { connStr: remoteConnStr() });
-              alert(r.exists ? 'Tablas creadas/verificadas' : 'No se pudo crear');
-            } catch (e: any) { alert('Error: ' + (e?.message || e)); }
+              notify(r.exists ? 'Tablas creadas/verificadas' : 'No se pudo crear', r.exists ? 'ok' : 'error');
+            } catch (e: any) { notify('Error: ' + (e?.message || e), 'error'); }
           }}>Crear tablas en remoto</button>
           <button className="btn ghost" onClick={async () => {
             try {
               const r = await invoke<any>('audit_tables_status', { connStr: remoteConnStr() });
-              alert(`Conexión: ${r.connected ? 'OK' : 'Sin conexión'}\nTabla: ${r.table_exists ? 'Existe' : 'No existe'}${r.error ? '\n' + r.error : ''}`);
-            } catch (e: any) { alert('Error: ' + (e?.message || e)); }
+              notify(`Conexión: ${r.connected ? 'OK' : 'Sin conexión'}\nTabla: ${r.table_exists ? 'Existe' : 'No existe'}${r.error ? '\n' + r.error : ''}`);
+            } catch (e: any) { notify('Error: ' + (e?.message || e), 'error'); }
           }}>Verificar conexión</button>
           <button className="btn ghost" onClick={() => { (window as any).__TAURI__?.core?.invoke?.('open_external', { url: 'https://www.microsoft.com/es-es/sql-server/sql-server-downloads' }).catch?.(() => window.open('https://www.microsoft.com/es-es/sql-server/sql-server-downloads', '_blank')); }}>Descargar SQL Express 2025</button>
         </div>
-        <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
           Para usar SQL Express local, define USE_SQLITE=0 y DB_LOCAL_SERVER en el entorno.
         </div>
       </div>
       <div className="card" style={{ marginBottom: 10 }}>
         <h3>Teclado en pantalla</h3>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 13, color: '#475569' }}>Modo:</span>
+          <span style={{ fontSize: 13, color: 'var(--text-2)' }}>Modo:</span>
           <select className="input" style={{ maxWidth: 200 }} value={kbMode} onChange={e => {
             const v = e.target.value;
             setKbMode(v);
@@ -982,8 +1048,28 @@ function SystemTab() {
             <option value="windows">Teclado de Windows</option>
           </select>
         </div>
-        <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
           {kbMode === 'integrated' ? 'Se usa el teclado virtual de la app.' : 'Se usa el teclado tactil de Windows (TabTip).'}
+        </div>
+      </div>
+      <div className="card" style={{ marginBottom: 10 }}>
+        <h3>Accesibilidad</h3>
+        <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, fontWeight: 600 }}>
+          <input
+            type="checkbox"
+            style={{ width: 18, height: 18 }}
+            checked={contrast}
+            onChange={e => {
+              const on = e.target.checked;
+              setContrast(on);
+              localStorage.setItem('contrast_mode', on ? '1' : '0');
+              document.body.classList.toggle('high-contrast', on);
+            }}
+          />
+          Alto contraste (texto y bordes reforzados)
+        </label>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
+          Útil en ambientes con mucha luz o pantallas de baja calidad.
         </div>
       </div>
       <div className="card" style={{ minWidth: 0 }}>
@@ -993,7 +1079,7 @@ function SystemTab() {
           <label className="btn" style={{ cursor: 'pointer', flex: '1 1 auto' }}>Importar<input type="file" accept=".json" hidden onChange={e => e.target.files?.[0] && doImport(e.target.files[0])} /></label>
           <select className="input" style={{ maxWidth: 140, flex: '1 1 130px' }} value={mode} onChange={e => setMode(e.target.value)}><option value="overwrite">Sobreescribir</option><option value="add">Agregar</option><option value="merge">Merge</option></select>
         </div>
-        <div style={{ marginTop: 10, fontSize: 12, color: '#64748b' }}>{impLog.map((r: any) => <div key={r.id}>#{r.id} {r.op} ({r.mode}) — {r.status}</div>)}</div>
+        <div style={{ marginTop: 10, fontSize: 12, color: 'var(--muted)' }}>{impLog.map((r: any) => <div key={r.id}>#{r.id} {r.op} ({r.mode}) — {r.status}</div>)}</div>
       </div>
     </div>
   );
@@ -1031,19 +1117,19 @@ function ManualTab() {
 
   return (
     <div style={{ minWidth: 0 }}>
-      <h2 style={{ margin: '0 0 10px 0', fontSize: 16 }}>Manual avanzado (sin registro)</h2>
-      {msg && <div style={{ marginBottom: 8, fontSize: 12, color: '#475569' }}>{msg}</div>}
+      <h2 className="page-title" style={{ marginBottom: 14 }}>Manual avanzado (sin registro)</h2>
+      {msg && <div style={{ marginBottom: 8, fontSize: 12, color: 'var(--text-2)' }}>{msg}</div>}
 
       <div className="card" style={{ marginBottom: 10 }}>
         <h3>Salidas del PLC (tags)</h3>
-        <div style={{ fontSize: 12, color: '#64748b', marginBottom: 8 }}>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
           Escribe valores directamente en los tags del PLC. No se guarda en BD.
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 240, overflow: 'auto' }}>
           {tags.map((t: any) => (
             <div key={t.id} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', minWidth: 0 }}>
               <span style={{ flex: '1 1 120px', fontSize: 13, fontWeight: 600 }}>{t.name}</span>
-              <span style={{ fontSize: 11, color: '#64748b', flex: '0 1 80px' }}>{t.data_type}</span>
+              <span style={{ fontSize: 12, color: 'var(--muted)', flex: '0 1 80px' }}>{t.data_type}</span>
               <input className="input" style={{ maxWidth: 100, flex: '0 1 100px' }}
                 defaultValue={t.value ?? ''} id={`tag-${t.id}`}
                 placeholder="valor" />
@@ -1057,29 +1143,29 @@ function ManualTab() {
               </button>
             </div>
           ))}
-          {!tags.length && <div style={{ fontSize: 12, color: '#64748b' }}>No hay tags configurados.</div>}
+          {!tags.length && <div style={{ fontSize: 12, color: 'var(--muted)' }}>No hay tags configurados.</div>}
         </div>
       </div>
 
       <div className="card" style={{ minWidth: 0 }}>
         <h3>Hipot manual (sin registro)</h3>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
-          <span style={{ fontSize: 13, color: '#475569' }}>Voltaje:</span>
+          <span style={{ fontSize: 13, color: 'var(--text-2)' }}>Voltaje:</span>
           <select className="input" style={{ maxWidth: 120 }} value={voltage} onChange={e => setVoltage(+e.target.value)}>
             {[120, 208, 220, 240].map(v => <option key={v} value={v}>{v} V</option>)}
           </select>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          <button className="btn ok" onClick={() => hipotCmd('START')}>Hipot Start</button>
-          <button className="btn danger" onClick={() => hipotCmd('STOP')}>Stop</button>
-          <button className="btn" onClick={() => hipotCmd('STATUS')}>Estado</button>
+          <button className="btn ok" onClick={() => hipotCmd('START')}>Iniciar Hipot</button>
+          <button className="btn danger" onClick={() => hipotCmd('STOP')}>Detener</button>
+          <button className="btn" onClick={() => hipotCmd('STATUS')}>Consultar estado</button>
           {hipot && (
-            <span style={{ fontSize: 12, color: '#475569', marginLeft: 8 }}>
+            <span style={{ fontSize: 12, color: 'var(--text-2)', marginLeft: 8 }}>
               {hipot.raw || '-'} {hipot.parsed?.voltage != null ? `→ ${hipot.parsed.voltage}V` : ''} {hipot.parsed?.pass ? 'PASS' : hipot.parsed?.pass === false ? 'FAIL' : ''}
             </span>
           )}
         </div>
-        <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
           No guarda en BD. Solo visualización y control directo.
         </div>
       </div>
@@ -1126,9 +1212,9 @@ function PlcIoTab() {
 
   return (
     <div style={{ minWidth: 0 }}>
-      <h2 style={{ margin: '0 0 10px 0', fontSize: 16 }}>Monitor PLC (IO) - Lectura y escritura de Q</h2>
+      <h2 className="page-title" style={{ marginBottom: 14 }}>Monitor PLC (IO) - Lectura y escritura de Q</h2>
       {(err || status?.error) && <div className="toast-err">{err || status?.error}</div>}
-      <div style={{ fontSize: 12, color: '#64748b', marginBottom: 10 }}>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
         Actualizacion automatica cada 2 segundos. Los indicadores muestran el estado en tiempo real.
       </div>
 
@@ -1136,13 +1222,13 @@ function PlcIoTab() {
         <h3>Salidas digitales (Q)</h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 6 }}>
           {Object.entries(status?.outputs ?? {}).map(([q, v]) => (
-            <div key={q} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: '#fff', borderRadius: 6, border: '1px solid #d8e0ea' }}>
-              <span style={{ width: 10, height: 10, borderRadius: '50%', background: v ? '#166534' : '#94a3b8', flexShrink: 0 }} />
+            <div key={q} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: '#fff', borderRadius: 6, border: '1px solid var(--line)' }}>
+              <span style={{ width: 10, height: 10, borderRadius: '50%', background: v ? 'var(--ok)' : '#94a3b8', flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <b style={{ fontSize: 12 }}>{q}</b>
-                <div style={{ fontSize: 10, color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis' }}>{Q_LABELS[q] || ''}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{Q_LABELS[q] || ''}</div>
               </div>
-              <span className={`pill ${v ? 'on' : ''}`} style={{ fontSize: 10 }}>{v ? 'ON' : 'OFF'}</span>
+              <span className={`pill ${v ? 'on' : ''}`} style={{ fontSize: 12 }}>{v ? 'ON' : 'OFF'}</span>
             </div>
           ))}
         </div>
@@ -1152,13 +1238,13 @@ function PlcIoTab() {
         <h3>Entradas digitales (I)</h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 6 }}>
           {Object.entries(status?.inputs ?? {}).map(([i, v]) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: '#fff', borderRadius: 6, border: '1px solid #d8e0ea' }}>
-              <span style={{ width: 10, height: 10, borderRadius: '50%', background: v ? '#b7790f' : '#94a3b8', flexShrink: 0 }} />
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: '#fff', borderRadius: 6, border: '1px solid var(--line)' }}>
+              <span style={{ width: 10, height: 10, borderRadius: '50%', background: v ? 'var(--accent)' : '#94a3b8', flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <b style={{ fontSize: 12 }}>{i}</b>
-                <div style={{ fontSize: 10, color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis' }}>{I_LABELS[i] || ''}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{I_LABELS[i] || ''}</div>
               </div>
-              <span className={`pill ${v ? 'accent' : ''}`} style={{ fontSize: 10 }}>{v ? 'ON' : 'OFF'}</span>
+              <span className={`pill ${v ? 'accent' : ''}`} style={{ fontSize: 12 }}>{v ? 'ON' : 'OFF'}</span>
             </div>
           ))}
         </div>
@@ -1168,12 +1254,12 @@ function PlcIoTab() {
         <h3>Entradas analogicas (IA)</h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 6 }}>
           {Object.entries(status?.analog ?? {}).map(([ia, v]) => (
-            <div key={ia} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: '#fff', borderRadius: 6, border: '1px solid #d8e0ea' }}>
+            <div key={ia} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: '#fff', borderRadius: 6, border: '1px solid var(--line)' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <b style={{ fontSize: 12 }}>{ia}</b>
-                <div style={{ fontSize: 10, color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis' }}>{IA_LABELS[ia] || ''}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{IA_LABELS[ia] || ''}</div>
               </div>
-              <span className="pill" style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums' }}>{Number(v).toFixed(2)}</span>
+              <span className="pill" style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>{Number(v).toFixed(2)}</span>
             </div>
           ))}
         </div>

@@ -7,9 +7,10 @@ export function ReprintPopup({ open, onClose }: { open: boolean; onClose: () => 
   const [sel, setSel] = useState<string>('');
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const load = async () => {
-    setMsg('');
+    setMsg(''); setLoading(true);
     try {
       const r:any = await invoke('history_list', { model: '', serial: '', start: '', end: '', limit: 50 });
       const arr = Array.isArray(r) ? r : (r.rows || []);
@@ -18,6 +19,7 @@ export function ReprintPopup({ open, onClose }: { open: boolean; onClose: () => 
       if (goods[0] && !sel) setSel(String(goods[0].id));
       if (!goods.length) setMsg('Sin registros BUENOS aún');
     } catch (e: any) { setMsg(String(e?.message ?? e)); }
+    finally { setLoading(false); }
   };
   useEffect(() => { if (open) load(); }, [open]);
 
@@ -32,9 +34,8 @@ export function ReprintPopup({ open, onClose }: { open: boolean; onClose: () => 
       const port = parseInt(cfg?.printer_port || '9100', 10);
       const name = cfg?.printer_name || 'Zebra ZT231';
       const r = await invoke<string>('reprint_zebra', { eid: Number(sel), printerIp: ip, printerPort: port, printerName: name });
-      setMsg(r === 'OK' ? '✓ Etiqueta enviada a Zebra ZT231' : `✗ ${r}`);
-      setMsg('✅ Etiqueta enviada a Zebra ZT231');
-    } catch (e: any) { setMsg(`❌ ${e?.message ?? e}`); }
+      setMsg(r === 'OK' ? 'Etiqueta enviada a Zebra ZT231' : `Error: ${r}`);
+    } catch (e: any) { setMsg(` ${e?.message ?? e}`); }
     finally { setBusy(false); }
   };
 
@@ -48,7 +49,7 @@ export function ReprintPopup({ open, onClose }: { open: boolean; onClose: () => 
             onClick={e => e.stopPropagation()}
             className="card" style={{ width: 'min(560px,96vw)', maxHeight: '88vh', overflow: 'auto', minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-              <h3 style={{ margin: 0, flex: 1 }}>🖨️ Reimprimir etiqueta</h3>
+              <h3 style={{ margin: 0, flex: 1 }}> Reimprimir etiqueta</h3>
               <button className="btn sm" onClick={onClose}>Cerrar</button>
             </div>
             <div style={{ fontSize: 12, color: '#64748b', marginBottom: 8 }}>Últimos 20 registros con resultado <b style={{ color: '#166534' }}>BUENO</b> — seleccione y reimprima.</div>
@@ -56,7 +57,7 @@ export function ReprintPopup({ open, onClose }: { open: boolean; onClose: () => 
               {list.map((x: any) => (
                 <option key={x.id} value={String(x.id)}>#{x.id} · {x.serial || '—'} · {x.final} · {x.created?.slice(0, 19).replace('T',' ')}</option>
               ))}
-              {!list.length && <option value="">— sin datos —</option>}
+              {!list.length && <option value="">{loading ? 'Cargando…' : 'Sin datos'}</option>}
             </select>
             {chosen && (
               <div style={{ background: '#f8fafc', border: '1px solid var(--line)', borderRadius: 8, padding: 8, fontSize: 12, marginBottom: 10 }}>
@@ -64,10 +65,10 @@ export function ReprintPopup({ open, onClose }: { open: boolean; onClose: () => 
                 <div style={{ color: '#64748b' }}>Creado: {chosen.created?.slice(0, 19).replace('T',' ')}</div>
               </div>
             )}
-            {msg && <div className="toast-err" style={{ background: msg.startsWith('✅') ? '#e6f4ea' : undefined, borderColor: msg.startsWith('✅') ? '#a8d0b4' : undefined, color: msg.startsWith('✅') ? '#166534' : undefined }}>{msg}</div>}
+            {msg && <div className="toast-err" style={{ background: msg.startsWith('') ? '#e6f4ea' : undefined, borderColor: msg.startsWith('') ? '#a8d0b4' : undefined, color: msg.startsWith('') ? '#166534' : undefined }}>{msg}</div>}
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8, flexWrap: 'wrap' }}>
               <button className="btn" onClick={onClose}>Cancelar</button>
-              <button className="btn primary" disabled={!sel || busy} onClick={doPrint}>{busy ? 'Enviando…' : '🖨️ Reimprimir'}</button>
+              <button className="btn primary" disabled={!sel || busy} onClick={doPrint}>{busy ? 'Enviando…' : ' Reimprimir'}</button>
             </div>
           </motion.div>
         </motion.div>

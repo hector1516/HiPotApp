@@ -1,8 +1,13 @@
 import { useEffect, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { Gauge } from '../components/Gauge';
+import { SplitLayout } from '../components/SplitLayout';
+import { PageHeader } from '../components/PageHeader';
+import { useHipot } from '../hooks/useHipot';
 
-// Modo manual: sin guardar, sin modelo, 1-a-1 por hardware. Todo en una pantalla.
+type PendingAction = 'START' | 'STOP' | null;
+
 export function ManualScreen({ onBack }: { onBack: () => void }) {
   const [recipes, setRecipes] = useState<any[]>([]);
   const [rid, setRid] = useState<number | null>(null);
@@ -11,6 +16,8 @@ export function ManualScreen({ onBack }: { onBack: () => void }) {
   const [values, setValues] = useState<Record<string, number>>({});
   const [hipot, setHipot] = useState<{ raw: string; parsed: any } | null>(null);
   const [err, setErr] = useState('');
+  const [pending, setPending] = useState<PendingAction>(null);
+  const hipotStatus = useHipot();
 
   useEffect(() => {
     invoke('plc_set_mode', { mode: 2 }).catch(() => {});
@@ -27,36 +34,37 @@ export function ManualScreen({ onBack }: { onBack: () => void }) {
 
   const recipe = recipes.find(r => r.id === rid) ?? null;
   const [detail, setDetail] = useState<any>(null);
+
   useEffect(() => {
-    if (!recipe) return;
+    if (!recipe) { setDetail(null); return; }
     invoke<any>('get_recipe_by_model', { model: recipe.model }).then(setDetail).catch(() => setDetail(null));
   }, [recipe?.model]);
 
   const items: { name: string; min: number; max: number; enabled: boolean }[] =
-    (detail?.components ?? [
-      { name: 'FAN', min: 0.3, max: 1.5, enabled: true },
-      { name: 'DOOR', min: 1.5, max: 3.0, enabled: true },
-      { name: 'FRAME', min: 0.5, max: 1.2, enabled: true },
-      { name: 'DRAIN', min: 1.5, max: 2.8, enabled: true },
-      { name: 'DEFROST', min: 0.4, max: 1.0, enabled: true },
-      { name: 'LIGHT', min: 0.1, max: 0.6, enabled: true },
-    ]).map((c: any) => ({ name: c.name, min: c.min, max: c.max, enabled: c.enabled !== false }));
+    (detail?.components ?? []).map((c: any) => ({
+      name: c.name, min: c.min, max: c.max, enabled: c.enabled !== false,
+    }));
 
   const testOne = async (name: string) => {
     if (active) return;
     setActive(name); setErr('');
     try {
-      const r = await invoke<any>('plc_test_component', { component: name, voltage });
-      setValues(v => ({ ...v, [name]: Number(r?.value ?? 0) }));
-      for (let i = 0; i < 5; i++) {
-        await new Promise(res => setTimeout(res, 350));
+      // Dispara UNA vez. Después solo se consultan resultados.
+      const first = await invoke<any>('plc_test_component', { component: name, voltage });
+      setValues(v => ({ ...v, [name]: Number(first?.value ?? 0) }));
+      for (let i = 0; i < 6; i++) {
+        await new Promise(res => setTimeout(res, 400));
         try {
-          const s = await invoke<any>('plc_test_component', { component: name, voltage });
-          setValues(v => ({ ...v, [name]: Number(s?.value ?? 0) }));
+          const all = await invoke<any>('plc_read_results');
+          const v = all?.[name] ?? all?.[name.toUpperCase()];
+          if (typeof v === 'number') setValues(prev => ({ ...prev, [name]: v }));
         } catch {}
       }
-    } catch (e: any) { setErr(String(e?.message ?? e)); }
-    finally { setActive(null); }
+    } catch (e: any) {
+      setErr(String(e?.message ?? e));
+    } finally {
+      setActive(null);
+    }
   };
 
   const hipotCmd = async (action: 'START' | 'STOP' | 'STATUS') => {
@@ -64,76 +72,179 @@ export function ManualScreen({ onBack }: { onBack: () => void }) {
       const r = await invoke<any>('hipot_test', { action });
       if (r?.error) throw new Error(r.error);
       setHipot({ raw: r.response ?? '', parsed: r.parsed ?? {} });
+    } catch (e: any) {
+      setErr(String(e?.message ?? e));
     }
-    catch (e: any) { setErr(String(e?.message ?? e)); }
   };
 
-  return (
-    <div style={{ padding: 12, position: 'relative', zIndex: 1, minWidth: 0 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap', minWidth: 0 }}>
-        <button className="btn" onClick={onBack}>← Volver</button>
-        <h2 style={{ margin: 0, flex: 1, minWidth: 140, fontSize: 16 }}>Modo manual — un componente a la vez</h2>
-        <span className="pill accent" style={{ flexShrink: 0 }}>Manual · No guarda · DB1.DBW110=2</span>
+  const runPending = async () => {
+    const action = pending;
+    setPending(null);
+    if (!action) return;
+    await hipotCmd(action);
+  };
+
+  const aside = (
+    <>
+      <div>
+        <div className="rail-eyebrow">Modo manual</div>
+        <h2 className="rail-title">Prueba 1 a 1</h2>
+        <p className="rail-sub">Sin modelo, serie ni batch. No guarda en base de datos. Solo control y visualización.</p>
       </div>
 
-      <div className="card" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10, minWidth: 0 }}>
-        <select className="input" style={{ maxWidth: 280, flex: '1 1 220px' }} value={rid ?? ''} onChange={e => setRid(+e.target.value)}>
+      <div className="rail-divider" />
+
+      <div className="field">
+        <label>Receta</label>
+        <select className="input" value={rid ?? ''} onChange={e => setRid(+e.target.value)}>
           {recipes.map(r => <option key={r.id} value={r.id}>{r.model} — {r.name}</option>)}
-          {!recipes.length && <option value="">Sin recetas — demo</option>}
+          {!recipes.length && <option value="">Sin recetas</option>}
         </select>
-        <select className="input" style={{ maxWidth: 130, flex: '0 1 130px' }} value={voltage} onChange={e => setVoltage(+e.target.value)}>
+      </div>
+
+      <div className="field">
+        <label>Voltaje de prueba</label>
+        <select className="input" value={voltage} onChange={e => setVoltage(+e.target.value)}>
           {[120, 208, 220, 240].map(v => <option key={v} value={v}>{v} V</option>)}
         </select>
-        <span style={{ fontSize: 12, color: '#64748b', marginLeft: 'auto' }}>Solo 1 botón activo a la vez por hardware.</span>
       </div>
 
-      {err && <div className="toast-err">{err}</div>}
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10, alignItems: 'start' }}>
-        {items.map(c => {
-          const v = values[c.name];
-          const measuring = active === c.name;
-          const busy = !!active;
-          return (
-            <div key={c.name}
-              style={{
-                background: measuring ? '#fdf6e3' : '#fff',
-                borderRadius: 10, padding: 10,
-                border: `1px solid ${measuring ? '#f0d9a0' : '#d8e0ea'}`,
-                opacity: c.enabled ? 1 : 0.5, minWidth: 0, overflow: 'hidden',
-              }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                <b style={{ fontSize: 13, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</b>
-                <span className={`pill ${measuring ? 'accent' : ''}`} style={{ marginLeft: 'auto', fontSize: 11, flexShrink: 0 }}>
-                  {measuring ? 'Midiendo' : `${c.min}–${c.max} A`}
-                </span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'center', padding: '6px 0' }}>
-                <Gauge label={c.name} value={v ?? 0} min={c.min} max={c.max} size={124} />
-              </div>
-              <button className={`btn ${measuring ? '' : 'primary'}`} style={{ width: '100%' }}
-                disabled={busy || !c.enabled} onClick={() => testOne(c.name)}>
-                {measuring ? 'Midiendo…' : 'Probar'}
-              </button>
-            </div>
-          );
-        })}
+      <div className="rail-kpi">
+        <span className="label">Componentes</span>
+        <span className="value">{items.length}</span>
+      </div>
+      <div className="rail-kpi">
+        <span className="label">Hipot</span>
+        <span className="value">{hipotStatus.connected ? 'Conectado' : 'Sin conexión'}</span>
       </div>
 
-      <div className="card" style={{ marginTop: 10 }}>
-        <h3 style={{ margin: '0 0 8px 0', fontSize: 14 }}>Hipot — manual</h3>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', minWidth: 0 }}>
-          <button className="btn ok" disabled={!!active} onClick={() => hipotCmd('START')}>Hipot Start</button>
-          <button className="btn danger" onClick={() => hipotCmd('STOP')}>Stop</button>
-          <button className="btn" onClick={() => hipotCmd('STATUS')}>Estado</button>
-          {hipot && (
-            <span className={`pill ${hipot.parsed?.pass === false ? 'off' : hipot.parsed?.pass ? 'on' : ''}`} style={{ maxWidth: 520, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {hipot.raw || '—'} {hipot.parsed?.voltage != null ? `· ${hipot.parsed.voltage}V` : ''} {hipot.parsed?.pass ? 'PASS' : hipot.parsed?.pass === false ? 'FAIL' : ''}
-            </span>
-          )}
+      <div className="rail-divider" />
+
+      <div className="stack" style={{ gap: 8 }}>
+        <div className="rail-eyebrow">Hipot manual</div>
+        <div className="row" style={{ gap: 8 }}>
+          <button className="btn ok" style={{ flex: 1 }} onClick={() => setPending('START')}>Iniciar</button>
+          <button className="btn danger" style={{ flex: 1 }} onClick={() => setPending('STOP')}>Detener</button>
         </div>
-        <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>No pide modelo/serie/batch. No guarda en BD. Solo visualización.</div>
+        <button className="btn" style={{ width: '100%' }} onClick={() => hipotCmd('STATUS')}>Consultar estado</button>
+        {hipot && (
+          <div className="rail-status" style={{ alignItems: 'flex-start', fontSize: 11, color: 'var(--on-rail-muted)' }}>
+            <span className={`dot ${hipot.parsed?.pass === false ? 'bad' : hipot.parsed?.pass ? 'ok' : 'warn'}`} />
+            <span className="mono" style={{ wordBreak: 'break-all' }}>{hipot.raw || '—'}</span>
+          </div>
+        )}
       </div>
-    </div>
+
+      <div className="rail-divider" />
+
+      <div className="image-card">
+        <img src="/IMG_0854.png" alt="Estación de pruebas HiPot" style={{ maxHeight: 110 }} />
+      </div>
+
+      <div className="rail-actions">
+        <button className="btn" style={{ width: '100%' }} onClick={onBack}>← Volver al inicio</button>
+        <div className="rail-status" style={{ fontSize: 11, color: 'var(--on-rail-muted)' }}>
+          <span>DB1.DBW110 = 2 (manual)</span>
+        </div>
+      </div>
+    </>
+  );
+
+  return (
+    <>
+      <SplitLayout aside={aside}>
+        <PageHeader
+          eyebrow="Hardware · Manual"
+          title="Prueba componente por componente"
+          subtitle="Solo un componente activo a la vez. Los resultados no se registran."
+          actions={recipe ? <span className="pill accent">{recipe.model}</span> : null}
+        />
+
+        {err && <div className="alert">{err}</div>}
+
+        {!recipe ? (
+          <div className="card" style={{ textAlign: 'center', padding: 40 }}>
+            <div className="page-title" style={{ fontSize: 18 }}>Seleccione una receta</div>
+            <p className="page-sub">No hay recetas cargadas. Cree una receta en Configuración → Recetas para probar componentes.</p>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
+            {items.map(c => {
+              const v = values[c.name];
+              const measuring = active === c.name;
+              const busy = !!active;
+              return (
+                <motion.div
+                  key={c.name}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.25 }}
+                  className="card"
+                  style={{
+                    padding: 12,
+                    opacity: c.enabled ? 1 : 0.5,
+                    borderColor: measuring ? 'var(--accent)' : undefined,
+                    background: measuring ? 'var(--accent-soft)' : undefined,
+                  }}
+                >
+                  <div className="row" style={{ justifyContent: 'space-between', marginBottom: 6 }}>
+                    <b style={{ fontSize: 14 }}>{c.name}</b>
+                    <span className={`pill ${measuring ? 'accent' : ''}`}>
+                      {measuring ? 'Midiendo' : `${c.min}–${c.max} A`}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'center', padding: '4px 0' }}>
+                    <Gauge label={c.name} value={v ?? 0} min={c.min} max={c.max} size={124} />
+                  </div>
+                  <button
+                    className={`btn ${measuring ? '' : 'primary'}`}
+                    style={{ width: '100%', marginTop: 8 }}
+                    disabled={busy || !c.enabled}
+                    onClick={() => testOne(c.name)}
+                  >
+                    {measuring ? 'Midiendo…' : 'Probar'}
+                  </button>
+                </motion.div>
+              );
+            })}
+            {!items.length && (
+              <div className="card" style={{ gridColumn: '1 / -1', textAlign: 'center', padding: 32 }}>
+                <div className="page-title" style={{ fontSize: 18 }}>La receta no tiene componentes</div>
+                <p className="page-sub">Edite la receta y agregue componentes habilitados.</p>
+              </div>
+            )}
+          </div>
+        )}
+      </SplitLayout>
+
+      <AnimatePresence>
+        {pending && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 6000, padding: 16 }}
+            onClick={() => setPending(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.96, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.96, opacity: 0 }}
+              className="card" style={{ width: 'min(420px, 96vw)' }}
+              onClick={e => e.stopPropagation()}
+            >
+              <h3>{pending === 'START' ? 'Iniciar Hipot' : 'Detener Hipot'}</h3>
+              <p className="page-sub" style={{ marginBottom: 16 }}>
+                {pending === 'START'
+                  ? 'Se aplicará alta tensión a la unidad. Verifique que el área esté despejada.'
+                  : 'Se detendrá la prueba de Hipot en curso.'}
+              </p>
+              <div className="row" style={{ justifyContent: 'flex-end' }}>
+                <button className="btn" onClick={() => setPending(null)}>Cancelar</button>
+                <button className={`btn ${pending === 'START' ? 'ok' : 'danger'}`} onClick={runPending}>
+                  {pending === 'START' ? 'Iniciar Hipot' : 'Detener Hipot'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
   );
 }

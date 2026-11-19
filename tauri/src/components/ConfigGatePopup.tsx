@@ -17,10 +17,10 @@ export function ConfigGatePopup({ open, onClose, onAdmin }: { open: boolean; onC
         onClose();
         onAdmin(batch);
       } else {
-        setMsg('⛔ Solo admin puede entrar a configuración. Este gafete es de operador.');
+        setMsg(' Solo admin puede entrar a configuración. Este gafete es de operador.');
       }
     } catch (e:any) {
-      setMsg(`❌ Gafete no encontrado o inactivo: ${batch}`);
+      setMsg(` Gafete no encontrado o inactivo: ${batch}`);
     } finally { setBusy(false); }
   };
 
@@ -34,11 +34,11 @@ export function ConfigGatePopup({ open, onClose, onAdmin }: { open: boolean; onC
             onClick={e=>e.stopPropagation()}
             className="card" style={{ width: 'min(420px,96vw)', textAlign: 'center', minWidth: 0 }}>
             <img src="logo.png" alt="" style={{ width: 180, margin: '0 auto', display: 'block' }} />
-            <h3 style={{ margin: '8px 0 4px 0' }}>🔒 Configuración — escanea tu gafete</h3>
+            <h3 style={{ margin: '8px 0 4px 0' }}> Configuración — escanea tu gafete</h3>
             <div style={{ fontSize: 12, color: '#64748b', marginBottom: 10 }}>Solo <b>admin</b> entra. Si es operador, se denegará.</div>
             <BarcodeInput label="" placeholder="Escanea tu BATCH / gafete aquí" onScan={tryBatch} autoFocus />
             {busy && <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>Verificando…</div>}
-            {msg && <div className="toast-err" style={{ background: msg.startsWith('⛔')||msg.startsWith('❌') ? '#fef2f2' : '#e6f4ea', color: msg.startsWith('⛔')||msg.startsWith('❌') ? '#991b1b' : '#166534', marginTop: 8 }}>{msg}</div>}
+            {msg && <div className="toast-err" style={{ background: msg.startsWith('')||msg.startsWith('') ? '#fef2f2' : '#e6f4ea', color: msg.startsWith('')||msg.startsWith('') ? '#991b1b' : '#166534', marginTop: 8 }}>{msg}</div>}
             <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 12 }}>
               <button className="btn" onClick={onClose}>Cancelar</button>
               <span style={{ fontSize: 11, color: '#94a3b8', alignSelf: 'center' }}>GodMode: Ctrl+Shift+K</span>

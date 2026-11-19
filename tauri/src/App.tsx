@@ -11,6 +11,7 @@ import { ReprintPopup } from './components/ReprintPopup';
 import { LogPopup } from './components/LogPopup';
 import { HistoryPopup } from './components/HistoryPopup';
 import { ConfigGatePopup } from './components/ConfigGatePopup';
+import { FeedbackHost } from './components/Feedback';
 import VirtualKeyboard from './components/VirtualKeyboard';
 import { Phase } from './styles/theme';
 import { invoke } from '@tauri-apps/api/core';
@@ -36,6 +37,7 @@ export default function App() {
     };
     window.addEventListener('error', handler);
     window.addEventListener('unhandledrejection', rejectionHandler);
+    document.body.classList.toggle('high-contrast', localStorage.getItem('contrast_mode') === '1');
     return () => {
       window.removeEventListener('error', handler);
       window.removeEventListener('unhandledrejection', rejectionHandler);
@@ -290,42 +292,86 @@ export default function App() {
     if (c.enabled) limits[c.name] = { min: c.min, max: c.max };
   });
 
+  const reprintCurrent = async () => {
+    if (!execId) return;
+    setPrintStatus('sending');
+    try {
+      const cfg = await invoke<any>('get_config').catch(() => ({}));
+      const p = await invoke<string>('reprint_zebra', {
+        eid: execId,
+        printerIp: cfg?.printer_ip || '',
+        printerPort: parseInt(cfg?.printer_port || '9100', 10),
+        printerName: cfg?.printer_name || 'Zebra ZT231',
+      });
+      setPrintStatus(p === 'OK' ? 'sent' : 'error');
+    } catch {
+      setPrintStatus('error');
+    }
+  };
+
+  const retryHealth = async () => {
+    try {
+      const r = await invoke<any>('app_health');
+      setHealth(!!r && (r.status === 'healthy' || r.database === true));
+    } catch {
+      setHealth(false);
+    }
+  };
+
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+    <div className="app-shell">
       <Backdrop phase={phase} />
-      <img src="logo.png" alt="" aria-hidden
-        style={{ position: 'fixed', right: 16, bottom: 12, width: 320,
-                 opacity: 0.06, zIndex: 0, pointerEvents: 'none' }} />
       <UpdateNotification />
+      <FeedbackHost />
       <VirtualKeyboard visible={kbVisible} layout={kbLayout} onClose={() => setKbVisible(false)} />
-      <header style={{ height: 64, display: 'flex', alignItems: 'center', gap: 10, padding: '0 12px',
-                       background: '#141b26', color: '#fff',
-                       position: 'relative', zIndex: 1, borderBottom: '3px solid #b7790f' }}>
-        <img src="logo.png" alt="HiPot Tester" style={{ height: 42, objectFit: 'contain' }} />
-        <b style={{ fontSize: 18, letterSpacing: '-.02em' }}>HiPot<span style={{ color: '#d9a441', fontWeight: 800 }}>App</span></b>
-        <span className="pill" style={{ background: '#1e2a3a', borderColor: '#2a3a52', color: '#cbd5e1' }}>PASO {Math.min(step, 6)}/6</span>
-        {recipe && <span className="pill" style={{ background: '#1e2a3a', borderColor: '#2a3a52', color: '#e2e8f0' }}>{recipe.model}</span>}
-        <span style={{ marginLeft: 'auto', fontSize: 13, color: '#cbd5e1', fontVariantNumeric: 'tabular-nums' }}>{clock}</span>
-        <button className="btn" style={{ background: '#fff', color: '#141b26', borderColor: '#d8e0ea' }}
-          onClick={() => setShowHistory(true)}>📊 HISTORIAL</button>
-        <button className="btn" style={{ background: '#fff', color: '#141b26', borderColor: '#d8e0ea' }}
-          onClick={() => setShowReprint(true)}>🖨️ REIMPRIMIR</button>
-        <button className="btn" style={{ background: '#fff', color: '#141b26', borderColor: '#d8e0ea' }}
-          onClick={() => setShowLog(true)}>📋 LOG</button>
-        <button className="btn" style={{ background: '#b7790f', color: '#fff', borderColor: '#b7790f' }}
-          onClick={() => setView('manual')}>🧪 MANUAL</button>
-        <button className="btn ghost" style={{ background: '#1e2a3a', color: '#fff', borderColor: '#334155' }}
-          onClick={() => setShowConfigGate(true)} title="Escanea gafete o Ctrl+Shift+K">CONFIG</button>
+
+      <header className="app-topbar">
+        <div className="app-brand">
+          <img src="logo.png" alt="HiPot Tester" />
+          <span style={{ color: '#fff' }}>HiPot<span style={{ color: 'var(--accent-2)' }}>App</span></span>
+        </div>
+        <span className="pill dark" style={{ fontSize: 11 }}>PASO {Math.min(step, 6)}/6</span>
+        {recipe && <span className="pill dark" style={{ fontSize: 11 }}>{recipe.model}</span>}
+        {adminBatch && <span className="pill dark" style={{ fontSize: 11 }}>Admin: {adminBatch}</span>}
+        <span className="spacer" />
+        <span className="app-clock">{clock}</span>
+        <span className="rail-status" style={{ fontSize: 12, color: health ? '#86efac' : '#fca5a5' }}>
+          <span className={`dot ${health ? 'ok' : 'bad'}`} />
+          {health ? 'Sistema OK' : 'BD sin conexión'}
+        </span>
+        <button className="btn" onClick={() => setShowHistory(true)}>Historial</button>
+        <button className="btn" onClick={() => setShowReprint(true)}>Reimprimir</button>
+        <button className="btn" onClick={() => setShowLog(true)}>Log</button>
+        <button className="btn" onClick={() => setView('manual')}>Manual</button>
+        <button className="btn accent" onClick={() => setShowConfigGate(true)} title="Escanea gafete o Ctrl+Shift+K">Configurar</button>
       </header>
 
-      <main style={{ flex: 1, position: 'relative', zIndex: 1 }}>
+      <AnimatePresence>
+        {!health && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            style={{ overflow: 'hidden' }}
+          >
+            <div className="alert" style={{ margin: 0, borderRadius: 0, borderLeftWidth: 4, alignItems: 'center' }}>
+              <b>SQL Express no está disponible.</b>
+              <span style={{ fontWeight: 500 }}>Revise el servicio o la configuración en Sistema → Base de datos local.</span>
+              <span className="spacer" />
+              <button className="btn sm" onClick={retryHealth}>Reintentar</button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <main className="app-body" style={{ position: 'relative', zIndex: 1 }}>
         <AnimatePresence mode="wait">
           <motion.div
             key={view + phase}
-            initial={{ opacity: 0, x: 60 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -60 }}
-            transition={{ duration: 0.25 }}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
           >
         {view === 'home' && (
           <HomeScreen step={step} recipe={recipe} serial={serial} batch={batch} error={error}
@@ -344,7 +390,7 @@ export default function App() {
               { label: `Exec #${execId ?? '-'} · PLC`, value: 'PASS', ok: final === 'GOOD' ? true : null },
               { label: 'Hipot', value: 'PASS', ok: final === 'GOOD' ? true : null },
             ]}
-            onNext={reset} />
+            onNext={reset} onReprint={reprintCurrent} />
         )}
         {view === 'admin' && <AdminPanel onBack={reset} adminBatch={adminBatch} />}
         {view === 'manual' && <ManualScreen onBack={reset} />}
@@ -352,17 +398,16 @@ export default function App() {
         </AnimatePresence>
       </main>
 
-      <footer style={{ minHeight: 48, display: 'flex', alignItems: 'center', gap: 10,
-                       padding: '6px 14px', background: '#141b26', color: '#94a3b8',
-                       position: 'relative', zIndex: 1, borderTop: '1px solid #2a3a52', fontSize: 13 }}>
-        <span className={`pill ${phase.startsWith('COMPLETE_GOOD') ? 'on' : phase.startsWith('COMPLETE_BAD') ? 'off' : ''}`} style={{ fontSize: 12 }}>
+      <footer className="app-footer">
+        <span className={`pill ${phase.startsWith('COMPLETE_GOOD') ? 'on' : phase.startsWith('COMPLETE_BAD') ? 'off' : ''}`} style={{ fontSize: 11 }}>
           {phase.replace(/_/g, ' ')}
         </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: health ? '#166534' : '#991b1b' }} />
-          {health ? 'Sistema OK' : 'BD sin conexion'}
+        <span className="rail-status" style={{ fontSize: 12, color: 'var(--on-rail-muted)' }}>
+          <span className={`dot ${health ? 'ok' : 'bad'}`} />
+          {health ? 'SQL Express conectado' : 'SQL Express sin conexión'}
         </span>
-        <span style={{ marginLeft: 'auto' }}>Offline-first · Windows 11 · v1.0.0 · Ctrl+Shift+K → GodMode</span>
+        <span className="spacer" />
+        <span style={{ color: 'var(--muted-2)', fontSize: 11 }}>Offline-first · Windows 11 · v1.0.31 · Ctrl+Shift+K → GodMode</span>
       </footer>
 
       <ReprintPopup open={showReprint} onClose={() => setShowReprint(false)} />

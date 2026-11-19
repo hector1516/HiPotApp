@@ -64,7 +64,7 @@ export function HistoryPopup({ open, onClose }: { open: boolean; onClose: () => 
             onClick={e=>e.stopPropagation()}
             className="card" style={{ width: 'min(980px,98vw)', maxHeight: '90vh', display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden', padding: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <h3 style={{ margin: 0, flex: 1, fontSize: 16 }}>📊 Historial de pruebas</h3>
+              <h3 style={{ margin: 0, flex: 1, fontSize: 16 }}> Historial de pruebas</h3>
               <button className="btn sm" onClick={onClose}>Cerrar</button>
             </div>
 
@@ -82,18 +82,18 @@ export function HistoryPopup({ open, onClose }: { open: boolean; onClose: () => 
                   animate={played ? { scale: [1, 1.08, 0.96, 1.06, 1], rotate: [0, -2, 2, -1, 0] } : {}}
                   transition={{ duration: 0.9, ease: 'easeInOut' }}
                   className="btn primary" style={{ flexShrink: 0, minWidth: 140 }} disabled={busy} onClick={query}>
-                  {busy ? 'Consultando…' : '🔍 Consultar'}
+                  {busy ? 'Consultando…' : ' Consultar'}
                 </motion.button>
-                <button className="btn" style={{ flexShrink: 0 }} disabled={!rows.length} onClick={exportExcel}>📥 Excel</button>
+                <button className="btn" style={{ flexShrink: 0 }} disabled={!rows.length} onClick={exportExcel}> Excel</button>
               </div>
               <AnimatePresence>
                 {played && (
                   <motion.div initial={{ opacity: 0, y: 6, scale: 0.8 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0 }}
                     style={{ marginTop: 8, display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, color: '#1e293b' }}>
-                    <motion.span animate={{ y: [0, -6, 0], rotate: [0, 8, -8, 0] }} transition={{ duration: 0.7, repeat: 1 }} style={{ fontSize: 20 }}>⚡</motion.span>
+                    <motion.span animate={{ y: [0, -6, 0], rotate: [0, 8, -8, 0] }} transition={{ duration: 0.7, repeat: 1 }} style={{ fontSize: 20 }}></motion.span>
                     <span><b>Hipot</b> buscando en <b>{start}</b> → <b>{end}</b></span>
-                    <motion.span animate={{ scale: [1, 1.3, 1] }} transition={{ duration: 0.5, repeat: 1 }} style={{ fontSize: 16 }}>🔎</motion.span>
-                    <motion.span animate={{ x: [0, 6, 0] }} transition={{ duration: 0.6, repeat: 1 }}>🧪</motion.span>
+                    <motion.span animate={{ scale: [1, 1.3, 1] }} transition={{ duration: 0.5, repeat: 1 }} style={{ fontSize: 16 }}></motion.span>
+                    <motion.span animate={{ x: [0, 6, 0] }} transition={{ duration: 0.6, repeat: 1 }}></motion.span>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -124,7 +124,7 @@ export function HistoryPopup({ open, onClose }: { open: boolean; onClose: () => 
                       <td>{r.total_duration ? Number(r.total_duration).toFixed(1) : '-'}</td>
                     </tr>
                   ))}
-                  {!rows.length && <tr><td colSpan={9} style={{ textAlign:'center', color:'#64748b', padding: 16 }}>Sin datos — elige rango y pulsa Consultar</td></tr>}
+                  {!rows.length && <tr><td colSpan={9} style={{ textAlign:'center', color:'var(--muted)', padding: 16 }}>{busy ? 'Consultando…' : 'Sin datos — elige rango y pulsa Consultar'}</td></tr>}
                 </tbody>
               </table>
             </div>

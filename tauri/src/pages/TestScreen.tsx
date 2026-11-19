@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Gauge } from '../components/Gauge';
+import { SplitLayout } from '../components/SplitLayout';
+import { PageHeader } from '../components/PageHeader';
+import { usePLC } from '../hooks/usePLC';
+import { useHipot } from '../hooks/useHipot';
 
 export function TestScreen({ phase, recipe, values, limits, onStop }: {
   phase: 'PLC_RUNNING' | 'HIPOT_RUNNING';
@@ -10,49 +14,125 @@ export function TestScreen({ phase, recipe, values, limits, onStop }: {
   onStop: () => void;
 }) {
   const [secs, setSecs] = useState(0);
+  const plc = usePLC();
+  const hipot = useHipot();
+
   useEffect(() => {
     const id = setInterval(() => setSecs(s => s + 1), 1000);
     return () => clearInterval(id);
   }, []);
+
   const isPlc = phase === 'PLC_RUNNING';
   const mm = String(Math.floor(secs / 60)).padStart(2, '0');
   const ss = String(secs % 60).padStart(2, '0');
+  const gauges = Object.entries(values);
+  const title = isPlc ? 'Prueba eléctrica en curso' : 'Prueba Hipot en curso';
+
+  const aside = (
+    <>
+      <div>
+        <div className="rail-eyebrow">Prueba en curso</div>
+        <h2 className="rail-title">{title}</h2>
+        <p className="rail-sub">
+          {isPlc
+            ? 'El PLC está midiendo consumo por componente. No abra el gabinete.'
+            : 'El Hipot está midiendo aislamiento. No toque la unidad bajo prueba.'}
+        </p>
+      </div>
+
+      <div className="rail-divider" />
+
+      <div className="rail-kpi">
+        <span className="label">Tiempo</span>
+        <span className="value mono">{mm}:{ss}</span>
+      </div>
+      <div className="rail-kpi">
+        <span className="label">Receta</span>
+        <span className="value">{recipe?.model ?? '—'}</span>
+      </div>
+      <div className="rail-kpi">
+        <span className="label">Fase</span>
+        <span className="value">{isPlc ? 'Eléctrica' : 'Hipot'}</span>
+      </div>
+
+      <div className="rail-divider" />
+
+      <div className="stack" style={{ gap: 8 }}>
+        <div className="rail-eyebrow">Estado</div>
+        <div className="rail-status">
+          <span className={`dot ${isPlc ? 'warn' : 'ok'}`} />
+          <span>Eléctrica {isPlc ? 'midiendo' : 'completada'}</span>
+        </div>
+        <div className="rail-status">
+          <span className={`dot ${!isPlc ? 'warn' : ''}`} />
+          <span>Hipot {!isPlc ? 'midiendo' : 'pendiente'}</span>
+        </div>
+        <div className="rail-status">
+          <span className={`dot ${plc.connected ? 'ok' : 'bad'}`} />
+          <span>PLC {plc.connected ? 'conectado' : 'sin conexión'}</span>
+        </div>
+        <div className="rail-status">
+          <span className={`dot ${hipot.connected ? 'ok' : 'bad'}`} />
+          <span>Hipot {hipot.connected ? 'conectado' : 'sin conexión'}</span>
+        </div>
+      </div>
+
+      <div className="rail-actions">
+        <button className="btn danger" style={{ width: '100%' }} onClick={onStop}>
+          Parar prueba
+        </button>
+        <div className="rail-status" style={{ fontSize: 11, color: 'var(--on-rail-muted)' }}>
+          <span>El hardware mide un componente a la vez.</span>
+        </div>
+      </div>
+    </>
+  );
 
   return (
-    <div style={{ padding: 14, minHeight: 520, position: 'relative', zIndex: 1, minWidth: 0 }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10,
-        background: '#fff', border: '1px solid var(--line)', borderRadius: 10, padding: '10px 14px',
-      }}>
-        <span style={{ width: 10, height: 10, borderRadius: '50%', background: isPlc ? '#b7790f' : '#7c3aed', flexShrink: 0 }} />
-        <h2 style={{ margin: 0, flex: 1, fontSize: 16, color: '#141b26' }}>
-          {isPlc ? 'Prueba PLC en curso' : 'Prueba Hipot en curso'}
-        </h2>
-        <span className="pill" style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>{mm}:{ss}</span>
-        {recipe && <span className="pill">{recipe.model}</span>}
+    <SplitLayout aside={aside}>
+      <PageHeader
+        eyebrow={isPlc ? 'Fase 1 de 2' : 'Fase 2 de 2'}
+        title={title}
+        subtitle="Lecturas en vivo. Los valores fuera de límite se marcan en rojo."
+        actions={<span className="pill accent mono">{mm}:{ss}</span>}
+      />
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
+          <b style={{ fontSize: 13 }}>Progreso de la prueba</b>
+          <span className="pill">{isPlc ? 'Eléctrica' : 'Hipot'}</span>
+        </div>
+        <div className="progress-track" style={{ height: 12 }}>
+          <motion.div
+            className="progress-fill"
+            style={{ width: '34%', background: isPlc ? 'var(--accent)' : '#6d28d9' }}
+            animate={{ x: ['-110%', '320%'] }}
+            transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+          />
+        </div>
+        <div className="row" style={{ marginTop: 10, gap: 8 }}>
+          <span className={`pill ${isPlc ? 'warn' : 'on'}`}>Eléctrica {isPlc ? 'midiendo' : 'completada'}</span>
+          <span className={`pill ${!isPlc ? 'warn' : ''}`}>Hipot {!isPlc ? 'midiendo' : 'pendiente'}</span>
+        </div>
       </div>
 
-      <div className="progress-track" style={{ marginBottom: 10 }}>
-        <motion.div className="progress-fill" initial={false}
-          animate={{ width: isPlc ? '48%' : '84%' }} transition={{ duration: 0.6 }} />
-      </div>
-
-      <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-        <span className={`pill ${!isPlc ? 'accent' : 'on'}`}>{!isPlc ? 'Hipot midiendo' : 'Hipot completado'}</span>
-        <span className={`pill ${isPlc ? 'accent' : ''}`}>{isPlc ? 'Electrica midiendo' : 'Electrica pendiente'}</span>
-      </div>
-
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-        {Object.entries(values).map(([k, v]) => {
-          const lim = limits[k];
-          return <Gauge key={k} label={k} value={Number(v)} min={lim?.min ?? 0} max={lim?.max ?? Math.max(Number(v) * 1.2, 1)} size={132} />;
-        })}
-      </div>
-
-      <div style={{ marginTop: 14, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button className="btn danger" onClick={onStop}>Parar prueba</button>
-        <span style={{ fontSize: 12, color: '#64748b', alignSelf: 'center' }}>El hardware mide un componente a la vez.</span>
-      </div>
-    </div>
+      {gauges.length ? (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: 12 }}>
+          {gauges.map(([k, v]) => {
+            const lim = limits[k];
+            return (
+              <motion.div key={k} initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.25 }}>
+                <Gauge label={k} value={Number(v)} min={lim?.min ?? 0} max={lim?.max ?? Math.max(Number(v) * 1.2, 1)} size={128} />
+              </motion.div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="card" style={{ textAlign: 'center', padding: 32 }}>
+          <div className="page-title" style={{ fontSize: 18 }}>Esperando lecturas del PLC…</div>
+          <p className="page-sub">Los indicadores aparecerán cuando el PLC publique los valores de cada componente.</p>
+        </div>
+      )}
+    </SplitLayout>
   );
 }
