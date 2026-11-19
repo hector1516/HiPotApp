@@ -1112,7 +1112,6 @@ fn duplicate_recipe(id: i64, new_model: String) -> i64 {
 
     new_id
 }
-
 struct Backend(Mutex<Option<Child>>);
 
 fn backend_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
