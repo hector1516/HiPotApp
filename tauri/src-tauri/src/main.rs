@@ -846,7 +846,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .invoke_handler(tauri::generate_handler![open_external, read_backend_log, get_config, set_config, plc_status, restart_backend])
+        .invoke_handler(tauri::generate_handler![open_external, read_backend_log, get_config, set_config, plc_status, restart_backend, list_operators, add_operator, list_users, add_user, delete_user])
         .manage(Backend(Mutex::new(None)))
         .setup(|app| {
             match backend_path(app.handle()) {
