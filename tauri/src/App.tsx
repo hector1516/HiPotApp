@@ -515,6 +515,7 @@ export default function App() {
       <HistoryPopup open={showHistory} onClose={() => setShowHistory(false)} />
       <DbSetupDialog
         open={showDbSetup}
+        errorHint={dbError}
         onClose={() => setShowDbSetup(false)}
         onSaved={() => {
           setShowDbSetup(false);

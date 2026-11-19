@@ -2,10 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 
-export function DbSetupDialog({ open, onClose, onSaved }: {
+export function DbSetupDialog({ open, onClose, onSaved, errorHint }: {
   open: boolean;
   onClose: () => void;
   onSaved: () => void;
+  errorHint?: string | null;
 }) {
   const [server, setServer] = useState('.\\SQLEXPRESS');
   const [name, setName] = useState('HiPotDB');
@@ -16,6 +17,11 @@ export function DbSetupDialog({ open, onClose, onSaved }: {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [ok, setOk] = useState(false);
+
+  const failedUser = (() => {
+    const match = /Login failed for user '([^']+)'/i.exec(errorHint || '');
+    return match?.[1] || '';
+  })();
 
   useEffect(() => {
     if (!open) return;
@@ -74,9 +80,29 @@ export function DbSetupDialog({ open, onClose, onSaved }: {
             <h3 style={{ margin: '0 0 6px 0' }}>Configurar SQL Express</h3>
             <p className="page-sub" style={{ marginTop: 0 }}>
               La app no pudo iniciar sesión en SQL Server. El error 18456 significa que SQL Server rechazó
-              el usuario de Windows. Usa autenticación SQL (por ejemplo <b>sa</b>) o agrega tu usuario de Windows
-              como administrador de SQL Server.
+              el usuario de Windows con el que estás logeado. <b>No necesitas usuario ni contraseña de la app</b>
+              si usas autenticación de Windows: hay que dar de alta tu cuenta de Windows en SQL Server.
             </p>
+
+            {auth === 'windows' && failedUser && (
+              <div className="card" style={{ background: 'var(--surface-2)', marginBottom: 12 }}>
+                <div style={{ fontWeight: 800, marginBottom: 4 }}>Tu usuario de Windows no existe en SQL Server</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+                  Pide a un administrador de SQL Server (o al instalador de SQL Express) que ejecute esto
+                  una sola vez. Después pulsa “Probar conexión”.
+                </div>
+                <pre style={{ fontSize: 12, whiteSpace: 'pre-wrap', background: '#0f172a', color: '#e2e8f0', padding: 10, borderRadius: 8, margin: 0 }}>
+{`USE master;
+CREATE LOGIN [${failedUser}] FROM WINDOWS;
+ALTER SERVER ROLE sysadmin ADD MEMBER [${failedUser}];`}
+                </pre>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>
+                  Si no tienes ningún administrador de SQL Server, reinstala SQL Express con tu usuario de Windows
+                  o inicia SQL Server en modo single-user para crear el login. También puedes usar una cuenta SQL
+                  con permisos si la tienes.
+                </div>
+              </div>
+            )}
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               <div className="field" style={{ gridColumn: '1 / -1' }}>
