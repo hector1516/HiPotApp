@@ -175,9 +175,9 @@ export default function App() {
     setBatch(code);
     await api.scan(code, 'batch', 3).catch(() => {});
     try {
-      const ex = await api.post('/executions/start', {
-        recipe_id: recipe?.id ?? 1, batch: code, serial_number: serial });
-      setExecId(ex.execution_id);
+      const ex = await invoke<number>('start_execution', {
+        recipeId: recipe?.id ?? 1, operatorId: null, batch: code, serialNumber: serial });
+      setExecId(ex);
     } catch { /* offline: seguir simulado */ }
     const start = Date.now();
     setT0(start);
