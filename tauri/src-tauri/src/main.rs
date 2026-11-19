@@ -7,22 +7,15 @@ mod db;
 mod hipot;
 mod plc;
 
-use db::paths::db_path;
 use tauri::{Emitter, Manager};
 #[tauri::command]
 fn get_config() -> serde_json::Value {
-    match db::open() {
-        Ok(conn) => db::config::get_all(&conn),
-        Err(_) => serde_json::json!({}),
-    }
+    db::repo::config_get_all()
 }
 
 #[tauri::command]
 fn app_health() -> serde_json::Value {
-    // Salud del núcleo Rust (sin HTTP). No sondea hardware para no bloquear la UI.
-    let db_ok = rusqlite::Connection::open(db_path())
-        .and_then(|conn| conn.query_row("SELECT 1", [], |row| row.get::<_, i64>(0)))
-        .is_ok();
+    let db_ok = db::odbc_local::test_connection().is_ok();
     let cfg = get_config();
     let plc_ip = cfg
         .get("plc_ip")
@@ -33,7 +26,7 @@ fn app_health() -> serde_json::Value {
         "status": if db_ok { "healthy" } else { "degraded" },
         "runtime": "rust",
         "database": db_ok,
-        "database_path": db_path().display().to_string(),
+        "database_engine": "SQL Express",
         "plc_configured": !plc_ip.is_empty(),
         "version": env!("CARGO_PKG_VERSION"),
         "timestamp": std::time::SystemTime::now()
@@ -45,11 +38,8 @@ fn app_health() -> serde_json::Value {
 
 #[tauri::command]
 fn set_config(values: serde_json::Value) -> String {
-    match db::open() {
-        Ok(conn) => match db::config::set_many(&conn, &values) {
-            Ok(_) => "saved".to_string(),
-            Err(e) => format!("error: {}", e),
-        },
+    match db::repo::config_set(&values) {
+        Ok(_) => "saved".to_string(),
         Err(e) => format!("error: {}", e),
     }
 }
@@ -147,87 +137,40 @@ fn plc_status_info() -> serde_json::Value {
 
 #[tauri::command]
 fn plc_tags_list() -> serde_json::Value {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return serde_json::json!([]),
-    };
+    let mut rows = db::repo::plc_tags_list();
     let cfg = plc_cfg();
     let mut client = plc::connect(&cfg, 1500).ok();
-    let mut arr = Vec::new();
-    if let Ok(mut stmt) = conn.prepare(
-        "SELECT id, name, db_number, offset, data_type, bit, description, unit \
-         FROM plc_tags ORDER BY id",
-    ) {
-        if let Ok(rows) = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, i64>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, i64>(5)?,
-                row.get::<_, Option<String>>(6)?,
-                row.get::<_, Option<String>>(7)?,
-            ))
-        }) {
-            for (id, name, db_number, offset, data_type, bit, description, unit) in rows.flatten() {
-                let value = if let Some(c) = client.as_mut() {
-                    plc::read_tag(c, db_number as i32, offset as i32, &data_type, bit as i32)
-                        .unwrap_or(serde_json::json!(null))
-                } else {
-                    serde_json::json!(null)
-                };
-                arr.push(serde_json::json!({
-                    "id": id,
-                    "name": name,
-                    "db": db_number,
-                    "offset": offset,
-                    "type": data_type,
-                    "bit": bit,
-                    "description": description,
-                    "unit": unit,
-                    "value": value,
-                }));
+    if let Some(arr) = rows.as_array_mut() {
+        for tag in arr {
+            let db_number = tag.get("db").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let offset = tag.get("offset").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let data_type = tag.get("type").and_then(|v| v.as_str()).unwrap_or("REAL");
+            let bit = tag.get("bit").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let value = if let Some(c) = client.as_mut() {
+                plc::read_tag(c, db_number, offset, data_type, bit)
+                    .unwrap_or(serde_json::json!(null))
+            } else {
+                serde_json::json!(null)
+            };
+            if let Some(obj) = tag.as_object_mut() {
+                obj.insert("value".to_string(), value);
             }
         }
     }
-    serde_json::Value::Array(arr)
+    rows
 }
 
 #[tauri::command]
-fn plc_tags_add(
-    name: String,
-    db_number: i64,
-    offset: i64,
-    data_type: String,
-    bit: i64,
-) -> i64 {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return -1,
-    };
-    conn.execute(
-        "INSERT INTO plc_tags (name, db_number, offset, data_type, bit) \
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![
-            name.trim().to_uppercase(),
-            db_number,
-            offset,
-            data_type.trim().to_uppercase(),
-            bit
-        ],
-    )
-    .ok();
-    conn.last_insert_rowid()
+fn plc_tags_add(name: String, db_number: i64, offset: i64, data_type: String, bit: i64) -> i64 {
+    match db::repo::plc_tags_add(&name, db_number, offset, &data_type, bit) {
+        Ok(id) => id,
+        Err(e) => { eprintln!("[plc_tags_add] {}", e); -1 }
+    }
 }
 
 #[tauri::command]
 fn plc_tags_delete(id: i64) -> String {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return "error".to_string(),
-    };
-    match conn.execute("DELETE FROM plc_tags WHERE id = ?1", rusqlite::params![id]) {
+    match db::repo::plc_tags_delete(id) {
         Ok(_) => "deleted".to_string(),
         Err(e) => format!("error: {}", e),
     }
@@ -235,36 +178,20 @@ fn plc_tags_delete(id: i64) -> String {
 
 #[tauri::command]
 fn plc_tag_write_by_id(tag_id: i64, value: serde_json::Value) -> String {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return "error: no db".to_string(),
-    };
-    let tag = conn.query_row(
-        "SELECT db_number, offset, data_type, bit FROM plc_tags WHERE id = ?1",
-        rusqlite::params![tag_id],
-        |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, i64>(3)?,
-            ))
-        },
-    );
-    let (db_number, offset, data_type, bit) = match tag {
+    let tag = match db::repo::plc_tag_get(tag_id) {
         Ok(v) => v,
         Err(e) => return format!("error: {}", e),
     };
+    let db_number = tag.get("db_number").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let offset = tag.get("offset").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let data_type = tag
+        .get("data_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("REAL");
+    let bit = tag.get("bit").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
     let cfg = plc_cfg();
     match plc::connect(&cfg, 1500) {
-        Ok(mut c) => match plc::write_tag(
-            &mut c,
-            db_number as i32,
-            offset as i32,
-            &data_type,
-            &value,
-            bit as i32,
-        ) {
+        Ok(mut c) => match plc::write_tag(&mut c, db_number, offset, data_type, &value, bit) {
             Ok(_) => "OK".to_string(),
             Err(e) => format!("error: {}", e),
         },
@@ -274,32 +201,21 @@ fn plc_tag_write_by_id(tag_id: i64, value: serde_json::Value) -> String {
 
 #[tauri::command]
 fn plc_tag_read_by_id(tag_id: i64) -> serde_json::Value {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return serde_json::json!(null),
-    };
-    let tag = conn.query_row(
-        "SELECT db_number, offset, data_type, bit FROM plc_tags WHERE id = ?1",
-        rusqlite::params![tag_id],
-        |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, i64>(3)?,
-            ))
-        },
-    );
-    let (db_number, offset, data_type, bit) = match tag {
+    let tag = match db::repo::plc_tag_get(tag_id) {
         Ok(v) => v,
         Err(_) => return serde_json::json!(null),
     };
+    let db_number = tag.get("db_number").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let offset = tag.get("offset").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let data_type = tag
+        .get("data_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("REAL");
+    let bit = tag.get("bit").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
     let cfg = plc_cfg();
     match plc::connect(&cfg, 1500) {
-        Ok(mut c) => {
-            plc::read_tag(&mut c, db_number as i32, offset as i32, &data_type, bit as i32)
-                .unwrap_or(serde_json::json!(null))
-        }
+        Ok(mut c) => plc::read_tag(&mut c, db_number, offset, data_type, bit)
+            .unwrap_or(serde_json::json!(null)),
         Err(_) => serde_json::json!(null),
     }
 }
@@ -709,315 +625,67 @@ fn run_test_cycle(
 
 #[tauri::command]
 fn template_list() -> serde_json::Value {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return serde_json::json!([]),
-    };
-    let mut arr = Vec::new();
-    if let Ok(mut stmt) = conn.prepare(
-        "SELECT id, name, width_mm, height_mm, is_default FROM label_templates ORDER BY id",
-    ) {
-        if let Ok(rows) = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, i64>(3)?,
-                row.get::<_, i64>(4)?,
-            ))
-        }) {
-            for (id, name, width, height, is_default) in rows.flatten() {
-                arr.push(serde_json::json!({
-                    "id": id, "name": name, "w": width, "h": height,
-                    "is_default": is_default != 0,
-                }));
-            }
-        }
-    }
-    serde_json::Value::Array(arr)
+    db::repo::templates_list()
 }
 
 #[tauri::command]
 fn template_get(tid: i64) -> Result<serde_json::Value, String> {
-    let conn = db::open().map_err(|e| e.to_string())?;
-    conn.query_row(
-        "SELECT id, name, width_mm, height_mm, canvas_data, is_default \
-         FROM label_templates WHERE id = ?1",
-        rusqlite::params![tid],
-        |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "name": row.get::<_, String>(1)?,
-                "width_mm": row.get::<_, i64>(2)?,
-                "height_mm": row.get::<_, i64>(3)?,
-                "canvas_data": row.get::<_, Option<String>>(4)?,
-                "is_default": row.get::<_, i64>(5)? != 0,
-            }))
-        },
-    )
-    .map_err(|_| "Plantilla no encontrada".to_string())
+    db::repo::template_get(tid)
 }
 
 #[tauri::command]
-fn template_create(
-    name: String,
-    width_mm: i64,
-    height_mm: i64,
-    canvas_data: String,
-    is_default: bool,
-) -> Result<i64, String> {
-    let mut conn = db::open().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-    if is_default {
-        tx.execute("UPDATE label_templates SET is_default = 0", [])
-            .map_err(|e| e.to_string())?;
-    }
-    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    tx.execute(
-        "INSERT INTO label_templates
-         (name, width_mm, height_mm, canvas_data, is_default, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
-        rusqlite::params![name, width_mm, height_mm, canvas_data, if is_default {1} else {0}, now],
-    )
-    .map_err(|e| e.to_string())?;
-    let id = tx.last_insert_rowid();
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(id)
+fn template_create(name: String, width_mm: i64, height_mm: i64, canvas_data: String, is_default: bool) -> Result<i64, String> {
+    db::repo::template_create(&name, width_mm, height_mm, &canvas_data, is_default)
 }
 
 #[tauri::command]
-fn template_update(
-    tid: i64,
-    name: String,
-    width_mm: i64,
-    height_mm: i64,
-    canvas_data: String,
-    is_default: bool,
-) -> Result<String, String> {
-    let mut conn = db::open().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-    if is_default {
-        tx.execute(
-            "UPDATE label_templates SET is_default = 0 WHERE id <> ?1",
-            rusqlite::params![tid],
-        )
-        .map_err(|e| e.to_string())?;
-    }
-    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    let changed = tx
-        .execute(
-            "UPDATE label_templates
-             SET name = ?1, width_mm = ?2, height_mm = ?3, canvas_data = ?4,
-                 is_default = ?5, updated_at = ?6
-             WHERE id = ?7",
-            rusqlite::params![
-                name,
-                width_mm,
-                height_mm,
-                canvas_data,
-                if is_default {1} else {0},
-                now,
-                tid
-            ],
-        )
-        .map_err(|e| e.to_string())?;
-    if changed == 0 {
-        return Err("Plantilla no encontrada".to_string());
-    }
-    tx.commit().map_err(|e| e.to_string())?;
+fn template_update(tid: i64, name: String, width_mm: i64, height_mm: i64, canvas_data: String, is_default: bool) -> Result<String, String> {
+    db::repo::template_update(tid, &name, width_mm, height_mm, &canvas_data, is_default)?;
     Ok("saved".to_string())
 }
 
 #[tauri::command]
 fn template_delete(tid: i64) -> Result<String, String> {
-    let conn = db::open().map_err(|e| e.to_string())?;
-    let changed = conn
-        .execute(
-            "DELETE FROM label_templates WHERE id = ?1",
-            rusqlite::params![tid],
-        )
-        .map_err(|e| e.to_string())?;
-    if changed == 0 {
-        return Err("Plantilla no encontrada".to_string());
-    }
+    db::repo::template_delete(tid)?;
     Ok("deleted".to_string())
 }
 
 #[tauri::command]
 fn config_export() -> Result<String, String> {
-    let conn = db::open().map_err(|e| e.to_string())?;
-    config_io::export(&conn)
+    config_io::export()
 }
 
 #[tauri::command]
 fn config_import(data: String, mode: String) -> Result<serde_json::Value, String> {
-    let mut conn = db::open().map_err(|e| e.to_string())?;
-    config_io::import(&mut conn, &data, &mode)
+    config_io::import(&data, &mode)
 }
 
 #[tauri::command]
 fn import_export_log_list(limit: i64) -> serde_json::Value {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return serde_json::json!([]),
-    };
-    let mut arr = Vec::new();
-    if let Ok(mut stmt) = conn.prepare(
-        "SELECT id, operation_type, mode, data_summary, status, performed_at \
-         FROM import_export_logs ORDER BY id DESC LIMIT ?1",
-    ) {
-        if let Ok(rows) = stmt.query_map(rusqlite::params![limit], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "op": row.get::<_, String>(1)?,
-                "mode": row.get::<_, Option<String>>(2)?,
-                "summary": row.get::<_, Option<String>>(3)?,
-                "status": row.get::<_, Option<String>>(4)?,
-                "at": row.get::<_, Option<String>>(5)?,
-            }))
-        }) {
-            for row in rows.flatten() {
-                arr.push(row);
-            }
-        }
-    }
-    serde_json::Value::Array(arr)
+    db::repo::import_export_log_list(limit)
 }
 
 #[tauri::command]
-fn history_list(
-    model: Option<String>,
-    serial: Option<String>,
-    start: Option<String>,
-    end: Option<String>,
-    limit: Option<i64>,
-) -> serde_json::Value {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return serde_json::json!({"rows": [], "total": 0, "good": 0, "bad": 0}),
-    };
-
-    let mut sql = String::from(
-        "SELECT e.id, e.recipe_id, COALESCE(r.model, '-') AS recipe_model, \
-         COALESCE(e.serial_number, '-') AS serial, COALESCE(b.batch_number, '-') AS batch, \
-         e.plc_pass_fail, e.hipot_pass_fail, COALESCE(e.final_status, '-') AS final, \
-         e.created_at, e.total_duration \
-         FROM executions e \
-         LEFT JOIN recipes r ON r.id = e.recipe_id \
-         LEFT JOIN batches b ON b.id = e.batch_id \
-         WHERE 1 = 1",
-    );
-    let mut params: Vec<rusqlite::types::Value> = Vec::new();
-
-    if let Some(s) = serial.filter(|s| !s.trim().is_empty()) {
-        sql.push_str(" AND e.serial_number LIKE ?");
-        params.push(rusqlite::types::Value::Text(format!(
-            "%{}%",
-            s.trim().to_uppercase()
-        )));
-    }
-    if let Some(m) = model.filter(|s| !s.trim().is_empty()) {
-        sql.push_str(" AND r.model LIKE ?");
-        params.push(rusqlite::types::Value::Text(format!(
-            "%{}%",
-            m.trim().to_uppercase()
-        )));
-    }
-    if let Some(s) = start.filter(|s| !s.trim().is_empty()) {
-        sql.push_str(" AND e.created_at >= ?");
-        params.push(rusqlite::types::Value::Text(s));
-    }
-    if let Some(e) = end.filter(|s| !s.trim().is_empty()) {
-        if let Ok(day) = chrono::NaiveDate::parse_from_str(&e, "%Y-%m-%d") {
-            if let Some(next) = day.succ_opt() {
-                sql.push_str(" AND e.created_at < ?");
-                params.push(rusqlite::types::Value::Text(
-                    next.format("%Y-%m-%d").to_string(),
-                ));
-            }
-        }
-    }
-
-    sql.push_str(" ORDER BY e.id DESC LIMIT ?");
-    params.push(rusqlite::types::Value::Integer(
-        limit.unwrap_or(200).clamp(1, 5000),
-    ));
-
-    let mut rows = Vec::new();
-    if let Ok(mut stmt) = conn.prepare(&sql) {
-        if let Ok(iter) = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "recipe_id": row.get::<_, Option<i64>>(1)?,
-                "recipe_model": row.get::<_, String>(2)?,
-                "serial": row.get::<_, String>(3)?,
-                "batch": row.get::<_, String>(4)?,
-                "plc": row.get::<_, Option<i64>>(5)?.map(|v| v != 0),
-                "hipot": row.get::<_, Option<i64>>(6)?.map(|v| v != 0),
-                "final": row.get::<_, String>(7)?,
-                "created": row.get::<_, Option<String>>(8)?,
-                "total_duration": row.get::<_, Option<f64>>(9)?,
-            }))
-        }) {
-            for row in iter.flatten() {
-                rows.push(row);
-            }
-        }
-    }
-
-    let good = rows
-        .iter()
-        .filter(|r| r.get("final").and_then(|v| v.as_str()) == Some("GOOD"))
-        .count();
-    let bad = rows
-        .iter()
-        .filter(|r| r.get("final").and_then(|v| v.as_str()) == Some("BAD"))
-        .count();
-    serde_json::json!({
-        "rows": rows,
-        "total": rows.len(),
-        "good": good,
-        "bad": bad,
-    })
+fn history_list(model: Option<String>, serial: Option<String>, start: Option<String>, end: Option<String>, limit: Option<i64>) -> serde_json::Value {
+    db::repo::history_list(
+        model.as_deref(), serial.as_deref(), start.as_deref(), end.as_deref(),
+        limit.unwrap_or(200),
+    )
 }
 
 #[tauri::command]
 fn sync_log_list(limit: Option<i64>) -> serde_json::Value {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return serde_json::json!([]),
-    };
-    let mut arr = Vec::new();
-    if let Ok(mut stmt) = conn.prepare(
-        "SELECT id, direction, table_name, records_synced, status, error_message \
-         FROM sync_log ORDER BY id DESC LIMIT ?1",
-    ) {
-        if let Ok(rows) = stmt.query_map(
-            rusqlite::params![limit.unwrap_or(20).clamp(1, 500)],
-            |row| {
-                Ok(serde_json::json!({
-                    "id": row.get::<_, i64>(0)?,
-                    "dir": row.get::<_, Option<String>>(1)?,
-                    "table": row.get::<_, Option<String>>(2)?,
-                    "n": row.get::<_, Option<i64>>(3)?,
-                    "status": row.get::<_, Option<String>>(4)?,
-                    "err": row.get::<_, Option<String>>(5)?,
-                }))
-            },
-        ) {
-            for row in rows.flatten() {
-                arr.push(row);
-            }
-        }
-    }
-    serde_json::Value::Array(arr)
+    db::repo::sync_log_list(limit.unwrap_or(20))
 }
 
 #[tauri::command]
 fn local_db_config_get() -> serde_json::Value {
     let path = db::paths::db_config_path();
     if let Ok(text) = std::fs::read_to_string(&path) {
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
+        if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&text) {
+            if let Some(obj) = value.as_object_mut() {
+                obj.insert("use_sqlite".to_string(), serde_json::json!("0"));
+            }
             return value;
         }
     }
@@ -1066,22 +734,17 @@ fn local_db_migrate() -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 fn audit_table_names() -> serde_json::Value {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return serde_json::json!({"tables": []}),
-    };
-    let mut tables = Vec::new();
-    if let Ok(mut stmt) = conn.prepare(
-        "SELECT name FROM sqlite_master \
-         WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name <> 'app_meta' \
-         ORDER BY name",
-    ) {
-        if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
-            for table in rows.flatten() {
-                tables.push(table);
-            }
-        }
-    }
+    let rows = db::odbc_local::with_connection(|conn| {
+        db::odbc_local::query_json(
+            conn,
+            "SELECT name FROM sys.tables WHERE name <> 'sysdiagrams' ORDER BY name",
+        )
+    })
+    .unwrap_or_default();
+    let tables = rows
+        .iter()
+        .filter_map(|row| row.get("name").and_then(|v| v.as_str()).map(str::to_string))
+        .collect::<Vec<_>>();
     serde_json::json!({ "tables": tables })
 }
 
@@ -1122,322 +785,70 @@ fn audit_ensure_tables(conn_str: String) -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-fn barcode_scan(
-    code: String,
-    barcode_type: String,
-    scan_order: i64,
-    execution_id: Option<i64>,
-) -> Result<serde_json::Value, String> {
-    let raw = code;
-    let normalized = raw.trim().to_uppercase();
-    if normalized.is_empty() {
-        return Err("Código vacío".to_string());
-    }
-    let conn = db::open().map_err(|e| e.to_string())?;
-    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    conn.execute(
-        "INSERT INTO barcode_logs
-         (code, barcode_type, scan_order, execution_id, scanned_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![&normalized, &barcode_type, scan_order, execution_id, &now],
-    )
-    .map_err(|e| e.to_string())?;
-
-    let _ = log_action(
-        "INFO".to_string(),
-        "BARCODE".to_string(),
-        format!("scan_{}", barcode_type),
-        Some(format!(
-            "Crudo: '{}' -> Normalizado: '{}'",
-            raw, normalized
-        )),
-        execution_id,
-        None,
-        Some(normalized.clone()),
-        None,
-        Some(true),
-        None,
-    );
-
-    Ok(serde_json::json!({
-        "status": "scanned",
-        "raw": raw,
-        "code": normalized,
-        "barcode_type": barcode_type,
-        "scan_order": scan_order,
-    }))
+fn barcode_scan(code: String, barcode_type: String, scan_order: i64, execution_id: Option<i64>) -> Result<serde_json::Value, String> {
+    db::repo::barcode_scan(&code, &barcode_type, scan_order, execution_id)
 }
 
 // --- Recipes (SQLite) ---
 #[tauri::command]
 fn list_recipes() -> serde_json::Value {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return serde_json::json!([]),
-    };
-    let mut stmt = match conn.prepare("SELECT id, name, model, type, product, voltage_levels, is_active, created_at, updated_at, modified_by FROM recipes ORDER BY id DESC") {
-        Ok(s) => s,
-        Err(_) => return serde_json::json!([]),
-    };
-    let rows = stmt.query_map([], |row| {
-        Ok(serde_json::json!({
-            "id": row.get::<_, i64>(0)?,
-            "name": row.get::<_, String>(1)?,
-            "model": row.get::<_, String>(2)?,
-            "type": row.get::<_, Option<String>>(3)?,
-            "product": row.get::<_, Option<String>>(4)?,
-            "voltage_levels": row.get::<_, Option<String>>(5)?,
-            "is_active": row.get::<_, i64>(6)? == 1,
-            "created_at": row.get::<_, Option<String>>(7)?,
-            "updated_at": row.get::<_, Option<String>>(8)?,
-            "modified_by": row.get::<_, Option<String>>(9)?,
-        }))
-    });
-    let mut arr = Vec::new();
-    if let Ok(rows) = rows {
-        for r in rows.flatten() {
-            arr.push(r);
-        }
-    }
-    serde_json::Value::Array(arr)
+    db::repo::recipes_list()
 }
 
 #[tauri::command]
 fn get_recipe_by_model(model: String) -> serde_json::Value {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return serde_json::json!(null),
-    };
-
-    // Get recipe
-    let recipe = conn.query_row(
-        "SELECT id, name, model, type, product, voltage_levels, is_active, created_at, updated_at, modified_by FROM recipes WHERE model = ?1",
-        rusqlite::params![model],
-        |row| Ok(serde_json::json!({
-            "id": row.get::<_, i64>(0)?,
-            "name": row.get::<_, String>(1)?,
-            "model": row.get::<_, String>(2)?,
-            "type": row.get::<_, Option<String>>(3)?,
-            "product": row.get::<_, Option<String>>(4)?,
-            "voltage_levels": row.get::<_, Option<String>>(5)?,
-            "is_active": row.get::<_, i64>(6)? == 1,
-            "created_at": row.get::<_, Option<String>>(7)?,
-            "updated_at": row.get::<_, Option<String>>(8)?,
-            "modified_by": row.get::<_, Option<String>>(9)?,
-        }))
-    );
-    let recipe = match recipe {
-        Ok(r) => r,
-        Err(_) => return serde_json::json!(null),
-    };
-    let rid = recipe.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
-
-    // Get components
-    let mut comps = Vec::new();
-    if let Ok(mut stmt) = conn.prepare("SELECT name, voltage, enabled, min_value, max_value, unit FROM recipe_components WHERE recipe_id = ?1") {
-        if let Ok(rows) = stmt.query_map(rusqlite::params![rid], |row| {
-            Ok(serde_json::json!({
-                "name": row.get::<_, String>(0)?,
-                "voltage": row.get::<_, String>(1)?,
-                "enabled": row.get::<_, i64>(2)? == 1,
-                "min": row.get::<_, f64>(3)?,
-                "max": row.get::<_, f64>(4)?,
-                "unit": row.get::<_, Option<String>>(5)?,
-            }))
-        }) {
-            for r in rows.flatten() {
-                comps.push(r);
-            }
-        }
-    }
-
-    // Get totals
-    let mut totes = Vec::new();
-    if let Ok(mut stmt) = conn.prepare("SELECT voltage, min_total, max_total FROM recipe_totals WHERE recipe_id = ?1") {
-        if let Ok(rows) = stmt.query_map(rusqlite::params![rid], |row| {
-            Ok(serde_json::json!({
-                "voltage": row.get::<_, String>(0)?,
-                "min": row.get::<_, f64>(1)?,
-                "max": row.get::<_, f64>(2)?,
-            }))
-        }) {
-            for r in rows.flatten() {
-                totes.push(r);
-            }
-        }
-    }
-
-    let mut result = recipe;
-    if let Some(obj) = result.as_object_mut() {
-        obj.insert("components".to_string(), serde_json::Value::Array(comps));
-        obj.insert("totals".to_string(), serde_json::Value::Array(totes));
-    }
-    result
+    db::repo::recipe_by_model(&model)
 }
 
 #[tauri::command]
 fn create_recipe(name: String, model: String, type_: String, product: Option<String>, voltage_levels: String, components: serde_json::Value, totals: serde_json::Value, modified_by: Option<String>) -> i64 {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return -1,
-    };
-
-    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    conn.execute(
-        "INSERT INTO recipes (name, model, type, product, voltage_levels, is_active, created_at, updated_at, modified_by) VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?6, ?7)",
-        rusqlite::params![name, model, type_, product, voltage_levels, now, modified_by],
-    ).ok();
-    let rid = conn.last_insert_rowid();
-
-    // Insert components
-    if let Some(comps) = components.as_array() {
-        for c in comps {
-            let comp_name = c.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            let voltage = c.get("voltage").and_then(|v| v.as_str()).unwrap_or("");
-            let enabled = c.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
-            let min = c.get("min").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let max = c.get("max").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let unit = c.get("unit").and_then(|v| v.as_str()).unwrap_or("A");
-            conn.execute(
-                "INSERT INTO recipe_components (recipe_id, name, voltage, enabled, min_value, max_value, unit) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                rusqlite::params![rid, comp_name, voltage, if enabled {1} else {0}, min, max, unit],
-            ).ok();
-        }
+    match db::repo::recipe_create(
+        &name, &model, &type_, product.as_deref(), &voltage_levels,
+        &components, &totals, modified_by.as_deref(),
+    ) {
+        Ok(id) => id,
+        Err(e) => { eprintln!("[recipe_create] {}", e); -1 }
     }
-
-    // Insert totals
-    if let Some(tots) = totals.as_array() {
-        for t in tots {
-            let voltage = t.get("voltage").and_then(|v| v.as_str()).unwrap_or("");
-            let min = t.get("min").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let max = t.get("max").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            conn.execute(
-                "INSERT INTO recipe_totals (recipe_id, voltage, min_total, max_total) VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![rid, voltage, min, max],
-            ).ok();
-        }
-    }
-
-    rid
 }
 
 #[tauri::command]
 fn delete_recipe(id: i64) -> String {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return "error".to_string(),
-    };
-    let _ = conn.execute("DELETE FROM recipe_components WHERE recipe_id = ?1", rusqlite::params![id]);
-    let _ = conn.execute("DELETE FROM recipe_totals WHERE recipe_id = ?1", rusqlite::params![id]);
-    let _ = conn.execute("DELETE FROM recipes WHERE id = ?1", rusqlite::params![id]);
-    "deleted".to_string()
+    match db::repo::recipe_delete(id) {
+        Ok(_) => "deleted".to_string(),
+        Err(e) => format!("error: {}", e),
+    }
 }
 
 // --- Operators & Users (SQLite) ---
 #[tauri::command]
 fn list_operators() -> serde_json::Value {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return serde_json::json!([]),
-    };
-    let mut stmt = match conn.prepare("SELECT id, name, employee_id, is_active, created_at FROM operators ORDER BY id DESC") {
-        Ok(s) => s,
-        Err(_) => return serde_json::json!([]),
-    };
-    let rows = stmt.query_map([], |row| {
-        Ok(serde_json::json!({
-            "id": row.get::<_, i64>(0)?,
-            "name": row.get::<_, String>(1)?,
-            "employee_id": row.get::<_, String>(2)?,
-            "is_active": row.get::<_, i64>(3)? == 1,
-            "created_at": row.get::<_, Option<String>>(4)?,
-        }))
-    });
-    let mut arr = Vec::new();
-    if let Ok(rows) = rows { for r in rows.flatten() { arr.push(r); } }
-    serde_json::Value::Array(arr)
+    db::repo::operators_list()
 }
 
 #[tauri::command]
 fn add_operator(name: String, employee_id: String) -> i64 {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return -1,
-    };
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_default();
-    conn.execute(
-        "INSERT INTO operators (name, employee_id, is_active, created_at) VALUES (?1, ?2, 1, ?3)",
-        rusqlite::params![name, employee_id, now],
-    ).ok();
-    conn.last_insert_rowid()
+    match db::repo::operator_add(&name, &employee_id) {
+        Ok(id) => id,
+        Err(e) => { eprintln!("[add_operator] {}", e); -1 }
+    }
 }
 
 #[tauri::command]
 fn list_users() -> serde_json::Value {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return serde_json::json!([]),
-    };
-    let mut stmt = match conn.prepare("SELECT id, username, role, is_active, created_at FROM users ORDER BY id DESC") {
-        Ok(s) => s,
-        Err(_) => return serde_json::json!([]),
-    };
-    let rows = stmt.query_map([], |row| {
-        Ok(serde_json::json!({
-            "id": row.get::<_, i64>(0)?,
-            "username": row.get::<_, String>(1)?,
-            "role": row.get::<_, String>(2)?,
-            "is_active": row.get::<_, i64>(3)? == 1,
-            "created_at": row.get::<_, Option<String>>(4)?,
-        }))
-    });
-    let mut arr = Vec::new();
-    if let Ok(rows) = rows { for r in rows.flatten() { arr.push(r); } }
-    serde_json::Value::Array(arr)
+    db::repo::users_list()
 }
 
 #[tauri::command]
 fn add_user(username: String, password: String, role: String) -> i64 {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return -1,
-    };
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_default();
-    // password hashing skipped for now (use bcrypt crate later)
-    let hash = password.clone();
-    conn.execute(
-        "INSERT INTO users (username, password_hash, role, is_active, created_at) VALUES (?1, ?2, ?3, 1, ?4)",
-        rusqlite::params![username, hash, role, now],
-    ).ok();
-    conn.last_insert_rowid()
+    match db::repo::user_add(&username, &password, &role) {
+        Ok(id) => id,
+        Err(e) => { eprintln!("[add_user] {}", e); -1 }
+    }
 }
 
 #[tauri::command]
 fn delete_user(id: i64) -> String {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return "error".to_string(),
-    };
-    let current = conn.query_row(
-        "SELECT role, is_active FROM users WHERE id = ?1",
-        rusqlite::params![id],
-        |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-    );
-    if let Ok((role, active)) = current {
-        if role == "admin" && active != 0 {
-            let admins: i64 = conn
-                .query_row(
-                    "SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1",
-                    [],
-                    |row| row.get(0),
-                )
-                .unwrap_or(0);
-            if admins <= 1 {
-                return "error: no se puede borrar el último admin activo".to_string();
-            }
-        }
-    }
-    match conn.execute("DELETE FROM users WHERE id = ?1", rusqlite::params![id]) {
+    match db::repo::user_delete(id) {
         Ok(_) => "deleted".to_string(),
         Err(e) => format!("error: {}", e),
     }
@@ -1445,316 +856,59 @@ fn delete_user(id: i64) -> String {
 
 #[tauri::command]
 fn auth_login(username: String) -> Result<serde_json::Value, String> {
-    let conn = db::open().map_err(|e| e.to_string())?;
-    let uname = username.trim().to_uppercase();
-    if uname.is_empty() {
-        return Err("Gafete/usuario requerido".to_string());
-    }
-    let row = conn
-        .query_row(
-            "SELECT username, role, is_active FROM users WHERE username = ?1",
-            rusqlite::params![uname],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, i64>(2)?,
-                ))
-            },
-        )
-        .map_err(|_| format!("Gafete no encontrado: {}", uname))?;
-    if row.2 != 1 {
-        return Err(format!("Usuario inactivo: {}", uname));
-    }
-    Ok(serde_json::json!({
-        "username": row.0,
-        "role": row.1,
-    }))
+    db::repo::auth_login(&username)
 }
 
 #[tauri::command]
 fn user_get(uid: i64) -> Result<serde_json::Value, String> {
-    let conn = db::open().map_err(|e| e.to_string())?;
-    let row = conn
-        .query_row(
-            "SELECT id, username, role, is_active, created_at FROM users WHERE id = ?1",
-            rusqlite::params![uid],
-            |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, i64>(3)?,
-                    row.get::<_, Option<String>>(4)?,
-                ))
-            },
-        )
-        .map_err(|_| "Usuario no encontrado".to_string())?;
-
-    let permissions: Vec<&str> = if row.2 == "admin" {
-        vec![
-            "Todo lo de operator",
-            "Configurar recetas (altas/bajas/cambios)",
-            "Gestionar usuarios y permisos",
-            "PLC/Hipot/BD, etiquetas, logs, import/export",
-            "Ajustar espera de resultado e impresión",
-        ]
-    } else {
-        vec![
-            "Ejecutar pruebas (Modelo/Serie/Batch)",
-            "Ver resultado BUENO/MALO",
-            "Usar modo manual (sin password)",
-            "Reimprimir/Log en principal",
-        ]
-    };
-
-    Ok(serde_json::json!({
-        "id": row.0,
-        "username": row.1,
-        "role": row.2,
-        "is_active": row.3 != 0,
-        "permissions": permissions,
-        "created_at": row.4,
-    }))
+    db::repo::user_get(uid)
 }
 
 #[tauri::command]
-fn user_update(
-    uid: i64,
-    username: Option<String>,
-    role: Option<String>,
-    is_active: Option<bool>,
-) -> Result<String, String> {
-    let conn = db::open().map_err(|e| e.to_string())?;
-    let current = conn
-        .query_row(
-            "SELECT username, role, is_active FROM users WHERE id = ?1",
-            rusqlite::params![uid],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, i64>(2)?,
-                ))
-            },
-        )
-        .map_err(|_| "Usuario no encontrado".to_string())?;
-
-    let new_username = username
-        .map(|s| s.trim().to_uppercase())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| current.0.clone());
-    let new_role = role
-        .filter(|r| r == "admin" || r == "operator")
-        .unwrap_or_else(|| current.1.clone());
-    let new_active = is_active.unwrap_or(current.2 != 0);
-
-    if new_username != current.0 {
-        let exists: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM users WHERE username = ?1 AND id <> ?2",
-                rusqlite::params![new_username, uid],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-        if exists > 0 {
-            return Err("Usuario ya existe".to_string());
-        }
-    }
-
-    let active_admins: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap_or(0);
-    if current.1 == "admin"
-        && current.2 != 0
-        && (new_role != "admin" || !new_active)
-        && active_admins <= 1
-    {
-        return Err("Debe quedar al menos un admin activo".to_string());
-    }
-
-    conn.execute(
-        "UPDATE users SET username = ?1, role = ?2, is_active = ?3 WHERE id = ?4",
-        rusqlite::params![new_username, new_role, if new_active { 1 } else { 0 }, uid],
-    )
-    .map_err(|e| e.to_string())?;
-
+fn user_update(uid: i64, username: Option<String>, role: Option<String>, is_active: Option<bool>) -> Result<String, String> {
+    db::repo::user_update(uid, username.as_deref(), role.as_deref(), is_active)?;
     Ok("updated".to_string())
 }
 
 // --- Executions (SQLite) ---
 #[tauri::command]
 fn start_execution(recipe_id: i64, operator_id: Option<i64>, batch: Option<String>, serial_number: Option<String>) -> i64 {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return -1,
-    };
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_default();
-    let mut batch_id: Option<i64> = None;
-    if let Some(b) = batch {
-        let bn = b.trim().to_uppercase();
-        if !bn.is_empty() {
-            // find or create batch
-            let existing: Option<i64> = conn.query_row("SELECT id FROM batches WHERE batch_number = ?1", rusqlite::params![bn], |row| row.get(0)).ok();
-            if let Some(id) = existing {
-                batch_id = Some(id);
-            } else {
-                conn.execute("INSERT INTO batches (batch_number, operator_id, scanned_at) VALUES (?1, ?2, ?3)", rusqlite::params![bn, operator_id, now]).ok();
-                batch_id = Some(conn.last_insert_rowid());
-            }
-        }
+    match db::repo::execution_start(recipe_id, operator_id, batch.as_deref(), serial_number.as_deref()) {
+        Ok(id) => id,
+        Err(e) => { eprintln!("[start_execution] {}", e); -1 }
     }
-    let serial = serial_number.map(|s| s.trim().to_uppercase());
-    conn.execute(
-        "INSERT INTO executions (recipe_id, operator_id, batch_id, serial_number, plc_start_time, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
-        rusqlite::params![recipe_id, operator_id, batch_id, serial, now],
-    ).ok();
-    conn.last_insert_rowid()
 }
 
 #[tauri::command]
 fn save_plc_result(eid: i64, passed: bool, readings: serde_json::Value) -> String {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return "error".to_string(),
-    };
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_default();
-    // update execution
-    let ex = conn.query_row("SELECT plc_start_time FROM executions WHERE id = ?1", rusqlite::params![eid], |row| row.get::<_, Option<String>>(0));
-    let plc_start = ex.ok().flatten();
-    let mut duration = 0.0;
-    if let Some(_start) = plc_start {
-        // parse not exact, skip duration calc for simplicity
-        duration = 0.0;
+    match db::repo::save_plc_result(eid, passed, &readings) {
+        Ok(_) => "saved".to_string(),
+        Err(e) => format!("error: {}", e),
     }
-    conn.execute(
-        "UPDATE executions SET plc_end_time = ?1, plc_pass_fail = ?2, plc_duration = ?3 WHERE id = ?4",
-        rusqlite::params![now, if passed {1} else {0}, duration, eid],
-    ).ok();
-    // insert readings
-    if let Some(arr) = readings.as_array() {
-        for r in arr {
-            let comp = r.get("component").and_then(|v| v.as_str()).unwrap_or("");
-            let voltage = r.get("voltage").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let tag = r.get("tag").and_then(|v| v.as_str()).unwrap_or("");
-            let value = r.get("value").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let min = r.get("min").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let max = r.get("max").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let is_pass = r.get("pass").and_then(|v| v.as_bool()).unwrap_or(false);
-            let recipe_id: i64 = conn.query_row("SELECT recipe_id FROM executions WHERE id = ?1", rusqlite::params![eid], |row| row.get(0)).unwrap_or(0);
-            conn.execute(
-                "INSERT INTO plc_readings (execution_id, recipe_id, component_name, voltage, tag_name, value, min_limit, max_limit, is_pass) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                rusqlite::params![eid, recipe_id, comp, voltage.to_string(), tag, value, min, max, if is_pass {1} else {0}],
-            ).ok();
-        }
-    }
-    "saved".to_string()
 }
 
 #[tauri::command]
 fn save_hipot_result(eid: i64, body: serde_json::Value) -> String {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return "error".to_string(),
-    };
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_default();
-    let hipot_pass = body.get("pass").and_then(|v| v.as_bool()).unwrap_or(false);
-    let voltage = body.get("voltage").and_then(|v| v.as_f64());
-    let current = body.get("current").and_then(|v| v.as_f64());
-    let resistance = body.get("resistance").and_then(|v| v.as_f64());
-    let insulation = body.get("insulation").and_then(|v| v.as_f64());
-    let duration = body.get("duration").and_then(|v| v.as_f64());
-    let recipe_id: i64 = conn.query_row("SELECT recipe_id FROM executions WHERE id = ?1", rusqlite::params![eid], |row| row.get(0)).unwrap_or(0);
-    let plc_pass: Option<i64> = conn.query_row("SELECT plc_pass_fail FROM executions WHERE id = ?1", rusqlite::params![eid], |row| row.get(0)).ok();
-    conn.execute(
-        "UPDATE executions SET hipot_start_time = ?1, hipot_end_time = ?2, hipot_pass_fail = ?3, hipot_duration = ?4, final_status = ?5, total_duration = ?6 WHERE id = ?7",
-        rusqlite::params![now, now, if hipot_pass {1} else {0}, duration, if plc_pass.unwrap_or(0) == 1 && hipot_pass {"GOOD"} else {"BAD"}, 0.0, eid],
-    ).ok();
-    conn.execute(
-        "INSERT INTO hipot_results (execution_id, recipe_id, voltage, current, resistance, insulation_resistance, test_duration, is_pass) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        rusqlite::params![eid, recipe_id, voltage, current, resistance, insulation, duration, if hipot_pass {1} else {0}],
-    ).ok();
-    let final_status = if plc_pass.unwrap_or(0) == 1 && hipot_pass { "GOOD" } else { "BAD" };
-    final_status.to_string()
+    match db::repo::save_hipot_result(eid, &body) {
+        Ok(status) => status,
+        Err(e) => format!("error: {}", e),
+    }
 }
 
 #[tauri::command]
 fn list_executions(limit: i64) -> serde_json::Value {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return serde_json::json!([]),
-    };
-    let mut stmt = match conn.prepare("SELECT id, recipe_id, serial_number, plc_pass_fail, hipot_pass_fail, final_status, created_at FROM executions ORDER BY id DESC LIMIT ?1") {
-        Ok(s) => s,
-        Err(_) => return serde_json::json!([]),
-    };
-    let rows = stmt.query_map(rusqlite::params![limit], |row| {
-        Ok(serde_json::json!({
-            "id": row.get::<_, i64>(0)?,
-            "recipe_id": row.get::<_, Option<i64>>(1)?,
-            "serial": row.get::<_, Option<String>>(2)?,
-            "plc": row.get::<_, Option<i64>>(3)?,
-            "hipot": row.get::<_, Option<i64>>(4)?,
-            "final": row.get::<_, Option<String>>(5)?,
-            "created": row.get::<_, Option<String>>(6)?,
-        }))
-    });
-    let mut arr = Vec::new();
-    if let Ok(rows) = rows { for r in rows.flatten() { arr.push(r); } }
-    serde_json::Value::Array(arr)
+    db::repo::executions_list(limit)
 }
 
 #[tauri::command]
 fn update_recipe(id: i64, name: String, model: String, type_: String, product: Option<String>, voltage_levels: String, components: serde_json::Value, totals: serde_json::Value, modified_by: Option<String>) -> String {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return "error".to_string(),
-    };
-
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_default();
-    conn.execute(
-        "UPDATE recipes SET name = ?1, model = ?2, type = ?3, product = ?4, voltage_levels = ?5, updated_at = ?6, modified_by = ?7 WHERE id = ?8",
-        rusqlite::params![name, model, type_, product, voltage_levels, now, modified_by, id],
-    ).ok();
-
-    // Delete old components and totals
-    let _ = conn.execute("DELETE FROM recipe_components WHERE recipe_id = ?1", rusqlite::params![id]);
-    let _ = conn.execute("DELETE FROM recipe_totals WHERE recipe_id = ?1", rusqlite::params![id]);
-
-    // Insert components
-    if let Some(comps) = components.as_array() {
-        for c in comps {
-            let comp_name = c.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            let voltage = c.get("voltage").and_then(|v| v.as_str()).unwrap_or("");
-            let enabled = c.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
-            let min = c.get("min").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let max = c.get("max").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let unit = c.get("unit").and_then(|v| v.as_str()).unwrap_or("A");
-            conn.execute(
-                "INSERT INTO recipe_components (recipe_id, name, voltage, enabled, min_value, max_value, unit) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                rusqlite::params![id, comp_name, voltage, if enabled {1} else {0}, min, max, unit],
-            ).ok();
-        }
+    match db::repo::recipe_update(
+        id, &name, &model, &type_, product.as_deref(), &voltage_levels,
+        &components, &totals, modified_by.as_deref(),
+    ) {
+        Ok(_) => "updated".to_string(),
+        Err(e) => format!("error: {}", e),
     }
-
-    // Insert totals
-    if let Some(tots) = totals.as_array() {
-        for t in tots {
-            let voltage = t.get("voltage").and_then(|v| v.as_str()).unwrap_or("");
-            let min = t.get("min").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let max = t.get("max").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            conn.execute(
-                "INSERT INTO recipe_totals (recipe_id, voltage, min_total, max_total) VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![id, voltage, min, max],
-            ).ok();
-        }
-    }
-
-    "updated".to_string()
 }
 
 #[tauri::command]
@@ -1810,48 +964,10 @@ fn ensure_remote_tables(conn_str: String) -> String {
 
 #[tauri::command]
 fn sync_pending(remote_conn_str: String) -> String {
-    use odbc_api::Environment;
-    // Read pending executions from local SQLite
-    let local_conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return "error: cannot open local db".to_string(),
-    };
-    let mut stmt = match local_conn.prepare("SELECT id, recipe_id, serial_number, final_status FROM executions WHERE synced_to_remote = 0 OR synced_to_remote IS NULL") {
-        Ok(s) => s,
-        Err(_) => return "error: cannot query local".to_string(),
-    };
-    let rows: Vec<(i64, Option<i64>, Option<String>, Option<String>)> = stmt.query_map([], |row| {
-        Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-    }).map(|r| r.flatten().collect()).unwrap_or_default();
-
-    if rows.is_empty() {
-        return "OK: 0 pendientes".to_string();
+    match db::repo::sync_pending(&remote_conn_str) {
+        Ok(report) => format!("OK: {}", report),
+        Err(e) => format!("error: {}", e),
     }
-
-    // Connect to remote
-    let env = match Environment::new() {
-        Ok(e) => e,
-        Err(e) => return format!("Error ODBC env: {}", e),
-    };
-    let remote = match env.connect_with_connection_string(&remote_conn_str, odbc_api::ConnectionOptions::default()) {
-        Ok(c) => c,
-        Err(e) => return format!("Error conexion remota: {}", e),
-    };
-
-    let mut synced = 0;
-    for (id, recipe_id, serial, final_status) in rows {
-        let sql = format!(
-            "INSERT INTO executions (recipe_id, serial_number, final_status, synced_to_remote) VALUES ({}, '{}', '{}', 1)",
-            recipe_id.unwrap_or(0),
-            serial.unwrap_or_default().replace("'", "''"),
-            final_status.unwrap_or_default().replace("'", "''"),
-        );
-        if remote.execute(&sql, (), None).is_ok() {
-            let _ = local_conn.execute("UPDATE executions SET synced_to_remote = 1 WHERE id = ?1", rusqlite::params![id]);
-            synced += 1;
-        }
-    }
-    format!("OK: {} sincronizados", synced)
 }
 
 #[tauri::command]
@@ -1902,52 +1018,19 @@ fn print_zpl_windows(printer_name: String, zpl: String) -> String {
 // --- Logs (SQLite) ---
 #[tauri::command]
 fn list_logs(category: Option<String>, level: Option<String>, q: Option<String>, limit: i64) -> serde_json::Value {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return serde_json::json!([]),
-    };
-    let mut sql = "SELECT id, timestamp, level, category, action, detail, execution_id, value_sent, value_received, duration_ms, success, error_message FROM app_logs WHERE 1=1".to_string();
-    if let Some(c) = &category { if !c.is_empty() { sql.push_str(&format!(" AND category = '{}'", c.replace("'", "''"))); } }
-    if let Some(l) = &level { if !l.is_empty() { sql.push_str(&format!(" AND level = '{}'", l.replace("'", "''"))); } }
-    if let Some(qq) = &q { if !qq.is_empty() { sql.push_str(&format!(" AND detail LIKE '%{}%'", qq.replace("'", "''"))); } }
-    sql.push_str(&format!(" ORDER BY id DESC LIMIT {}", limit));
-    let mut stmt = match conn.prepare(&sql) {
-        Ok(s) => s,
-        Err(_) => return serde_json::json!([]),
-    };
-    let rows = stmt.query_map([], |row| {
-        Ok(serde_json::json!({
-            "id": row.get::<_, i64>(0)?,
-            "ts": row.get::<_, Option<String>>(1)?,
-            "level": row.get::<_, String>(2)?,
-            "cat": row.get::<_, String>(3)?,
-            "action": row.get::<_, String>(4)?,
-            "detail": row.get::<_, Option<String>>(5)?,
-            "execution_id": row.get::<_, Option<i64>>(6)?,
-            "value_sent": row.get::<_, Option<String>>(7)?,
-            "value_received": row.get::<_, Option<String>>(8)?,
-            "duration_ms": row.get::<_, Option<i64>>(9)?,
-            "success": row.get::<_, Option<i64>>(10)?,
-            "error_message": row.get::<_, Option<String>>(11)?,
-        }))
-    });
-    let mut arr = Vec::new();
-    if let Ok(rows) = rows { for r in rows.flatten() { arr.push(r); } }
-    serde_json::Value::Array(arr)
+    db::repo::logs_list(category.as_deref(), level.as_deref(), q.as_deref(), limit)
 }
 
 #[tauri::command]
 fn log_action(level: String, category: String, action: String, detail: Option<String>, execution_id: Option<i64>, value_sent: Option<String>, value_received: Option<String>, duration_ms: Option<i64>, success: Option<bool>, error_message: Option<String>) -> i64 {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return -1,
-    };
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_default();
-    conn.execute(
-        "INSERT INTO app_logs (timestamp, level, category, action, detail, execution_id, value_sent, value_received, duration_ms, success, error_message) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-        rusqlite::params![now, level, category, action, detail, execution_id, value_sent, value_received, duration_ms, if success.unwrap_or(true) {1} else {0}, error_message],
-    ).ok();
-    conn.last_insert_rowid()
+    match db::repo::log_add(
+        &level, &category, &action, detail.as_deref(), execution_id,
+        value_sent.as_deref(), value_received.as_deref(), duration_ms,
+        success.unwrap_or(true), error_message.as_deref(),
+    ) {
+        Ok(id) => id,
+        Err(e) => { eprintln!("[log_action] {}", e); -1 }
+    }
 }
 
 #[tauri::command]
@@ -2042,23 +1125,27 @@ fn print_test_zebra(printer_ip: String, printer_port: u16, printer_name: String)
 
 #[tauri::command]
 fn reprint_zebra(eid: i64, printer_ip: String, printer_port: u16, printer_name: String) -> String {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return "error: cannot open db".to_string(),
-    };
-    let row = conn.query_row(
-        "SELECT serial_number, final_status FROM executions WHERE id = ?1",
-        rusqlite::params![eid],
-        |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<String>>(1)?)),
-    );
-    let (serial, status) = match row {
-        Ok(v) => v,
-        Err(_) => return "error: execution not found".to_string(),
-    };
+    let row = db::repo::label_data(eid);
+    if row.is_null() {
+        return "error: execution not found".to_string();
+    }
+    let serial = row
+        .get("serial_number")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let status = row
+        .get("final_status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let model = row.get("model").and_then(|v| v.as_str()).unwrap_or("");
+    let batch = row.get("batch").and_then(|v| v.as_str()).unwrap_or("");
+    let created = row.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
     let data = serde_json::json!({
-        "model": "", "serial_number": serial.unwrap_or_default(),
-        "batch_number": "", "final_status": status.unwrap_or_default(),
-        "date": "", "time": ""
+        "model": model, "serial_number": serial,
+        "batch_number": batch, "final_status": status,
+        "date": created, "time": ""
     });
     let zpl = canvas_to_zpl(db::seed::DEFAULT_TEMPLATE_JSON.to_string(), data);
     if !printer_ip.is_empty() {
@@ -2070,57 +1157,10 @@ fn reprint_zebra(eid: i64, printer_ip: String, printer_port: u16, printer_name: 
 
 #[tauri::command]
 fn duplicate_recipe(id: i64, new_model: String) -> i64 {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(_) => return -1,
-    };
-    // Get original recipe
-    let orig = conn.query_row(
-        "SELECT name, model, type, product, voltage_levels, modified_by FROM recipes WHERE id = ?1",
-        rusqlite::params![id],
-        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<String>>(2)?, row.get::<_, Option<String>>(3)?, row.get::<_, Option<String>>(4)?, row.get::<_, Option<String>>(5)?)),
-    );
-    let (name, _model, rtype, product, voltage_levels, modified_by) = match orig {
-        Ok(v) => v,
-        Err(_) => return -1,
-    };
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_default();
-    let new_name = format!("{} (copia)", name);
-    conn.execute(
-        "INSERT INTO recipes (name, model, type, product, voltage_levels, is_active, created_at, updated_at, modified_by) VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?6, ?7)",
-        rusqlite::params![new_name, new_model, rtype, product, voltage_levels, now, modified_by],
-    ).ok();
-    let new_id = conn.last_insert_rowid();
-
-    // Copy components
-    let mut stmt = conn.prepare("SELECT name, voltage, enabled, min_value, max_value, unit FROM recipe_components WHERE recipe_id = ?1").ok();
-    if let Some(ref mut s) = stmt {
-        let rows: Vec<(String, String, i64, f64, f64, Option<String>)> = s.query_map(rusqlite::params![id], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?))
-        }).map(|r| r.flatten().collect()).unwrap_or_default();
-        for (name, voltage, enabled, min, max, unit) in rows {
-            conn.execute(
-                "INSERT INTO recipe_components (recipe_id, name, voltage, enabled, min_value, max_value, unit) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                rusqlite::params![new_id, name, voltage, enabled, min, max, unit],
-            ).ok();
-        }
+    match db::repo::recipe_duplicate(id, &new_model) {
+        Ok(id) => id,
+        Err(e) => { eprintln!("[duplicate_recipe] {}", e); -1 }
     }
-
-    // Copy totals
-    let mut stmt = conn.prepare("SELECT voltage, min_total, max_total FROM recipe_totals WHERE recipe_id = ?1").ok();
-    if let Some(ref mut s) = stmt {
-        let rows: Vec<(String, f64, f64)> = s.query_map(rusqlite::params![id], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-        }).map(|r| r.flatten().collect()).unwrap_or_default();
-        for (voltage, min, max) in rows {
-            conn.execute(
-                "INSERT INTO recipe_totals (recipe_id, voltage, min_total, max_total) VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![new_id, voltage, min, max],
-            ).ok();
-        }
-    }
-
-    new_id
 }
 fn main() {
     tauri::Builder::default()
@@ -2215,11 +1255,17 @@ fn main() {
         .setup(|app| {
             // Esquema + seed una sola vez, antes de que la UI llame comandos.
             db::init();
-            // Auto-sync loop: cada 5 minutos sincronizar pendientes a SQL Server remoto
+            // Auto-sync loop: intervalo configurable (sync_interval_minutes)
             std::thread::spawn(move || {
                 loop {
-                    std::thread::sleep(std::time::Duration::from_secs(300));
                     let cfg = get_config();
+                    let minutes = cfg
+                        .get("sync_interval_minutes")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| s.parse::<u64>().ok())
+                        .unwrap_or(5)
+                        .clamp(1, 1440);
+                    std::thread::sleep(std::time::Duration::from_secs(minutes * 60));
                     let server = cfg.get("sql_server").and_then(|v| v.as_str()).unwrap_or("");
                     if !server.is_empty() {
                         let db_name = cfg.get("sql_database").and_then(|v| v.as_str()).unwrap_or("HiPotDB_Central");

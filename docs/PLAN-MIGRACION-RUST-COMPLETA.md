@@ -29,7 +29,7 @@ Mientras esos tres puntos no se resuelvan, cualquier migración adicional se con
 │ HiPotApp.exe (Tauri 2) — un solo binario                     │
 │                                                              │
 │  React UI ── invoke() ──► comandos Rust                      │
-│                              ├─ rusqlite (SQLite local)      │
+│                              ├─ odbc-api (SQL Express local)  │
 │                              ├─ s7 (PLC S7-1200)             │
 │                              ├─ serialport (Hipot 3865)       │
 │                              ├─ odbc-api (SQL Server remoto) │
@@ -39,9 +39,9 @@ Mientras esos tres puntos no se resuelvan, cualquier migración adicional se con
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**Estado:** el sidecar Python ya fue eliminado. Toda la lógica corre en Rust.
-La única deuda estructural pendiente es migrar la BD local de SQLite a
-SQL Express (Fase 7).
+**Estado:** el sidecar Python ya fue eliminado y la persistencia local corre
+sobre **SQL Express**. `rusqlite` se conserva únicamente para la migración
+única desde `hipot_local.db` y para tests.
 
 ---
 
@@ -381,7 +381,7 @@ Cambios frontend:
 
 ---
 
-### Fase 7 - BD local SQL Express + sync multitable (EN CURSO: 7A completada)
+### Fase 7 - BD local SQL Express + sync multitable (COMPLETADA)
 
 Esta es la fase más grande y la que cumple el requisito "solo SQL Express".
 
@@ -390,34 +390,42 @@ Esta es la fase más grande y la que cumple el requisito "solo SQL Express".
 - [x] `db/odbc_local.rs` con `odbc-api`:
   - [x] Conexión `Trusted_Connection` o usuario/password.
   - [x] Lectura de `db_config.json` por Rust.
-  - [x] `test_connection`, `execute`, `query_json`, `query_one`, `last_id`.
+  - [x] `test_connection`, `execute`, `query_json`, `query_one`, `last_id`, `insert_id`.
   - [x] `ensure_schema()` usando `schema.sql` y `sys.tables`.
+  - [x] `with_transaction` para operaciones atómicas.
 - [x] Migración única SQLite → SQL Express (`migrate_from_sqlite`):
   - [x] Recetas + componentes + totales.
   - [x] Configuración, usuarios, operadores, batches.
   - [x] Ejecuciones, lecturas PLC, resultados Hipot.
   - [x] Barcode, logs, plantillas, impresiones, tags PLC, import/export.
   - [x] `IDENTITY_INSERT` para conservar IDs.
-- [x] Comandos nuevos: `local_db_status`, `local_db_test_connection`, `local_db_ensure_tables`, `local_db_migrate`.
-- [x] UI en Sistema → Base de datos local: probar, crear tablas y migrar.
+  - [x] Merge de configuración/usuarios/plantillas por clave única.
 
-#### 7B — Migrar comandos CRUD a ODBC (PENDIENTE)
+#### 7B — Comandos CRUD sobre ODBC (COMPLETADA)
 
-- [ ] Repositorios ODBC para las 18 tablas.
-- [ ] Reemplazar `rusqlite` en config, usuarios, recetas, ejecuciones, logs, tags, plantillas, historial, barcode.
-- [ ] `db::open()` con backend SQL Express.
-- [ ] Eliminar `rusqlite` del runtime (solo queda para migración).
+- [x] `db/repo.rs` con repositorios ODBC.
+- [x] Configuración, recetas, operadores, usuarios, auth.
+- [x] Ejecuciones, resultados PLC/Hipot, historial.
+- [x] Logs, tags PLC, plantillas, barcode.
+- [x] Import/export sobre ODBC (`config_io` reescrito).
+- [x] `db::init()` crea esquema y seed en SQL Express.
+- [x] `rusqlite` queda **solo** para la migración y tests; el runtime usa ODBC.
+- [x] `app_health` reporta estado de SQL Express.
 
-#### 7C — Sync multitable (PENDIENTE)
+#### 7C — Sync multitable (COMPLETADA)
 
-- [ ] Sync local SQL Express → SQL Server remoto:
-  `executions`, `plc_readings`, `hipot_results`, `barcode_logs`, `recipes`, `operators`, `batches`, `users`, `label_prints`.
-- [ ] Escribir `sync_log` (dirección, tabla, registros, estado, error).
-- [ ] Actualizar `synced_at`.
-- [ ] Reintentos y modo offline.
-- [ ] `sync_now` manual y loop cada `sync_interval_minutes`.
+- [x] Sync local SQL Express → SQL Server remoto:
+  recetas, componentes, totales, operadores, batches, usuarios, plantillas,
+  ejecuciones, lecturas PLC, resultados Hipot, barcode, impresiones, tags y configuración.
+- [x] Inserta de forma idempotente (`IF NOT EXISTS`).
+- [x] Conserva IDs con `IDENTITY_INSERT`.
+- [x] Marca `executions.synced_to_remote = 1` y `synced_at`.
+- [x] Escribe `sync_log` por tabla (éxito/error).
+- [x] Intervalo configurable (`sync_interval_minutes`).
+- [x] Sync manual desde `DbTab`.
+- [x] La UI no se bloquea si el remoto no responde.
 
-**Criterio de aceptación (7 completa):** con SQL Express local vacío, la app crea el esquema, opera 100% offline y sincroniza a SQL Server remoto. **Aún no cumplido: 7B/7C pendientes.**
+**Criterio de aceptación:** con SQL Express local vacío, la app crea el esquema, opera 100% offline y sincroniza a SQL Server remoto. **Cumplido en código; falta prueba en estación con SQL Express instalado.**
 
 ---
 

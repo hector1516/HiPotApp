@@ -360,7 +360,7 @@ export default function App() {
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: health ? '#166534' : '#991b1b' }} />
-          {health ? 'Sistema OK' : 'Sin conexion'}
+          {health ? 'Sistema OK' : 'BD sin conexion'}
         </span>
         <span style={{ marginLeft: 'auto' }}>Offline-first · Windows 11 · v1.0.0 · Ctrl+Shift+K → GodMode</span>
       </footer>

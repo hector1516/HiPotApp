@@ -138,6 +138,61 @@ pub fn last_id(conn: &mut Connection<'_>, table: &str) -> Result<i64, String> {
         .unwrap_or(0))
 }
 
+/// Inserta y devuelve el ID generado en la misma conexión.
+pub fn insert_id(conn: &mut Connection<'_>, sql: &str) -> Result<i64, String> {
+    execute(conn, sql)?;
+    let rows = query_json(conn, "SELECT CAST(SCOPE_IDENTITY() AS BIGINT) AS id")?;
+    Ok(rows
+        .first()
+        .and_then(|row| row.get("id"))
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0))
+}
+
+/// Ejecuta varias sentencias en una transacción.
+pub fn with_transaction<T>(
+    f: impl FnOnce(&mut Connection<'_>) -> Result<T, String>,
+) -> Result<T, String> {
+    with_connection(|conn| {
+        execute(conn, "BEGIN TRANSACTION")?;
+        match f(conn) {
+            Ok(value) => {
+                execute(conn, "COMMIT TRANSACTION")?;
+                Ok(value)
+            }
+            Err(e) => {
+                let _ = execute(conn, "ROLLBACK TRANSACTION");
+                Err(e)
+            }
+        }
+    })
+}
+
+/// Literal SQL seguro para texto/NVARCHAR.
+pub fn sql_text(value: &str) -> String {
+    format!("N'{}'", value.replace('\'', "''"))
+}
+
+pub fn sql_opt(value: Option<&str>) -> String {
+    value.map(sql_text).unwrap_or_else(|| "NULL".to_string())
+}
+
+pub fn sql_bool(value: bool) -> &'static str {
+    if value {
+        "1"
+    } else {
+        "0"
+    }
+}
+
+pub fn sql_num(value: f64) -> String {
+    if value.is_finite() {
+        value.to_string()
+    } else {
+        "NULL".to_string()
+    }
+}
+
 /// Crea las tablas que falten usando `schema.sql` como fuente.
 pub fn ensure_schema() -> Result<usize, String> {
     with_connection(|conn| {
@@ -168,8 +223,43 @@ pub fn ensure_schema() -> Result<usize, String> {
                 let _ = execute(conn, stmt);
             }
         }
+
+        // Columnas añadidas después de la primera versión del esquema.
+        let _ = ensure_column(conn, "recipes", "modified_by", "NVARCHAR(50)");
+        let _ = ensure_column(conn, "executions", "synced_at", "DATETIME");
+        let _ = ensure_column(conn, "plc_readings", "timestamp", "DATETIME");
+        let _ = ensure_column(conn, "hipot_results", "timestamp", "DATETIME");
+        let _ = ensure_column(conn, "configurations", "updated_at", "DATETIME");
+        let _ = ensure_column(conn, "app_logs", "user_id", "INTEGER");
+
         Ok(created)
     })
+}
+
+fn ensure_column(
+    conn: &mut Connection<'_>,
+    table: &str,
+    column: &str,
+    ddl: &str,
+) -> Result<(), String> {
+    let exists = query_one(
+        conn,
+        &format!(
+            "SELECT COUNT(*) AS n FROM sys.columns \
+             WHERE object_id = OBJECT_ID({}) AND name = {}",
+            sql_text(table),
+            sql_text(column)
+        ),
+    )?
+    .and_then(|row| row.get("n").and_then(|v| v.as_i64()))
+    .unwrap_or(0);
+    if exists == 0 {
+        execute(
+            conn,
+            &format!("ALTER TABLE [{}] ADD [{}] {}", table, column, ddl),
+        )?;
+    }
+    Ok(())
 }
 
 /// Migra una vez los datos de `hipot_local.db` (SQLite) a SQL Express.
@@ -184,7 +274,6 @@ pub fn migrate_from_sqlite() -> Result<Value, String> {
     let src = rusqlite::Connection::open(&sqlite_path).map_err(|e| e.to_string())?;
 
     let tables = [
-        "configurations",
         "recipes",
         "recipe_components",
         "recipe_totals",
@@ -194,11 +283,9 @@ pub fn migrate_from_sqlite() -> Result<Value, String> {
         "plc_readings",
         "hipot_results",
         "barcode_logs",
-        "users",
         "sync_log",
         "app_logs",
         "ui_state_log",
-        "label_templates",
         "label_prints",
         "plc_tags",
         "import_export_logs",
@@ -210,18 +297,21 @@ pub fn migrate_from_sqlite() -> Result<Value, String> {
             let migrated = migrate_table(&src, conn, table)?;
             report.insert(table.to_string(), json!(migrated));
         }
+        // Estas tres tablas ya tienen datos seed; se fusionan por clave.
+        let config_source = if sqlite_table_exists(&src, "configurations") {
+            "configurations"
+        } else {
+            "configuration"
+        };
+        let configs = merge_by_key(&src, conn, config_source, "configurations", "config_key")?;
+        let users = merge_by_key(&src, conn, "users", "users", "username")?;
+        let templates =
+            merge_by_key(&src, conn, "label_templates", "label_templates", "name")?;
+        report.insert("configurations".to_string(), json!(configs));
+        report.insert("users".to_string(), json!(users));
+        report.insert("label_templates".to_string(), json!(templates));
         Ok(Value::Object(report))
     })?;
-
-    // Si la BD antigua usaba `configuration` (singular), migrar esa tabla.
-    let _ = with_connection(|conn| {
-        if sqlite_table_exists(&src, "configuration")
-            && !sqlite_table_exists(&src, "configurations")
-        {
-            migrate_table_named(&src, conn, "configuration", "configurations")?;
-        }
-        Ok(())
-    });
 
     // Marcar migración en la configuración de SQL Express.
     let _ = with_connection(|conn| {
@@ -238,6 +328,74 @@ pub fn migrate_from_sqlite() -> Result<Value, String> {
     });
 
     Ok(report)
+}
+
+/// Merge de tablas con clave única (configuraciones, usuarios, plantillas).
+fn merge_by_key(
+    src: &rusqlite::Connection,
+    target: &mut Connection<'_>,
+    source_table: &str,
+    target_table: &str,
+    key_column: &str,
+) -> Result<i64, String> {
+    if !sqlite_table_exists(src, source_table) {
+        return Ok(0);
+    }
+    let columns = sqlite_columns(src, source_table)?;
+    if columns.is_empty() {
+        return Ok(0);
+    }
+    let mut stmt = src
+        .prepare(&format!("SELECT * FROM [{}]", source_table))
+        .map_err(|e| e.to_string())?;
+    let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
+    let mut count = 0i64;
+    while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+        let mut values = Vec::new();
+        let mut key_value = String::new();
+        for (i, column) in columns.iter().enumerate() {
+            let value = row.get_ref(i).map_err(|e| e.to_string())?;
+            if column == key_column {
+                key_value = match value {
+                    rusqlite::types::ValueRef::Text(bytes) => {
+                        String::from_utf8_lossy(bytes).to_string()
+                    }
+                    other => format!("{:?}", other),
+                };
+            }
+            values.push(sql_literal(value));
+        }
+        if key_value.is_empty() {
+            continue;
+        }
+        let exists = query_one(
+            target,
+            &format!(
+                "SELECT COUNT(*) AS n FROM [{}] WHERE [{}] = {}",
+                target_table,
+                key_column,
+                sql_literal(rusqlite::types::ValueRef::Text(key_value.as_bytes()))
+            ),
+        )?
+        .and_then(|row| row.get("n").and_then(|v| v.as_i64()))
+        .unwrap_or(0);
+        if exists > 0 {
+            continue;
+        }
+        let sql = format!(
+            "INSERT INTO [{}] ({}) VALUES ({})",
+            target_table,
+            columns
+                .iter()
+                .map(|c| format!("[{}]", c))
+                .collect::<Vec<_>>()
+                .join(", "),
+            values.join(", ")
+        );
+        execute(target, &sql)?;
+        count += 1;
+    }
+    Ok(count)
 }
 
 fn migrate_table(

@@ -1,14 +1,13 @@
-//! Capa de acceso a la base de datos local.
+//! Capa de datos local.
 //!
-//! Punto único de entrada: `db::open()`. Abre SQLite, aplica PRAGMAs,
-//! garantiza el esquema completo y deja la conexión lista para usar.
-//!
-//! Cuando se migre a SQL Express (Fase 7) solo cambia la implementación
-//! interna de este módulo; los comandos no se tocan.
+//! `init()` prepara **SQL Express** (esquema + seed) y es lo que usa la app en
+//! producción. `open()` (SQLite) se conserva únicamente para la migración
+//! `SQLite -> SQL Express` y para tests.
 
 pub mod config;
 pub mod odbc_local;
 pub mod paths;
+pub mod repo;
 pub mod schema;
 pub mod seed;
 
@@ -28,9 +27,64 @@ pub fn open() -> rusqlite::Result<Connection> {
     Ok(conn)
 }
 
-/// Inicialización de arranque: esquema + valores por defecto.
+/// Inicialización de arranque: esquema SQL Express + valores por defecto.
 pub fn init() {
-    if let Ok(conn) = open() {
-        seed::seed_defaults(&conn);
+    if let Err(e) = odbc_local::ensure_schema() {
+        eprintln!("[db] SQL Express no disponible: {}", e);
+        return;
     }
+    if let Err(e) = seed_express() {
+        eprintln!("[db] seed SQL Express: {}", e);
+    }
+}
+
+fn seed_express() -> Result<(), String> {
+    use crate::db::seed::{DEFAULT_CONFIGS, DEFAULT_TEMPLATE_JSON};
+    use odbc_local::{execute, query_one, sql_bool, sql_text, with_transaction};
+
+    with_transaction(|conn| {
+        let now = sql_text(&chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string());
+        for (key, value) in DEFAULT_CONFIGS {
+            execute(
+                conn,
+                &format!(
+                    "IF NOT EXISTS (SELECT 1 FROM configurations WHERE config_key = {k}) \
+                     INSERT INTO configurations (config_key, config_value, updated_at) \
+                     VALUES ({k}, {v}, {now})",
+                    k = sql_text(key),
+                    v = sql_text(value),
+                    now = now
+                ),
+            )?;
+        }
+
+        execute(
+            conn,
+            &format!(
+                "IF NOT EXISTS (SELECT 1 FROM users WHERE username = 'ADMIN') \
+                 INSERT INTO users (username, password_hash, role, is_active, created_at) \
+                 VALUES ('ADMIN', '', 'admin', 1, {})",
+                now
+            ),
+        )?;
+
+        let templates = query_one(conn, "SELECT COUNT(*) AS n FROM label_templates")?
+            .and_then(|row| row.get("n").and_then(|v| v.as_i64()))
+            .unwrap_or(0);
+        if templates == 0 {
+            execute(
+                conn,
+                &format!(
+                    "INSERT INTO label_templates \
+                     (name, width_mm, height_mm, canvas_data, is_default, created_at, updated_at) \
+                     VALUES ('Predeterminada 100x60', 100, 60, {}, {}, {}, {})",
+                    sql_text(DEFAULT_TEMPLATE_JSON),
+                    sql_bool(true),
+                    now,
+                    now
+                ),
+            )?;
+        }
+        Ok(())
+    })
 }

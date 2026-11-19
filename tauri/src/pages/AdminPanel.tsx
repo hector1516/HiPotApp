@@ -854,33 +854,27 @@ function SystemTab() {
       </div>
       <div className="card" style={{ marginBottom: 10 }}>
         <h3>Base de datos local</h3>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
-          <label style={{ fontSize: 12, color: '#475569' }}>Tipo:</label>
-          <select className="input" style={{ maxWidth: 140 }} value={localDbCfg.use_sqlite === '0' ? 'sql' : 'sqlite'} onChange={e => setLocalDbCfg({ ...localDbCfg, use_sqlite: e.target.value === 'sql' ? '0' : '1' })}>
-            <option value="sqlite">SQLite (default)</option>
-            <option value="sql">SQL Express</option>
-          </select>
+        <div style={{ fontSize: 12, color: '#475569', marginBottom: 8 }}>
+          Motor: <b>SQL Server Express</b> (obligatorio en producción)
         </div>
-        {localDbCfg.use_sqlite === '0' && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-            <div>
-              <label style={{ fontSize: 12, color: '#475569' }}>Servidor</label>
-              <input className="input" value={localDbCfg.server ?? ''} onChange={e => setLocalDbCfg({ ...localDbCfg, server: e.target.value })} placeholder=".\\SQLEXPRESS" inputMode="text" />
-            </div>
-            <div>
-              <label style={{ fontSize: 12, color: '#475569' }}>Base de datos</label>
-              <input className="input" value={localDbCfg.name ?? ''} onChange={e => setLocalDbCfg({ ...localDbCfg, name: e.target.value })} placeholder="HiPotDB" inputMode="text" />
-            </div>
-            <div>
-              <label style={{ fontSize: 12, color: '#475569' }}>Usuario</label>
-              <input className="input" value={localDbCfg.user ?? ''} onChange={e => setLocalDbCfg({ ...localDbCfg, user: e.target.value })} placeholder="(vacío = trusted)" inputMode="text" />
-            </div>
-            <div>
-              <label style={{ fontSize: 12, color: '#475569' }}>Contraseña</label>
-              <input className="input" type="password" value={localDbCfg.password ?? ''} onChange={e => setLocalDbCfg({ ...localDbCfg, password: e.target.value })} placeholder="****" inputMode="text" />
-            </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+          <div>
+            <label style={{ fontSize: 12, color: '#475569' }}>Servidor</label>
+            <input className="input" value={localDbCfg.server ?? ''} onChange={e => setLocalDbCfg({ ...localDbCfg, use_sqlite: '0', server: e.target.value })} placeholder=".\\SQLEXPRESS" inputMode="text" />
           </div>
-        )}
+          <div>
+            <label style={{ fontSize: 12, color: '#475569' }}>Base de datos</label>
+            <input className="input" value={localDbCfg.name ?? ''} onChange={e => setLocalDbCfg({ ...localDbCfg, use_sqlite: '0', name: e.target.value })} placeholder="HiPotDB" inputMode="text" />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#475569' }}>Usuario</label>
+            <input className="input" value={localDbCfg.user ?? ''} onChange={e => setLocalDbCfg({ ...localDbCfg, use_sqlite: '0', user: e.target.value })} placeholder="(vacío = trusted)" inputMode="text" />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#475569' }}>Contraseña</label>
+            <input className="input" type="password" value={localDbCfg.password ?? ''} onChange={e => setLocalDbCfg({ ...localDbCfg, use_sqlite: '0', password: e.target.value })} placeholder="****" inputMode="text" />
+          </div>
+        </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <button className="btn ok" onClick={async () => {
             try {
