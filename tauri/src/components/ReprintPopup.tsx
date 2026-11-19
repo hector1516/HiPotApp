@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../api';
+import { invoke } from '@tauri-apps/api/core';
 
 export function ReprintPopup({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [list, setList] = useState<any[]>([]);
@@ -27,7 +28,12 @@ export function ReprintPopup({ open, onClose }: { open: boolean; onClose: () => 
     if (!sel) return;
     setBusy(true); setMsg('');
     try {
-      await api.post(`/executions/${sel}/reprint`);
+      const cfg = await invoke<any>('get_config').catch(() => ({}));
+      const ip = cfg?.printer_ip || '';
+      const port = parseInt(cfg?.printer_port || '9100', 10);
+      const name = cfg?.printer_name || 'Zebra ZT231';
+      const r = await invoke<string>('reprint_zebra', { eid: Number(sel), printerIp: ip, printerPort: port, printerName: name });
+      setMsg(r === 'OK' ? '✓ Etiqueta enviada a Zebra ZT231' : `✗ ${r}`);
       setMsg('✅ Etiqueta enviada a Zebra ZT231');
     } catch (e: any) { setMsg(`❌ ${e?.message ?? e}`); }
     finally { setBusy(false); }
