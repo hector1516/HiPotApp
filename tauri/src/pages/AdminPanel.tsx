@@ -198,7 +198,9 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
     const body:any={name:editing.name.trim(),model:editing.model.trim().toUpperCase(),product:editing.product||'',voltage_levels:JSON.stringify(VOLTS.map(v=>String(v))),components,totals,modified_by:(adminBatch||'').toUpperCase()||'ADMIN'};
     try{
       if(editing.id) await api.put(`/recipes/${editing.id}`,body);
-      else await api.post('/recipes',body);
+      else {
+        await invoke('create_recipe', { name: body.name, model: body.model, type_: body.type, product: body.product, voltageLevels: body.voltage_levels, components: body.components, totals: body.totals, modifiedBy: body.modified_by });
+      }
       setEditing(null); setMsg(editing.id?'Receta actualizada':'Receta creada'); load();
     }catch(err:any){ setMsg(String(err?.message ?? err)); }
   };
