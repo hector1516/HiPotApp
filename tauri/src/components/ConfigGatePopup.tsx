@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { api } from '../api';
+import { invoke } from '@tauri-apps/api/core';
 import { BarcodeInput } from './BarcodeInput';
 
 export function ConfigGatePopup({ open, onClose, onAdmin }: { open: boolean; onClose: () => void; onAdmin: (batch:string)=>void }) {
@@ -12,7 +12,7 @@ export function ConfigGatePopup({ open, onClose, onAdmin }: { open: boolean; onC
     if (!batch) return;
     setBusy(true); setMsg('');
     try {
-      const r:any = await api.post('/auth/login', { username: batch, password: '' });
+      const r:any = await invoke('auth_login', { username: batch });
       if (r.role === 'admin') {
         onClose();
         onAdmin(batch);

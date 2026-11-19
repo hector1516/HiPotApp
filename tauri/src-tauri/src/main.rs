@@ -9,7 +9,7 @@ mod plc;
 use db::paths::db_path;
 use std::process::{Child, Command};
 use std::sync::Mutex;
-use tauri::{Manager, State, WindowEvent};
+use tauri::{Emitter, Manager, State, WindowEvent};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
@@ -133,14 +133,14 @@ fn plc_status(ip: String, rack: u16, slot: u16) -> bool {
 
 #[tauri::command]
 fn plc_read_tag(ip: String, rack: u16, slot: u16, db: i32, offset: i32, data_type: String, bit: i32) -> Result<serde_json::Value, String> {
-    let cfg = plc::PlcConfig { ip, rack, slot, simulate: false };
+    let cfg = plc::PlcConfig { ip, rack, slot };
     let mut client = plc::connect(&cfg, 2000)?;
     plc::read_tag(&mut client, db, offset, &data_type, bit)
 }
 
 #[tauri::command]
 fn plc_write_tag(ip: String, rack: u16, slot: u16, db: i32, offset: i32, data_type: String, value: serde_json::Value, bit: i32) -> Result<String, String> {
-    let cfg = plc::PlcConfig { ip, rack, slot, simulate: false };
+    let cfg = plc::PlcConfig { ip, rack, slot };
     let mut client = plc::connect(&cfg, 2000)?;
     plc::write_tag(&mut client, db, offset, &data_type, &value, bit)?;
     Ok("written".to_string())
@@ -165,7 +165,7 @@ fn open_external(url: String) {
     }
 }
 
-// --- PLC admin / I/O / manual (Rust) ---
+// --- PLC admin / I/O / manual (Rust, producción) ---
 
 fn plc_cfg() -> plc::PlcConfig {
     plc::config_from(&get_config())
@@ -177,32 +177,24 @@ fn plc_config_get() -> serde_json::Value {
 }
 
 #[tauri::command]
-fn plc_config_set(ip: String, rack: u16, slot: u16, simulate: bool) -> String {
+fn plc_config_set(ip: String, rack: u16, slot: u16) -> String {
     set_config(serde_json::json!({
         "plc_ip": ip,
         "plc_rack": rack.to_string(),
         "plc_slot": slot.to_string(),
-        "plc_simulate": if simulate { "true" } else { "false" },
     }))
 }
 
 #[tauri::command]
 fn plc_status_info() -> serde_json::Value {
     let cfg = plc_cfg();
-    if cfg.simulate {
-        return serde_json::json!({
-            "connected": true, "ip": cfg.ip, "rack": cfg.rack,
-            "slot": cfg.slot, "simulate": true
-        });
-    }
     match plc::connect(&cfg, 1500) {
         Ok(_) => serde_json::json!({
-            "connected": true, "ip": cfg.ip, "rack": cfg.rack,
-            "slot": cfg.slot, "simulate": false
+            "connected": true, "ip": cfg.ip, "rack": cfg.rack, "slot": cfg.slot
         }),
         Err(e) => serde_json::json!({
             "connected": false, "ip": cfg.ip, "rack": cfg.rack,
-            "slot": cfg.slot, "simulate": false, "error": e
+            "slot": cfg.slot, "error": e
         }),
     }
 }
@@ -214,11 +206,7 @@ fn plc_tags_list() -> serde_json::Value {
         Err(_) => return serde_json::json!([]),
     };
     let cfg = plc_cfg();
-    let mut client = if cfg.simulate {
-        None
-    } else {
-        plc::connect(&cfg, 1500).ok()
-    };
+    let mut client = plc::connect(&cfg, 1500).ok();
     let mut arr = Vec::new();
     if let Ok(mut stmt) = conn.prepare(
         "SELECT id, name, db_number, offset, data_type, bit, description, unit \
@@ -237,14 +225,7 @@ fn plc_tags_list() -> serde_json::Value {
             ))
         }) {
             for (id, name, db_number, offset, data_type, bit, description, unit) in rows.flatten() {
-                let value = if cfg.simulate {
-                    let v = plc::sim::tag(id);
-                    match data_type.to_uppercase().as_str() {
-                        "BOOL" => serde_json::json!(v != 0.0),
-                        "WORD" | "INT" => serde_json::json!(v as i64),
-                        _ => serde_json::json!(v),
-                    }
-                } else if let Some(c) = client.as_mut() {
+                let value = if let Some(c) = client.as_mut() {
                     plc::read_tag(c, db_number as i32, offset as i32, &data_type, bit as i32)
                         .unwrap_or(serde_json::json!(null))
                 } else {
@@ -329,21 +310,6 @@ fn plc_tag_write_by_id(tag_id: i64, value: serde_json::Value) -> String {
         Err(e) => return format!("error: {}", e),
     };
     let cfg = plc_cfg();
-    if cfg.simulate {
-        let v = match data_type.to_uppercase().as_str() {
-            "BOOL" => {
-                if plc::value_as_bool(&value) {
-                    1.0
-                } else {
-                    0.0
-                }
-            }
-            "WORD" | "INT" => plc::value_as_i64(&value) as f64,
-            _ => plc::value_as_f64(&value),
-        };
-        plc::sim::set_tag(tag_id, v);
-        return "OK".to_string();
-    }
     match plc::connect(&cfg, 1500) {
         Ok(mut c) => match plc::write_tag(
             &mut c,
@@ -383,9 +349,6 @@ fn plc_tag_read_by_id(tag_id: i64) -> serde_json::Value {
         Err(_) => return serde_json::json!(null),
     };
     let cfg = plc_cfg();
-    if cfg.simulate {
-        return serde_json::json!(plc::sim::tag(tag_id));
-    }
     match plc::connect(&cfg, 1500) {
         Ok(mut c) => {
             plc::read_tag(&mut c, db_number as i32, offset as i32, &data_type, bit as i32)
@@ -398,20 +361,11 @@ fn plc_tag_read_by_id(tag_id: i64) -> serde_json::Value {
 #[tauri::command]
 fn plc_io_status() -> serde_json::Value {
     let cfg = plc_cfg();
-    if cfg.simulate {
-        let mut v = plc::sim_io();
-        if let Some(obj) = v.as_object_mut() {
-            obj.insert("connected".to_string(), serde_json::json!(true));
-            obj.insert("simulate".to_string(), serde_json::json!(true));
-        }
-        return v;
-    }
     match plc::connect(&cfg, 1500) {
         Ok(mut c) => {
             let mut v = plc::read_io(&mut c);
             if let Some(obj) = v.as_object_mut() {
                 obj.insert("connected".to_string(), serde_json::json!(true));
-                obj.insert("simulate".to_string(), serde_json::json!(false));
             }
             v
         }
@@ -419,7 +373,6 @@ fn plc_io_status() -> serde_json::Value {
             let mut v = plc::empty_io();
             if let Some(obj) = v.as_object_mut() {
                 obj.insert("connected".to_string(), serde_json::json!(false));
-                obj.insert("simulate".to_string(), serde_json::json!(false));
                 obj.insert("error".to_string(), serde_json::json!(e));
             }
             v
@@ -430,10 +383,6 @@ fn plc_io_status() -> serde_json::Value {
 #[tauri::command]
 fn plc_io_write(q: String, value: bool) -> String {
     let cfg = plc_cfg();
-    if cfg.simulate {
-        plc::sim::set_q(&q, value);
-        return "OK".to_string();
-    }
     match plc::connect(&cfg, 1500) {
         Ok(mut c) => match plc::write_q(&mut c, &q, value) {
             Ok(_) => "OK".to_string(),
@@ -446,10 +395,6 @@ fn plc_io_write(q: String, value: bool) -> String {
 #[tauri::command]
 fn plc_send_recipe(voltage: f64, components: serde_json::Value) -> String {
     let cfg = plc_cfg();
-    if cfg.simulate {
-        plc::sim::set_recipe(voltage, &components);
-        return "OK".to_string();
-    }
     match plc::connect(&cfg, 1500) {
         Ok(mut c) => match plc::send_recipe(&mut c, voltage, &components) {
             Ok(_) => "OK".to_string(),
@@ -462,11 +407,6 @@ fn plc_send_recipe(voltage: f64, components: serde_json::Value) -> String {
 #[tauri::command]
 fn plc_start() -> String {
     let cfg = plc_cfg();
-    if cfg.simulate {
-        plc::sim::set("result:running", 1.0);
-        plc::sim::set("result:complete", 0.0);
-        return "OK".to_string();
-    }
     match plc::connect(&cfg, 1500) {
         Ok(mut c) => match plc::start(&mut c) {
             Ok(_) => "OK".to_string(),
@@ -479,10 +419,6 @@ fn plc_start() -> String {
 #[tauri::command]
 fn plc_stop() -> String {
     let cfg = plc_cfg();
-    if cfg.simulate {
-        plc::sim::set("result:running", 0.0);
-        return "OK".to_string();
-    }
     match plc::connect(&cfg, 1500) {
         Ok(mut c) => match plc::stop(&mut c) {
             Ok(_) => "OK".to_string(),
@@ -495,41 +431,37 @@ fn plc_stop() -> String {
 #[tauri::command]
 fn plc_read_results() -> serde_json::Value {
     let cfg = plc_cfg();
-    if cfg.simulate {
-        return plc::sim_results();
-    }
     match plc::connect(&cfg, 1500) {
         Ok(mut c) => plc::read_results(&mut c),
-        Err(_) => plc::empty_results(),
+        Err(e) => {
+            let mut v = plc::empty_results();
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert("error".to_string(), serde_json::json!(e));
+            }
+            v
+        }
     }
 }
 
 #[tauri::command]
 fn plc_set_mode(mode: i64) -> serde_json::Value {
     let cfg = plc_cfg();
-    if cfg.simulate {
-        plc::sim::set_mode(mode as i32);
-        return serde_json::json!({ "mode": plc::sim::mode(), "ok": true });
-    }
     match plc::connect(&cfg, 1500) {
         Ok(mut c) => {
             let ok = plc::set_mode(&mut c, mode as i32).is_ok();
             let current = plc::get_mode(&mut c).unwrap_or(1);
             serde_json::json!({ "mode": current, "ok": ok })
         }
-        Err(_) => serde_json::json!({ "mode": 1, "ok": false }),
+        Err(e) => serde_json::json!({ "mode": 1, "ok": false, "error": e }),
     }
 }
 
 #[tauri::command]
 fn plc_get_mode() -> serde_json::Value {
     let cfg = plc_cfg();
-    if cfg.simulate {
-        return serde_json::json!({ "mode": plc::sim::mode() });
-    }
     match plc::connect(&cfg, 1500) {
         Ok(mut c) => serde_json::json!({ "mode": plc::get_mode(&mut c).unwrap_or(1) }),
-        Err(_) => serde_json::json!({ "mode": 1 }),
+        Err(e) => serde_json::json!({ "mode": 1, "error": e }),
     }
 }
 
@@ -537,14 +469,6 @@ fn plc_get_mode() -> serde_json::Value {
 fn plc_test_component(component: String, voltage: f64) -> serde_json::Value {
     let name = component.trim().to_uppercase();
     let cfg = plc_cfg();
-    if cfg.simulate {
-        let value = plc::sim::test_component(&name);
-        return serde_json::json!({
-            "component": name,
-            "value": value,
-            "all": plc::sim_results(),
-        });
-    }
     match plc::connect(&cfg, 2000) {
         Ok(mut c) => match plc::test_component(&mut c, &name, voltage) {
             Ok(v) => v,
@@ -557,16 +481,14 @@ fn plc_test_component(component: String, voltage: f64) -> serde_json::Value {
 #[tauri::command]
 fn plc_abort() -> String {
     let cfg = plc_cfg();
-    if cfg.simulate {
-        plc::sim::set("result:running", 0.0);
-        plc::sim::set_mode(1);
-        return "OK".to_string();
+    match plc::connect(&cfg, 1500) {
+        Ok(mut c) => {
+            let _ = plc::stop(&mut c);
+            let _ = plc::set_mode(&mut c, 1);
+            "OK".to_string()
+        }
+        Err(e) => format!("error: {}", e),
     }
-    if let Ok(mut c) = plc::connect(&cfg, 1500) {
-        let _ = plc::stop(&mut c);
-        let _ = plc::set_mode(&mut c, 1);
-    }
-    "OK".to_string()
 }
 
 // --- Hipot 3865 (Rust) ---
@@ -583,11 +505,10 @@ fn hipot_config_get() -> serde_json::Value {
 }
 
 #[tauri::command]
-fn hipot_config_set(port: String, baud: u32, simulate: bool) -> String {
+fn hipot_config_set(port: String, baud: u32) -> String {
     set_config(serde_json::json!({
         "hipot_port": port,
         "hipot_baud": baud.to_string(),
-        "hipot_simulate": if simulate { "true" } else { "false" },
     }))
 }
 
@@ -595,20 +516,13 @@ fn hipot_config_set(port: String, baud: u32, simulate: bool) -> String {
 fn hipot_status() -> serde_json::Value {
     let cfg = hipot::config_from(&get_config());
     let ports = hipot::list_ports();
-    if cfg.simulate {
-        return serde_json::json!({
-            "connected": true, "port": cfg.port, "baud": cfg.baud,
-            "simulate": true, "ports": ports
-        });
-    }
     match hipot::check_connection(&cfg) {
         Ok(_) => serde_json::json!({
-            "connected": true, "port": cfg.port, "baud": cfg.baud,
-            "simulate": false, "ports": ports
+            "connected": true, "port": cfg.port, "baud": cfg.baud, "ports": ports
         }),
         Err(e) => serde_json::json!({
             "connected": false, "port": cfg.port, "baud": cfg.baud,
-            "simulate": false, "ports": ports, "error": e
+            "ports": ports, "error": e
         }),
     }
 }
@@ -649,6 +563,202 @@ fn hipot_abort() -> serde_json::Value {
 fn hipot_close() -> String {
     hipot::close();
     "closed".to_string()
+}
+
+/// Ciclo real de producción: PLC -> Hipot -> guardar resultados.
+#[tauri::command]
+fn run_test_cycle(
+    app: tauri::AppHandle,
+    execution_id: i64,
+    recipe_id: i64,
+    voltage: f64,
+    components: serde_json::Value,
+) -> serde_json::Value {
+    let started = std::time::Instant::now();
+    let mut errors: Vec<String> = Vec::new();
+    let mut plc_pass = false;
+    let mut plc_values = serde_json::json!({});
+    let mut plc_component_values = serde_json::json!({});
+
+    // --- PLC ---
+    let cfg = plc_cfg();
+    match plc::connect(&cfg, 2000) {
+        Ok(mut client) => {
+            if let Err(e) = plc::send_recipe(&mut client, voltage, &components) {
+                errors.push(format!("PLC receta: {}", e));
+            }
+            let _ = plc::set_mode(&mut client, 1);
+            if let Err(e) = plc::start(&mut client) {
+                errors.push(format!("PLC start: {}", e));
+            }
+
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
+            loop {
+                let results = plc::read_results(&mut client);
+                let mut snapshot = serde_json::Map::new();
+                if let Some(arr) = components.as_array() {
+                    for comp in arr {
+                        let name = comp
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_uppercase();
+                        if name.is_empty() {
+                            continue;
+                        }
+                        if let Some(value) = results.get(&name) {
+                            snapshot.insert(name, value.clone());
+                        }
+                    }
+                }
+                if !snapshot.is_empty() {
+                    let _ = app.emit("test-values", serde_json::Value::Object(snapshot));
+                }
+                let complete = results
+                    .get("complete")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                if complete {
+                    plc_values = results;
+                    break;
+                }
+                if std::time::Instant::now() >= deadline {
+                    errors.push("PLC: timeout esperando Test_Complete".to_string());
+                    plc_values = results;
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+
+            plc_pass = plc_values
+                .get("pass")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            let mut readings = Vec::new();
+            if let Some(arr) = components.as_array() {
+                for comp in arr {
+                    let name = comp
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_uppercase();
+                    if name.is_empty() {
+                        continue;
+                    }
+                    let min = comp.get("min").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                    let max = comp.get("max").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                    let value = plc_values
+                        .get(&name)
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.0);
+                    let ok = value >= min && value <= max;
+                    readings.push(serde_json::json!({
+                        "component": name,
+                        "voltage": voltage.to_string(),
+                        "tag": name,
+                        "value": value,
+                        "min": min,
+                        "max": max,
+                        "pass": ok,
+                    }));
+                }
+            }
+            let mut component_values = serde_json::Map::new();
+            for reading in &readings {
+                if let Some(name) = reading.get("component").and_then(|v| v.as_str()) {
+                    let value = reading
+                        .get("value")
+                        .cloned()
+                        .unwrap_or(serde_json::json!(0.0));
+                    component_values.insert(name.to_string(), value);
+                }
+            }
+            plc_component_values = serde_json::Value::Object(component_values);
+            let _ = save_plc_result(execution_id, plc_pass, serde_json::json!(readings));
+        }
+        Err(e) => {
+            errors.push(format!("PLC no conectado: {}", e));
+            let _ = save_plc_result(execution_id, false, serde_json::json!([]));
+        }
+    }
+
+    let _ = app.emit("test-phase", "HIPOT_RUNNING");
+
+    // --- Hipot ---
+    let hipot_cfg = hipot::config_from(&get_config());
+    let mut hipot_parsed = serde_json::json!({});
+    let mut hipot_pass = false;
+
+    match hipot::test_action(&hipot_cfg, "START") {
+        Ok(v) => {
+            hipot_parsed = v
+                .get("parsed")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}));
+            if hipot_parsed
+                .get("pass")
+                .and_then(|p| p.as_bool())
+                .is_none()
+            {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(1000));
+                    match hipot::command(&hipot_cfg, "STATUS?") {
+                        Ok(s) => {
+                            let parsed = s
+                                .get("parsed")
+                                .cloned()
+                                .unwrap_or_else(|| serde_json::json!({}));
+                            if parsed.get("pass").and_then(|p| p.as_bool()).is_some() {
+                                hipot_parsed = parsed;
+                                break;
+                            }
+                            hipot_parsed = parsed;
+                        }
+                        Err(e) => errors.push(format!("Hipot status: {}", e)),
+                    }
+                    if std::time::Instant::now() >= deadline {
+                        errors.push("Hipot: timeout esperando PASS/FAIL".to_string());
+                        break;
+                    }
+                }
+            }
+            hipot_pass = hipot_parsed
+                .get("pass")
+                .and_then(|p| p.as_bool())
+                .unwrap_or(false);
+        }
+        Err(e) => errors.push(format!("Hipot start: {}", e)),
+    }
+
+    let duration = started.elapsed().as_secs_f64();
+    let _ = save_hipot_result(
+        execution_id,
+        serde_json::json!({
+            "pass": hipot_pass,
+            "voltage": hipot_parsed.get("voltage"),
+            "current": hipot_parsed.get("current"),
+            "resistance": hipot_parsed.get("resistance"),
+            "insulation": hipot_parsed.get("insulation"),
+            "duration": duration,
+        }),
+    );
+
+    let final_status = if plc_pass && hipot_pass { "GOOD" } else { "BAD" };
+    serde_json::json!({
+        "execution_id": execution_id,
+        "recipe_id": recipe_id,
+        "voltage": voltage,
+        "plc": plc_pass,
+        "hipot": hipot_pass,
+        "final": final_status,
+        "values": plc_component_values,
+        "plc_results": plc_values,
+        "hipot_data": hipot_parsed,
+        "duration": duration,
+        "errors": errors,
+    })
 }
 
 // --- Recipes (SQLite) ---
@@ -901,8 +1011,172 @@ fn delete_user(id: i64) -> String {
         Ok(c) => c,
         Err(_) => return "error".to_string(),
     };
-    let _ = conn.execute("DELETE FROM users WHERE id = ?1", rusqlite::params![id]);
-    "deleted".to_string()
+    let current = conn.query_row(
+        "SELECT role, is_active FROM users WHERE id = ?1",
+        rusqlite::params![id],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+    );
+    if let Ok((role, active)) = current {
+        if role == "admin" && active != 0 {
+            let admins: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+            if admins <= 1 {
+                return "error: no se puede borrar el último admin activo".to_string();
+            }
+        }
+    }
+    match conn.execute("DELETE FROM users WHERE id = ?1", rusqlite::params![id]) {
+        Ok(_) => "deleted".to_string(),
+        Err(e) => format!("error: {}", e),
+    }
+}
+
+#[tauri::command]
+fn auth_login(username: String) -> Result<serde_json::Value, String> {
+    let conn = db::open().map_err(|e| e.to_string())?;
+    let uname = username.trim().to_uppercase();
+    if uname.is_empty() {
+        return Err("Gafete/usuario requerido".to_string());
+    }
+    let row = conn
+        .query_row(
+            "SELECT username, role, is_active FROM users WHERE username = ?1",
+            rusqlite::params![uname],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
+        )
+        .map_err(|_| format!("Gafete no encontrado: {}", uname))?;
+    if row.2 != 1 {
+        return Err(format!("Usuario inactivo: {}", uname));
+    }
+    Ok(serde_json::json!({
+        "username": row.0,
+        "role": row.1,
+    }))
+}
+
+#[tauri::command]
+fn user_get(uid: i64) -> Result<serde_json::Value, String> {
+    let conn = db::open().map_err(|e| e.to_string())?;
+    let row = conn
+        .query_row(
+            "SELECT id, username, role, is_active, created_at FROM users WHERE id = ?1",
+            rusqlite::params![uid],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            },
+        )
+        .map_err(|_| "Usuario no encontrado".to_string())?;
+
+    let permissions: Vec<&str> = if row.2 == "admin" {
+        vec![
+            "Todo lo de operator",
+            "Configurar recetas (altas/bajas/cambios)",
+            "Gestionar usuarios y permisos",
+            "PLC/Hipot/BD, etiquetas, logs, import/export",
+            "Ajustar espera de resultado e impresión",
+        ]
+    } else {
+        vec![
+            "Ejecutar pruebas (Modelo/Serie/Batch)",
+            "Ver resultado BUENO/MALO",
+            "Usar modo manual (sin password)",
+            "Reimprimir/Log en principal",
+        ]
+    };
+
+    Ok(serde_json::json!({
+        "id": row.0,
+        "username": row.1,
+        "role": row.2,
+        "is_active": row.3 != 0,
+        "permissions": permissions,
+        "created_at": row.4,
+    }))
+}
+
+#[tauri::command]
+fn user_update(
+    uid: i64,
+    username: Option<String>,
+    role: Option<String>,
+    is_active: Option<bool>,
+) -> Result<String, String> {
+    let conn = db::open().map_err(|e| e.to_string())?;
+    let current = conn
+        .query_row(
+            "SELECT username, role, is_active FROM users WHERE id = ?1",
+            rusqlite::params![uid],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
+        )
+        .map_err(|_| "Usuario no encontrado".to_string())?;
+
+    let new_username = username
+        .map(|s| s.trim().to_uppercase())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| current.0.clone());
+    let new_role = role
+        .filter(|r| r == "admin" || r == "operator")
+        .unwrap_or_else(|| current.1.clone());
+    let new_active = is_active.unwrap_or(current.2 != 0);
+
+    if new_username != current.0 {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM users WHERE username = ?1 AND id <> ?2",
+                rusqlite::params![new_username, uid],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        if exists > 0 {
+            return Err("Usuario ya existe".to_string());
+        }
+    }
+
+    let active_admins: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    if current.1 == "admin"
+        && current.2 != 0
+        && (new_role != "admin" || !new_active)
+        && active_admins <= 1
+    {
+        return Err("Debe quedar al menos un admin activo".to_string());
+    }
+
+    conn.execute(
+        "UPDATE users SET username = ?1, role = ?2, is_active = ?3 WHERE id = ?4",
+        rusqlite::params![new_username, new_role, if new_active { 1 } else { 0 }, uid],
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok("updated".to_string())
 }
 
 // --- Executions (SQLite) ---
@@ -1540,7 +1814,11 @@ fn main() {
             list_users,
             add_user,
             delete_user,
+            auth_login,
+            user_get,
+            user_update,
             start_execution,
+            run_test_cycle,
             save_plc_result,
             save_hipot_result,
             list_executions,

@@ -15,6 +15,7 @@ import VirtualKeyboard from './components/VirtualKeyboard';
 import { Phase } from './styles/theme';
 import { api } from './api';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 
 // Router principal: HOME -> TEST -> RESULT + ADMIN (doc 02 flujo operador).
 type View = 'home' | 'test' | 'result' | 'admin' | 'manual';
@@ -46,7 +47,7 @@ export default function App() {
   const [batch, setBatch] = useState('');
   const [error, setError] = useState('');
   const [execId, setExecId] = useState<number | null>(null);
-  const [values, setValues] = useState<Record<string, number>>({ FAN: 0.45, DOOR: 2.1 });
+  const [values, setValues] = useState<Record<string, number>>({});
   const [final, setFinal] = useState<'GOOD' | 'BAD'>('GOOD');
   const [t0, setT0] = useState<number>(0);
   const [health, setHealth] = useState<boolean>(false);
@@ -64,11 +65,24 @@ export default function App() {
 
   React.useEffect(() => {
     const id = setInterval(() => setClock(new Date().toLocaleTimeString()), 1000);
-    api.get('/admin/config').then(c => {
+    invoke<any>('get_config').then(c => {
       const v = parseInt(c?.result_hold_seconds ?? '10', 10);
       if (!Number.isNaN(v) && v >= 3 && v <= 60) setHoldSeconds(v);
     }).catch(() => {});
     return () => clearInterval(id);
+  }, []);
+
+  // Fase del ciclo real emitida por Rust (PLC -> Hipot)
+  React.useEffect(() => {
+    let unlistenPhase: (() => void) | undefined;
+    let unlistenValues: (() => void) | undefined;
+    listen<string>('test-phase', event => {
+      if (event.payload === 'HIPOT_RUNNING') setPhase('HIPOT_RUNNING');
+    }).then(fn => { unlistenPhase = fn; }).catch(() => {});
+    listen<Record<string, number>>('test-values', event => {
+      if (event.payload) setValues(event.payload);
+    }).then(fn => { unlistenValues = fn; }).catch(() => {});
+    return () => { unlistenPhase?.(); unlistenValues?.(); };
   }, []);
 
   // Health check del núcleo Rust (sin backend HTTP)
@@ -174,61 +188,102 @@ export default function App() {
     setStep(3); setPhase('READY');
   };
   const scanBatch = async (code: string) => {
+    if (!recipe?.id) {
+      setError('No hay receta cargada. Escanea el modelo primero.');
+      setPhase('ERROR');
+      return;
+    }
     setBatch(code);
+    setError('');
     await api.scan(code, 'batch', 3).catch(() => {});
-    try {
-      const ex = await invoke<number>('start_execution', {
-        recipeId: recipe?.id ?? 1, operatorId: null, batch: code, serialNumber: serial });
-      setExecId(ex);
-    } catch { /* offline: seguir simulado */ }
     const start = Date.now();
     setT0(start);
-    setStep(4); setPhase('HIPOT_RUNNING'); setView('test');
-    // Primero HiPot: si falla, se cancela todo (no pasa a prueba electrica)
-    later(() => {
-      const hipotPass = Math.random() > 0.15;
-      if (!hipotPass) {
-        clearTimers();
-        const s = Math.round((Date.now() - start) / 1000);
-        setElapsed(`${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`);
-        setFinal('BAD');
-        setPhase('COMPLETE_BAD');
-        setStep(6); setView('result');
-        setPrintStatus(null);
-        return;
+
+    let ex = 0;
+    try {
+      ex = await invoke<number>('start_execution', {
+        recipeId: recipe.id, operatorId: null, batch: code, serialNumber: serial });
+      setExecId(ex);
+    } catch (e: any) {
+      setError(`No se pudo registrar la ejecución: ${String(e?.message ?? e)}`);
+      setPhase('ERROR');
+      return;
+    }
+
+    setStep(4); setPhase('PLC_RUNNING'); setView('test');
+
+    // Voltaje de prueba: primer nivel de la receta (o 120 V).
+    const voltage = (() => {
+      const raw = recipe?.voltage_levels;
+      let candidate: any = raw;
+      if (typeof raw === 'string') {
+        try { candidate = JSON.parse(raw); } catch { candidate = raw; }
       }
-      setStep(5); setPhase('PLC_RUNNING');
-    }, 4000);
-    later(() => {
-      // Solo llega aqui si HiPot paso
-      const elecPass = Math.random() > 0.15;
-      const good = elecPass;
+      if (Array.isArray(candidate) && candidate.length) {
+        const n = Number(candidate[0]);
+        if (Number.isFinite(n) && n > 0) return n;
+      }
+      if (typeof candidate === 'string') {
+        const m = candidate.match(/\d+(?:\.\d+)?/);
+        if (m) return Number(m[0]);
+      }
+      return 120;
+    })();
+
+    try {
+      const r = await invoke<any>('run_test_cycle', {
+        executionId: ex,
+        recipeId: recipe.id,
+        voltage,
+        components: recipe?.components ?? [],
+      });
+      if (r?.error) throw new Error(r.error);
+
+      setValues(r?.values ?? {});
       const s = Math.round((Date.now() - start) / 1000);
       setElapsed(`${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`);
-      setFinal(good ? 'GOOD' : 'BAD');
-      setPhase(good ? 'COMPLETE_GOOD' : 'COMPLETE_BAD');
+      setFinal(r?.final === 'GOOD' ? 'GOOD' : 'BAD');
+      setPhase(r?.final === 'GOOD' ? 'COMPLETE_GOOD' : 'COMPLETE_BAD');
       setStep(6); setView('result');
-      if (good) {
+
+      if (r?.final === 'GOOD') {
         setPrintStatus('sending');
-        const eid = execId;
-        const p = eid
-          ? api.post(`/executions/${eid}/reprint`).catch(() => api.post('/admin/print-test'))
-          : api.post('/admin/print-test').catch(() => null);
-        p.then(() => setPrintStatus('sent')).catch(() => setPrintStatus('error'));
-      } else setPrintStatus(null);
-    }, 8000);
+        try {
+          const cfg = await invoke<any>('get_config').catch(() => ({}));
+          const ip = cfg?.printer_ip || '';
+          const port = parseInt(cfg?.printer_port || '9100', 10);
+          const name = cfg?.printer_name || 'Zebra ZT231';
+          const p = await invoke<string>('reprint_zebra', {
+            eid: ex, printerIp: ip, printerPort: port, printerName: name,
+          });
+          setPrintStatus(p === 'OK' ? 'sent' : 'error');
+        } catch { setPrintStatus('error'); }
+      } else {
+        setPrintStatus(null);
+      }
+
+      if (Array.isArray(r?.errors) && r.errors.length) setError(r.errors.join(' | '));
+    } catch (e: any) {
+      const s = Math.round((Date.now() - start) / 1000);
+      setElapsed(`${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`);
+      setError(`Error en prueba: ${String(e?.message ?? e)}`);
+      setFinal('BAD');
+      setPhase('COMPLETE_BAD');
+      setStep(6); setView('result');
+      setPrintStatus(null);
+    }
   };
 
   const reset = () => {
     clearTimers();
     setPrintStatus(null);
-    api.get('/admin/config').then(c => {
+    invoke<any>('get_config').then(c => {
       const v = parseInt(c?.result_hold_seconds ?? '10', 10);
       if (!Number.isNaN(v) && v >= 3 && v <= 60) setHoldSeconds(v);
     }).catch(() => {});
     setView('home'); setStep(1); setRecipe(null); setSerial(''); setBatch('');
     setError(''); setPhase('IDLE'); setExecId(null);
-    setValues({ FAN: 0.45, DOOR: 2.1 });
+    setValues({});
   };
 
   const limits: Record<string, { min: number; max: number }> = {};

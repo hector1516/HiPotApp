@@ -11,14 +11,12 @@ pub const DEFAULT_CONFIGS: &[(&str, &str)] = &[
     ("plc_ip", "192.168.1.10"),
     ("plc_rack", "0"),
     ("plc_slot", "1"),
-    ("plc_simulate", "true"),
     // Hipot
     ("hipot_port", "COM3"),
     ("hipot_baud", "9600"),
     ("hipot_parity", "None"),
     ("hipot_databits", "8"),
     ("hipot_stopbits", "1"),
-    ("hipot_simulate", "true"),
     // BD local (SQL Express)
     ("db_local_server", ".\\SQLEXPRESS"),
     ("db_local_name", "HiPotDB"),

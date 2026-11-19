@@ -9,7 +9,7 @@ export function usePLC(enabled = true) {
     try {
       const r = await invoke<any>('plc_status_info');
       setConnected(!!r?.connected);
-      setDetail(`${r?.ip ?? ''}${r?.simulate ? ' (sim)' : ''}`);
+      setDetail(`${r?.ip ?? ''}`);
     } catch { setConnected(false); }
   }, []);
   useEffect(() => {

@@ -43,19 +43,26 @@ function UsersTab(){
   const [q,setQ]=useState('');
   const [editing,setEditing]=useState<null|{id:number|null,username:string,role:'operator'|'admin',is_active:boolean}>(null);
   const [viewPerm,setViewPerm]=useState<any|null>(null);
-  const load=()=>invoke<any>('list_users').then(setUsers).catch(()=>api.get('/users').then(setUsers).catch(()=>setUsers([])));
+  const load=()=>invoke<any[]>('list_users').then(setUsers).catch(()=>setUsers([]));
   useEffect(()=>{load();},[]);
   const rows=users.filter(u=>!q||u.username.includes(q.toUpperCase()));
   const doDelete=async(u:any)=>{
     if(!confirm(`Borrar usuario ${u.username}?`)) return;
-    try{ await invoke('delete_user', { id: u.id }); setMsg(`Borrado ${u.username}`); load(); }catch(e:any){ setMsg(String(e?.message??e)); }
+    try{
+      const r = await invoke<string>('delete_user', { id: u.id });
+      if (r !== 'deleted') throw new Error(r);
+      setMsg(`Borrado ${u.username}`); load();
+    }catch(e:any){ setMsg(String(e?.message??e)); }
   };
   const doSave=async()=>{
     if(!editing) return;
     if(!editing.username.trim()){ setMsg('Batch es obligatorio'); return; }
     const payload:any={username:editing.username.trim().toUpperCase(),role:editing.role,is_active:editing.is_active};
     try{
-      if(editing.id){ await api.put(`/users/${editing.id}`,payload); setMsg('Usuario actualizado'); }
+      if(editing.id){
+        await invoke('user_update', { uid: editing.id, username: payload.username, role: payload.role, isActive: payload.is_active });
+        setMsg('Usuario actualizado');
+      }
       else {
         await invoke('add_user', { username: payload.username, password: '', role: payload.role });
         setMsg('Usuario creado - gafete listo');
@@ -80,7 +87,7 @@ function UsersTab(){
             <tr key={u.id}><td><b>{u.username}</b></td><td><span className={`pill ${u.role==='admin'?'accent':''}`} style={{ fontSize:11 }}>{u.role==='admin'?'Admin':'Operador'}</span></td><td>{u.is_active?'Activo':'Inactivo'}</td>
               <td>
                 <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-                  <button className="btn sm" onClick={async()=>{ const d=await api.get(`/users/${u.id}`); setViewPerm(d); }}>Ver permisos</button>
+                  <button className="btn sm" onClick={async()=>{ try { const d=await invoke<any>('user_get', { uid: u.id }); setViewPerm(d); } catch (e:any) { setMsg(String(e?.message??e)); } }}>Ver permisos</button>
                   <button className="btn sm primary" onClick={()=>setEditing({id:u.id,username:u.username,role:u.role,is_active:u.is_active})}>Editar</button>
                   <button className="btn sm danger" onClick={()=>doDelete(u)}>Borrar</button>
                 </div>
@@ -284,11 +291,10 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
 
 function PlcTab() {
   const [st, setSt] = useState<any>(null);
-  const [cfg, setCfg] = useState<{ ip: string; rack: number; slot: number; simulate: boolean }>({
+  const [cfg, setCfg] = useState<{ ip: string; rack: number; slot: number }>({
     ip: '192.168.1.10',
     rack: 0,
     slot: 1,
-    simulate: true,
   });
   const [tags, setTags] = useState<any[]>([]);
   const [writeVals, setWriteVals] = useState<Record<number, string>>({});
@@ -315,7 +321,7 @@ function PlcTab() {
 
   const saveConfig = async () => {
     try {
-      const r = await invoke<string>('plc_config_set', { ip: cfg.ip, rack: cfg.rack, slot: cfg.slot, simulate: cfg.simulate });
+      const r = await invoke<string>('plc_config_set', { ip: cfg.ip, rack: cfg.rack, slot: cfg.slot });
       if (r !== 'saved') throw new Error(r);
       setMsg('Configuración de PLC guardada correctamente');
       invoke<any>('plc_status_info').then(setSt).catch(() => {});
@@ -378,9 +384,6 @@ function PlcTab() {
             <label style={{ fontSize: 11, fontWeight: 700, color: '#475569' }}>Slot</label>
             <input className="input" type="number" inputMode="numeric" value={cfg.slot} onChange={e => setCfg({ ...cfg, slot: parseInt(e.target.value) || 1 })} style={{ width: 64 }} />
           </div>
-          <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, marginTop: 16 }}>
-            <input type="checkbox" checked={cfg.simulate} onChange={e => setCfg({ ...cfg, simulate: e.target.checked })} style={{ width: 16, height: 16 }} /> Modo Simulación
-          </label>
           <div style={{ display: 'flex', gap: 6, marginTop: 16 }}>
             <button className="btn primary" onClick={saveConfig}>Guardar Red PLC</button>
             <button className="btn" onClick={() => invoke<any>('plc_status_info').then(setSt).catch(() => {})}>Probar Conexión</button>
@@ -487,8 +490,8 @@ function TagForm({ onDone }: { onDone: () => void }) {
 
 function HipotTab() {
   const [st, setSt] = useState<any>(null);
-  const [cfg, setCfg] = useState<{ port: string; baud: number; simulate: boolean }>({
-    port: 'COM3', baud: 9600, simulate: true,
+  const [cfg, setCfg] = useState<{ port: string; baud: number }>({
+    port: 'COM3', baud: 9600,
   });
   const [ports, setPorts] = useState<string[]>([]);
   const [cmd, setCmd] = useState('STATUS?');
@@ -502,7 +505,7 @@ function HipotTab() {
 
   const save = async () => {
     try {
-      const r = await invoke<string>('hipot_config_set', { port: cfg.port, baud: cfg.baud, simulate: cfg.simulate });
+      const r = await invoke<string>('hipot_config_set', { port: cfg.port, baud: cfg.baud });
       if (r !== 'saved') throw new Error(r);
       setMsg('Configuración Hipot guardada');
       invoke<any>('hipot_status').then(setSt).catch(() => {});
@@ -533,9 +536,6 @@ function HipotTab() {
             <label style={{ fontSize: 11, fontWeight: 700, color: '#475569' }}>Baudios</label>
             <input className="input" type="number" inputMode="numeric" value={cfg.baud} onChange={e => setCfg({ ...cfg, baud: parseInt(e.target.value) || 9600 })} style={{ width: 100 }} />
           </div>
-          <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, marginTop: 16 }}>
-            <input type="checkbox" checked={cfg.simulate} onChange={e => setCfg({ ...cfg, simulate: e.target.checked })} style={{ width: 16, height: 16 }} /> Modo Simulación
-          </label>
           <div style={{ display: 'flex', gap: 6, marginTop: 16, flexWrap: 'wrap' }}>
             <button className="btn primary" onClick={save}>Guardar</button>
             <button className="btn" onClick={() => invoke<any>('hipot_status').then(setSt).catch(() => {})}>Probar Hipot</button>
@@ -569,7 +569,7 @@ function DbTab() {
   const [cfg, setCfg] = useState<any>(null);
   const [log, setLog] = useState('');
   const [syncs, setSyncs] = useState<any[]>([]);
-  const load = () => { api.get('/admin/config').then(setCfg).catch(() => setCfg(null)); api.get('/admin/sync-log').then(setSyncs).catch(() => setSyncs([])); };
+  const load = () => { invoke<any>('get_config').then(setCfg).catch(() => setCfg(null)); api.get('/admin/sync-log').then(setSyncs).catch(() => setSyncs([])); };
   useEffect(() => { load(); }, []);
   return (
     <div style={{ minWidth: 0 }}>
@@ -705,7 +705,7 @@ function SystemTab() {
   const loadLog = () => api.get('/admin/import-export-log').then(setImpLog).catch(() => setImpLog([]));
   useEffect(() => {
     loadLog();
-    invoke<any>('get_config').then(c => { setHold(String(c?.result_hold_seconds ?? '10')); setCfg(c || {}); }).catch(() => { api.get('/admin/config').then(c => { setHold(String(c?.result_hold_seconds ?? '10')); setCfg(c || {}); }).catch(() => {}); });
+    invoke<any>('get_config').then(c => { setHold(String(c?.result_hold_seconds ?? '10')); setCfg(c || {}); }).catch(() => {});
     api.get('/admin/local-db-config').then(r => setLocalDbCfg(r || { use_sqlite: '1', server: '', name: '', user: '', password: '' })).catch(() => {});
     api.get('/audit/table-names').then(r => setTableNames(r?.tables ?? [])).catch(() => {});
    

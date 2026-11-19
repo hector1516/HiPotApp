@@ -6,7 +6,9 @@
 //! - Mapa de salidas Q, entradas I y analógicas IA.
 //! - Modo simulación para operar sin PLC físico.
 
-pub mod sim;
+
+
+
 
 use s7::client::Client;
 use s7::tcp::Transport;
@@ -57,7 +59,6 @@ pub struct PlcConfig {
     pub ip: String,
     pub rack: u16,
     pub slot: u16,
-    pub simulate: bool,
 }
 
 /// Lee la configuración desde el JSON de `get_config`.
@@ -72,10 +73,6 @@ pub fn config_from(cfg: &Value) -> PlcConfig {
         ip: s("plc_ip", "192.168.1.10"),
         rack: s("plc_rack", "0").parse().unwrap_or(0),
         slot: s("plc_slot", "1").parse().unwrap_or(1),
-        simulate: {
-            let raw = s("plc_simulate", "true").to_lowercase();
-            raw == "true" || raw == "1" || raw == "yes" || raw == "on"
-        },
     }
 }
 
@@ -84,7 +81,6 @@ pub fn config_to_json(cfg: &PlcConfig) -> Value {
         "ip": cfg.ip,
         "rack": cfg.rack,
         "slot": cfg.slot,
-        "simulate": cfg.simulate,
     })
 }
 
@@ -329,35 +325,6 @@ pub fn empty_io() -> Value {
     json!({ "outputs": outputs, "inputs": inputs, "analog": analog })
 }
 
-/// I/O desde el estado simulado.
-pub fn sim_io() -> Value {
-    let mut outputs = BTreeMap::new();
-    for (addr, _, _) in Q_MAP {
-        outputs.insert((*addr).to_string(), json!(sim::q(addr)));
-    }
-    let mut inputs = BTreeMap::new();
-    for (addr, _, _) in I_MAP {
-        inputs.insert((*addr).to_string(), json!(sim::i(addr)));
-    }
-    let mut analog = BTreeMap::new();
-    for (addr, _) in IA_MAP {
-        analog.insert((*addr).to_string(), json!(sim::ia(addr)));
-    }
-    json!({ "outputs": outputs, "inputs": inputs, "analog": analog })
-}
-
-/// Resultados desde el estado simulado.
-pub fn sim_results() -> Value {
-    let mut out = BTreeMap::new();
-    for (name, _) in RES_OFFSETS {
-        out.insert((*name).to_string(), json!(sim::result(name)));
-    }
-    out.insert("complete".to_string(), json!(true));
-    out.insert("pass".to_string(), json!(true));
-    out.insert("running".to_string(), json!(false));
-    Value::Object(out.into_iter().collect())
-}
-
 /// Resultados en reposo (sin conexión).
 pub fn empty_results() -> Value {
     let mut out = BTreeMap::new();
@@ -473,17 +440,5 @@ mod tests {
         assert_eq!(value_as_i64(&json!("12")), 12);
         assert!((value_as_f64(&json!("1,5")) - 1.5).abs() < 0.001);
         assert!((value_as_f64(&json!(2.25)) - 2.25).abs() < 0.001);
-    }
-
-    #[test]
-    fn simulation_returns_value_inside_recipe_range() {
-        let comps = json!([
-            { "name": "FAN", "min": 0.3, "max": 1.5, "enabled": true }
-        ]);
-        sim::set_recipe(120.0, &comps);
-        let v = sim::test_component("FAN");
-        assert!(v >= 0.3 && v <= 1.5, "valor simulado fuera de rango: {}", v);
-        assert_eq!(sim::result("FAN"), v);
-        assert_eq!(sim::mode(), 2);
     }
 }

@@ -3,6 +3,8 @@
 > Fecha: 2026-11-18
 > Estado de partida: `main` @ `6bec4c5` + corrección de registro de comandos.
 > Objetivo: **un solo `HiPotApp.exe`**, sin Python, sin sidecar, sin puertos HTTP, con BD local SQL Express y sync a SQL Server remoto.
+>
+> **Modo producción:** la app no incluye simulación de PLC/Hipot ni resultados aleatorios. Si el hardware no responde, se muestra el error real y la prueba queda como `BAD`.
 
 ---
 
@@ -240,7 +242,7 @@ Portado `App/python/plc_manager.py` a `tauri/src-tauri/src/plc/`:
 - [x] Tags: `read_tag` / `write_tag` (BOOL/WORD/INT/REAL sobre DB).
 - [x] I/O directo: Q por `ab_read/ab_write`, I/IA por `eb_read`.
 - [x] Receta, start/stop, resultados, modo auto/manual.
-- [x] Modo simulación (`plc/sim.rs`) para operar sin PLC físico.
+- [x] Sin modo simulación: si el PLC no responde, se reporta el error real.
 
 Comandos nuevos:
 
@@ -264,7 +266,7 @@ Cambios frontend:
 - [x] `usePLC.ts` → `plc_status_info` con simulación.
 - [x] `SystemTab` → `plc_status_info`.
 
-**Criterio de aceptación:** lectura/escritura de Q/I/IA y DB1 contra PLC real; simulación si no hay PLC. **Cumplido en código y tests; falta prueba con hardware real.**
+**Criterio de aceptación:** lectura/escritura de Q/I/IA y DB1 contra PLC real. **Cumplido en código; falta prueba con hardware real.**
 
 > Hipot ya migrado en Fase 3 (`hipot_test`, `hipot_status`, `hipot_command`).
 
@@ -279,7 +281,7 @@ Portado `App/python/hipot_manager.py` a `tauri/src-tauri/src/hipot/`:
 - [x] Comandos: `STATUS?`, `START`, `STOP`, `ABORT`, `VOLTAGE:`, `CURRENT_MAX:`.
 - [x] Lectura de respuesta con timeout y parseo `V:/I:/R:/PASS/FAIL`.
 - [x] Lista de puertos disponibles.
-- [x] Modo simulación (respuesta `V:120.5 I:1.23 R:456.7 PASS`).
+- [x] Sin modo simulación: si el puerto no abre, se reporta el error real.
 
 Comandos nuevos:
 
@@ -301,31 +303,35 @@ Cambios frontend:
 - [x] `SystemTab` → `hipot_status`.
 - [x] Cero llamadas HTTP de Hipot restantes.
 
-**Criterio de aceptación:** handshake RS-232 con el 3865 real y modo simulado. **Cumplido en código y tests; falta prueba con hardware real.**
+**Criterio de aceptación:** handshake RS-232 con el 3865 real. **Cumplido en código; falta prueba con hardware real.**
 
 ---
 
-### Fase 4 — Auth y usuarios completos (1 sesión)
+### Fase 4 - Auth y usuarios completos (COMPLETADA)
 
 Comandos:
 
-| Comando | Reemplaza |
-|---|---|
-| `auth_login` | `POST /auth/login` |
-| `user_get` | `GET /users/{id}` |
-| `user_update` | `PUT /users/{id}` |
-| `auth_verify` (opcional) | validación de token/rol |
+| Comando | Reemplaza | Estado |
+|---|---|---|
+| `auth_login` | `POST /auth/login` | ✅ |
+| `user_get` | `GET /users/{id}` | ✅ |
+| `user_update` | `PUT /users/{id}` | ✅ |
 
-Notas:
+Reglas de producción implementadas:
 
-- Hoy el login es **sin contraseña** (solo gafete/batch). Mantener ese comportamiento; si se activa bcrypt, usar el crate `bcrypt` y migrar `password_hash`.
-- `ConfigGatePopup.tsx` y `UsersTab` deben usar `invoke`.
+- [x] Login por gafete/batch (sin contraseña).
+- [x] Validación de usuario activo.
+- [x] `user_update` valida usuario único.
+- [x] No se puede degradar/desactivar/borrar el último admin activo.
+- [x] `user_get` devuelve permisos por rol.
+- [x] `ConfigGatePopup.tsx` y `UsersTab` usan `invoke`.
+- [x] Cero llamadas HTTP de auth/usuarios restantes.
 
-**Criterio de aceptación:** entrar al panel con `ADMIN`/gafete sin HTTP.
+**Criterio de aceptación:** entrar al panel con `ADMIN`/gafete sin HTTP. **Cumplido.**
 
 ---
 
-### Fase 5 — Plantillas de etiqueta e import/export (2 sesiones)
+### Fase 5 - Plantillas de etiqueta e import/export (2 sesiones)
 
 Comandos:
 
@@ -394,24 +400,25 @@ Esta es la fase más grande y la que cumple el requisito "solo SQL Express".
 
 ---
 
-### Fase 8 — Barcode y flujo manual (1 sesión)
+### Fase 8 - Barcode y flujo de prueba (EN CURSO)
 
-Comandos:
-
-| Comando | Reemplaza |
-|---|---|
-| `barcode_scan` | `POST /barcode/scan` |
-| `manual_mode_set` | `POST /manual/mode` |
-| `manual_plc_test` | `POST /manual/plc-test` |
-| `manual_hipot` | `POST /manual/hipot` |
-| `manual_abort` | `POST /manual/abort` |
+| Comando | Reemplaza | Estado |
+|---|---|---|
+| `run_test_cycle` | flujo PLC -> Hipot -> resultados (antes `Math.random()`) | ✅ |
+| `barcode_scan` | `POST /barcode/scan` | ⏳ |
+| `manual_mode_set` | `POST /manual/mode` | ✅ (`plc_set_mode`) |
+| `manual_plc_test` | `POST /manual/plc-test` | ✅ (`plc_test_component`) |
+| `manual_hipot` | `POST /manual/hipot` | ✅ (`hipot_test`) |
+| `manual_abort` | `POST /manual/abort` | ✅ (`plc_abort` + `hipot_abort`) |
 
 Cambios frontend:
 
-- `App.tsx`: reemplazar `api.scan(...)` por `invoke('barcode_scan', ...)`.
-- `ManualScreen.tsx`: todos los endpoints.
+- [x] `App.tsx`: flujo real con `run_test_cycle`; sin `Math.random()`.
+- [x] `App.tsx`: reimpresión con `reprint_zebra`.
+- [x] `ManualScreen.tsx`: PLC/Hipot por `invoke`.
+- [ ] `App.tsx`: reemplazar `api.scan(...)` por `invoke('barcode_scan', ...)`.
 
-**Criterio de aceptación:** flujo model → serial → batch → prueba → resultado sin HTTP.
+**Criterio de aceptación:** flujo model -> serial -> batch -> prueba -> resultado sin HTTP y sin resultados simulados. **Pendiente solo el log de barcode.**
 
 ---
 

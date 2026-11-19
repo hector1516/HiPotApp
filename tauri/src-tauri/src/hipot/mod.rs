@@ -21,7 +21,6 @@ fn port_slot() -> &'static Mutex<Option<OpenPort>> {
 pub struct HipotConfig {
     pub port: String,
     pub baud: u32,
-    pub simulate: bool,
 }
 
 pub fn config_from(cfg: &Value) -> HipotConfig {
@@ -31,11 +30,9 @@ pub fn config_from(cfg: &Value) -> HipotConfig {
             .unwrap_or(default)
             .to_string()
     };
-    let simulate_raw = s("hipot_simulate", "true").to_lowercase();
     HipotConfig {
         port: s("hipot_port", "COM3"),
         baud: s("hipot_baud", "9600").parse().unwrap_or(9600),
-        simulate: matches!(simulate_raw.as_str(), "true" | "1" | "yes" | "on"),
     }
 }
 
@@ -43,7 +40,6 @@ pub fn config_to_json(cfg: &HipotConfig) -> Value {
     json!({
         "port": cfg.port,
         "baud": cfg.baud,
-        "simulate": cfg.simulate,
     })
 }
 
@@ -88,11 +84,6 @@ pub fn close() {
 
 /// Envía un comando y devuelve la respuesta cruda + mediciones parseadas.
 pub fn command(cfg: &HipotConfig, command: &str) -> Result<Value, String> {
-    let action = command.trim().to_uppercase();
-    if cfg.simulate {
-        return Ok(simulate_response(&action));
-    }
-
     ensure_open(cfg)?;
     let mut guard = port_slot()
         .lock()
@@ -115,7 +106,6 @@ pub fn command(cfg: &HipotConfig, command: &str) -> Result<Value, String> {
     Ok(json!({
         "response": response,
         "parsed": parse_measurement(&response),
-        "simulate": false,
     }))
 }
 
@@ -135,11 +125,8 @@ pub fn test_action(cfg: &HipotConfig, action: &str) -> Result<Value, String> {
     Ok(value)
 }
 
-/// Consulta de conexión (abre el puerto o valida simulación).
+/// Consulta de conexión (abre el puerto).
 pub fn check_connection(cfg: &HipotConfig) -> Result<(), String> {
-    if cfg.simulate {
-        return Ok(());
-    }
     ensure_open(cfg)
 }
 
@@ -168,20 +155,6 @@ pub fn parse_measurement(data: &str) -> Value {
     Value::Object(map)
 }
 
-fn simulate_response(action: &str) -> Value {
-    let response = match action {
-        "START" => "V:120.5 I:1.23 R:456.7 PASS",
-        "STATUS" | "STATUS?" | "MEASURE?" | "RESULT?" => "V:120.5 I:1.23 R:456.7 PASS",
-        "STOP" | "ABORT" => "STOPPED",
-        _ => "OK",
-    };
-    json!({
-        "response": response,
-        "parsed": parse_measurement(response),
-        "simulate": true,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,18 +172,9 @@ mod tests {
     }
 
     #[test]
-    fn simulation_returns_measurement() {
-        let v = simulate_response("START");
-        assert_eq!(v["simulate"], json!(true));
-        assert_eq!(v["parsed"]["pass"], json!(true));
-        assert!(v["parsed"]["voltage"].as_f64().unwrap() > 0.0);
-    }
-
-    #[test]
     fn config_defaults() {
         let cfg = config_from(&json!({}));
         assert_eq!(cfg.port, "COM3");
         assert_eq!(cfg.baud, 9600);
-        assert!(cfg.simulate);
     }
 }
