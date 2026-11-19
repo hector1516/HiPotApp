@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Gauge } from '../components/Gauge';
-import { api } from '../api';
 
 // Modo manual: sin guardar, sin modelo, 1-a-1 por hardware. Todo en una pantalla.
 export function ManualScreen({ onBack }: { onBack: () => void }) {
@@ -22,7 +21,7 @@ export function ManualScreen({ onBack }: { onBack: () => void }) {
     return () => {
       invoke('plc_set_mode', { mode: 1 }).catch(() => {});
       invoke('plc_abort').catch(() => {});
-      api.post('/manual/hipot', { action: 'STOP' }).catch(() => {});
+      invoke('hipot_test', { action: 'STOP' }).catch(() => {});
     };
   }, []);
 
@@ -61,7 +60,11 @@ export function ManualScreen({ onBack }: { onBack: () => void }) {
   };
 
   const hipotCmd = async (action: 'START' | 'STOP' | 'STATUS') => {
-    try { const r = await api.post('/manual/hipot', { action }); setHipot({ raw: r.response ?? '', parsed: r.parsed ?? {} }); }
+    try {
+      const r = await invoke<any>('hipot_test', { action });
+      if (r?.error) throw new Error(r.error);
+      setHipot({ raw: r.response ?? '', parsed: r.parsed ?? {} });
+    }
     catch (e: any) { setErr(String(e?.message ?? e)); }
   };
 

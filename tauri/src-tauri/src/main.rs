@@ -3,6 +3,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod db;
+mod hipot;
 mod plc;
 
 use db::paths::db_path;
@@ -566,6 +567,88 @@ fn plc_abort() -> String {
         let _ = plc::set_mode(&mut c, 1);
     }
     "OK".to_string()
+}
+
+// --- Hipot 3865 (Rust) ---
+
+#[tauri::command]
+fn hipot_list_ports() -> Vec<String> {
+    hipot::list_ports()
+}
+
+#[tauri::command]
+fn hipot_config_get() -> serde_json::Value {
+    let cfg = hipot::config_from(&get_config());
+    hipot::config_to_json(&cfg)
+}
+
+#[tauri::command]
+fn hipot_config_set(port: String, baud: u32, simulate: bool) -> String {
+    set_config(serde_json::json!({
+        "hipot_port": port,
+        "hipot_baud": baud.to_string(),
+        "hipot_simulate": if simulate { "true" } else { "false" },
+    }))
+}
+
+#[tauri::command]
+fn hipot_status() -> serde_json::Value {
+    let cfg = hipot::config_from(&get_config());
+    let ports = hipot::list_ports();
+    if cfg.simulate {
+        return serde_json::json!({
+            "connected": true, "port": cfg.port, "baud": cfg.baud,
+            "simulate": true, "ports": ports
+        });
+    }
+    match hipot::check_connection(&cfg) {
+        Ok(_) => serde_json::json!({
+            "connected": true, "port": cfg.port, "baud": cfg.baud,
+            "simulate": false, "ports": ports
+        }),
+        Err(e) => serde_json::json!({
+            "connected": false, "port": cfg.port, "baud": cfg.baud,
+            "simulate": false, "ports": ports, "error": e
+        }),
+    }
+}
+
+#[tauri::command]
+fn hipot_command(command: String) -> serde_json::Value {
+    let cfg = hipot::config_from(&get_config());
+    match hipot::command(&cfg, &command) {
+        Ok(mut value) => {
+            if let Some(obj) = value.as_object_mut() {
+                obj.insert("command".to_string(), serde_json::json!(command));
+            }
+            value
+        }
+        Err(e) => serde_json::json!({
+            "response": "", "parsed": {}, "error": e, "command": command
+        }),
+    }
+}
+
+#[tauri::command]
+fn hipot_test(action: String) -> serde_json::Value {
+    let cfg = hipot::config_from(&get_config());
+    match hipot::test_action(&cfg, &action) {
+        Ok(value) => value,
+        Err(e) => serde_json::json!({
+            "response": "", "parsed": {}, "error": e, "action": action
+        }),
+    }
+}
+
+#[tauri::command]
+fn hipot_abort() -> serde_json::Value {
+    hipot_test("STOP".to_string())
+}
+
+#[tauri::command]
+fn hipot_close() -> String {
+    hipot::close();
+    "closed".to_string()
 }
 
 // --- Recipes (SQLite) ---
@@ -1436,6 +1519,14 @@ fn main() {
             plc_get_mode,
             plc_test_component,
             plc_abort,
+            hipot_list_ports,
+            hipot_config_get,
+            hipot_config_set,
+            hipot_status,
+            hipot_command,
+            hipot_test,
+            hipot_abort,
+            hipot_close,
             plc_read_tag,
             plc_write_tag,
             list_recipes,

@@ -18,6 +18,7 @@ pub const DEFAULT_CONFIGS: &[(&str, &str)] = &[
     ("hipot_parity", "None"),
     ("hipot_databits", "8"),
     ("hipot_stopbits", "1"),
+    ("hipot_simulate", "true"),
     // BD local (SQL Express)
     ("db_local_server", ".\\SQLEXPRESS"),
     ("db_local_name", "HiPotDB"),

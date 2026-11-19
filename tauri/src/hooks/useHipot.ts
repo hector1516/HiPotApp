@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api } from '../api';
+import { invoke } from '@tauri-apps/api/core';
 
 export function useHipot(enabled = true) {
   const [connected, setConnected] = useState<boolean | null>(null);
   const refresh = useCallback(async () => {
     try {
-      const r = await api.get('/status/hipot');
-      setConnected(!!r.connected);
+      const r = await invoke<any>('hipot_status');
+      setConnected(!!r?.connected);
     } catch { setConnected(false); }
   }, []);
   useEffect(() => {

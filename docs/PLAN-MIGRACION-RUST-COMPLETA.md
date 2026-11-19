@@ -266,33 +266,42 @@ Cambios frontend:
 
 **Criterio de aceptación:** lectura/escritura de Q/I/IA y DB1 contra PLC real; simulación si no hay PLC. **Cumplido en código y tests; falta prueba con hardware real.**
 
-> Pendiente de Fase 3: los botones Hipot de `ManualTab`, `ManualScreen` y `HipotTab` siguen usando el sidecar (`/manual/hipot`, `/status/hipot`, `/admin/hipot-cmd`).
+> Hipot ya migrado en Fase 3 (`hipot_test`, `hipot_status`, `hipot_command`).
 
 ---
 
-### Fase 3 — Hipot 3865 en Rust (2 sesiones)
+### Fase 3 — Hipot 3865 en Rust (COMPLETADA)
 
-Portar `hipot_manager.py` con `serialport`:
+Portado `App/python/hipot_manager.py` a `tauri/src-tauri/src/hipot/`:
 
-- Puerto, baudios, paridad, databits, stopbits desde configuración.
-- Comandos: `STATUS?`, `START`, `STOP`, `ABORT`, `VOLTAGE:`, `CURRENT_MAX:`.
-- Parseo de mediciones a `{voltage, current, resistance, insulation_resistance, pass}`.
+- [x] Apertura de puerto serie 8N1 con `serialport`.
+- [x] Conexión persistente (`Mutex<Option<Box<dyn SerialPort>>>`).
+- [x] Comandos: `STATUS?`, `START`, `STOP`, `ABORT`, `VOLTAGE:`, `CURRENT_MAX:`.
+- [x] Lectura de respuesta con timeout y parseo `V:/I:/R:/PASS/FAIL`.
+- [x] Lista de puertos disponibles.
+- [x] Modo simulación (respuesta `V:120.5 I:1.23 R:456.7 PASS`).
 
 Comandos nuevos:
 
-| Comando | Reemplaza |
-|---|---|
-| `serial_list_ports` | `HipotManager.list_ports()` |
-| `hipot_status` | `GET /status/hipot` |
-| `hipot_command` | `POST /admin/hipot-cmd` |
-| `hipot_test` | `POST /manual/hipot` |
-| `hipot_abort` | `POST /manual/abort` |
+| Comando | Reemplaza | Estado |
+|---|---|---|
+| `hipot_list_ports` | `HipotManager.list_ports()` | ✅ |
+| `hipot_config_get` / `hipot_config_set` | (nuevo) | ✅ |
+| `hipot_status` | `GET /status/hipot` | ✅ |
+| `hipot_command` | `POST /admin/hipot-cmd` | ✅ |
+| `hipot_test` | `POST /manual/hipot` | ✅ |
+| `hipot_abort` | `POST /manual/abort` (parte Hipot) | ✅ |
+| `hipot_close` | (nuevo) | ✅ |
 
 Cambios frontend:
 
-- `useHipot.ts`, `ManualScreen.tsx`, `HipotTab` de `AdminPanel.tsx`.
+- [x] `useHipot.ts` → `hipot_status`.
+- [x] `HipotTab` → configuración de puerto/baudios/simulación, probar y comando manual.
+- [x] `ManualTab` y `ManualScreen` → `hipot_test`.
+- [x] `SystemTab` → `hipot_status`.
+- [x] Cero llamadas HTTP de Hipot restantes.
 
-**Criterio de aceptación:** handshake RS-232 con el 3865 real y modo simulado.
+**Criterio de aceptación:** handshake RS-232 con el 3865 real y modo simulado. **Cumplido en código y tests; falta prueba con hardware real.**
 
 ---
 

@@ -487,30 +487,77 @@ function TagForm({ onDone }: { onDone: () => void }) {
 
 function HipotTab() {
   const [st, setSt] = useState<any>(null);
+  const [cfg, setCfg] = useState<{ port: string; baud: number; simulate: boolean }>({
+    port: 'COM3', baud: 9600, simulate: true,
+  });
+  const [ports, setPorts] = useState<string[]>([]);
   const [cmd, setCmd] = useState('STATUS?');
   const [resp, setResp] = useState<any>(null);
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    invoke<any>('hipot_config_get').then(c => c && setCfg(c)).catch(() => {});
+    invoke<string[]>('hipot_list_ports').then(p => setPorts(p || [])).catch(() => {});
+  }, []);
+
+  const save = async () => {
+    try {
+      const r = await invoke<string>('hipot_config_set', { port: cfg.port, baud: cfg.baud, simulate: cfg.simulate });
+      if (r !== 'saved') throw new Error(r);
+      setMsg('Configuración Hipot guardada');
+      invoke<any>('hipot_status').then(setSt).catch(() => {});
+    } catch (e: any) { setMsg(String(e?.message ?? e)); }
+  };
+
+  const send = async () => {
+    try { setResp(await invoke<any>('hipot_command', { command: cmd })); }
+    catch (e: any) { setResp({ error: String(e?.message ?? e) }); }
+  };
+
   return (
     <div style={{ minWidth: 0 }}>
-      <h2 style={{ margin: '0 0 10px 0', fontSize: 16 }}>Hipot 3865</h2>
+      <h2 style={{ margin: '0 0 10px 0', fontSize: 16 }}>Hipot 3865 — RS-232</h2>
+      {msg && <div className="toast-err" style={{ background: msg.startsWith('Configuración') ? '#e6f4ea' : undefined, borderColor: msg.startsWith('Configuración') ? '#a8d0b4' : undefined, color: msg.startsWith('Configuración') ? '#166534' : undefined }}>{msg}</div>}
+
       <div className="card" style={{ marginBottom: 10 }}>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button className="btn" onClick={() => api.get('/status/hipot').then(setSt)}>Probar Hipot</button>
-          <button className="btn" onClick={async () => {
-            const cfg = await invoke<any>('get_config').catch(() => ({}));
-            const ip = cfg?.printer_ip || '';
-            const port = parseInt(cfg?.printer_port || '9100', 10);
-            const name = cfg?.printer_name || 'Zebra ZT231';
-            const r = await invoke<string>('print_test_zebra', { printerIp: ip, printerPort: port, printerName: name });
-            alert(r);
-          }}>Test Zebra (Rust)</button>
+        <h3 style={{ margin: '0 0 8px 0', fontSize: 14 }}>Puerto serie</h3>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <label style={{ fontSize: 11, fontWeight: 700, color: '#475569' }}>Puerto</label>
+            <select className="input" value={cfg.port} onChange={e => setCfg({ ...cfg, port: e.target.value })} style={{ width: 140 }}>
+              {ports.map(p => <option key={p} value={p}>{p}</option>)}
+              {!ports.includes(cfg.port) && <option value={cfg.port}>{cfg.port}</option>}
+            </select>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <label style={{ fontSize: 11, fontWeight: 700, color: '#475569' }}>Baudios</label>
+            <input className="input" type="number" inputMode="numeric" value={cfg.baud} onChange={e => setCfg({ ...cfg, baud: parseInt(e.target.value) || 9600 })} style={{ width: 100 }} />
+          </div>
+          <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, marginTop: 16 }}>
+            <input type="checkbox" checked={cfg.simulate} onChange={e => setCfg({ ...cfg, simulate: e.target.checked })} style={{ width: 16, height: 16 }} /> Modo Simulación
+          </label>
+          <div style={{ display: 'flex', gap: 6, marginTop: 16, flexWrap: 'wrap' }}>
+            <button className="btn primary" onClick={save}>Guardar</button>
+            <button className="btn" onClick={() => invoke<any>('hipot_status').then(setSt).catch(() => {})}>Probar Hipot</button>
+            <button className="btn" onClick={() => invoke('hipot_close').catch(() => {})}>Cerrar puerto</button>
+            <button className="btn" onClick={async () => {
+              const c = await invoke<any>('get_config').catch(() => ({}));
+              const ip = c?.printer_ip || '';
+              const port = parseInt(c?.printer_port || '9100', 10);
+              const name = c?.printer_name || 'Zebra ZT231';
+              const r = await invoke<string>('print_test_zebra', { printerIp: ip, printerPort: port, printerName: name });
+              alert(r);
+            }}>Test Zebra (Rust)</button>
+          </div>
         </div>
         {st && <pre style={{ marginTop: 8, fontSize: 12, background: '#f1f5f9', padding: 8, borderRadius: 6, overflow: 'auto' }}>{JSON.stringify(st, null, 2)}</pre>}
       </div>
+
       <div className="card">
         <h3>Comando manual</h3>
         <div style={{ display: 'flex', gap: 8, minWidth: 0 }}>
           <input className="input" value={cmd} onChange={e => setCmd(e.target.value.toUpperCase())} style={{ flex: 1, minWidth: 0 }} />
-          <button className="btn primary" style={{ flexShrink: 0 }} onClick={() => api.post('/admin/hipot-cmd', { command: cmd }).then(setResp)}>Enviar</button>
+          <button className="btn primary" style={{ flexShrink: 0 }} onClick={send}>Enviar</button>
         </div>
         {resp && <pre style={{ marginTop: 8, fontSize: 12, background: '#f1f5f9', padding: 8, borderRadius: 6, overflow: 'auto' }}>{JSON.stringify(resp, null, 2)}</pre>}
       </div>
@@ -664,7 +711,7 @@ function SystemTab() {
    
     getVersion().then(setAppVersion).catch(() => setAppVersion('1.0.0'));
     invoke<any>('plc_status_info').then(setPlcStatus).catch(() => {});
-    api.get('/status/hipot').then(setHipotStatus).catch(() => {});
+    invoke<any>('hipot_status').then(setHipotStatus).catch(() => {});
   }, []);
   const doExport = async () => { const r = await api.get('/admin/export'); const blob = new Blob([r.data], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `config_export_${new Date().toISOString().slice(0,10)}.json`; a.click(); };
   const doImport = async (f: File) => { try { const t = await f.text(); const r = await api.post('/admin/import', { data: t, mode }); setMsg(`Import OK: ${r.imported} · Conflictos: ${(r.conflicts ?? []).length}`); loadLog(); } catch (e) { setMsg(String(e)); } };
@@ -732,8 +779,8 @@ function SystemTab() {
                   slot: parseInt(c?.plc_slot || '1', 10),
                 }) };
               } catch {}
-              let hp: any = { connected: false, error: 'Hipot aun en sidecar' };
-              try { hp = await api.get('/status/hipot'); } catch {}
+              let hp: any = { connected: false };
+              try { hp = await invoke<any>('hipot_status'); } catch {}
               alert(`Health: ${JSON.stringify(h)}\nPLC: ${JSON.stringify(p)}\nHipot: ${JSON.stringify(hp)}`);
             } catch (e: any) { alert('Error: ' + (e?.message || e)); }
           }}>Ver estado completo</button>
@@ -914,7 +961,8 @@ function ManualTab() {
 
   const hipotCmd = async (action: 'START' | 'STOP' | 'STATUS') => {
     try {
-      const r = await api.post('/manual/hipot', { action });
+      const r = await invoke<any>('hipot_test', { action });
+      if (r?.error) throw new Error(r.error);
       setHipot({ raw: r.response ?? '', parsed: r.parsed ?? {} });
     } catch (e: any) { setMsg(String(e?.message ?? e)); }
   };
