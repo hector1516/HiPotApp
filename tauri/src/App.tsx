@@ -11,6 +11,7 @@ import { ReprintPopup } from './components/ReprintPopup';
 import { LogPopup } from './components/LogPopup';
 import { HistoryPopup } from './components/HistoryPopup';
 import { ConfigGatePopup } from './components/ConfigGatePopup';
+import { DbSetupDialog } from './components/DbSetupDialog';
 import { FeedbackHost } from './components/Feedback';
 import { EmergencyStopOverlay } from './components/EmergencyStopOverlay';
 import { useEmergencyStop } from './hooks/useEmergencyStop';
@@ -58,6 +59,9 @@ export default function App() {
   const [final, setFinal] = useState<'GOOD' | 'BAD'>('GOOD');
   const [t0, setT0] = useState<number>(0);
   const [health, setHealth] = useState<boolean>(false);
+  const [dbError, setDbError] = useState<string | null>(null);
+  const [dbInitializing, setDbInitializing] = useState<boolean>(true);
+  const [showDbSetup, setShowDbSetup] = useState(false);
   const [elapsed, setElapsed] = useState('0:00');
   const [holdSeconds, setHoldSeconds] = useState(10);
   const [printStatus, setPrintStatus] = useState<'sending' | 'sent' | 'error' | null>(null);
@@ -68,7 +72,7 @@ export default function App() {
   const [godActive, setGodActive] = useState(false);
   const [adminBatch, setAdminBatch] = useState<string>('');
   const [clock, setClock] = useState('');
-  const estop = useEmergencyStop();
+  const estop = useEmergencyStop(health);
   const timers = useRef<number[]>([]);
 
   React.useEffect(() => {
@@ -78,7 +82,7 @@ export default function App() {
       if (!Number.isNaN(v) && v >= 3 && v <= 60) setHoldSeconds(v);
     }).catch(() => {});
     return () => clearInterval(id);
-  }, []);
+  }, [health]);
 
   // Listeners de fase y valores en vivo
   React.useEffect(() => {
@@ -102,6 +106,7 @@ export default function App() {
 
   // Modelos/recetas disponibles y último modelo recordado.
   React.useEffect(() => {
+    if (!health) return;
     invoke<any[]>('list_recipes').then(list => {
       const arr = (Array.isArray(list) ? list : []).filter((r: any) => r.is_active !== false);
       setModels(arr);
@@ -117,19 +122,28 @@ export default function App() {
         }).catch(() => {});
       }
     }).catch(() => {});
-  }, []);
+  }, [health]);
 
-  // Health check del núcleo Rust (sin backend HTTP)
+  // Health check no bloqueante: la BD se inicializa en segundo plano.
   React.useEffect(() => {
+    let mounted = true;
     const check = async () => {
       try {
         const r = await invoke<any>('app_health');
-        setHealth(!!r && (r.status === 'healthy' || r.database === true));
-      } catch { setHealth(false); }
+        if (!mounted) return;
+        setHealth(!!r?.db_ready);
+        setDbError(r?.db_error ?? null);
+        setDbInitializing(!!r?.db_initializing);
+      } catch (e: any) {
+        if (!mounted) return;
+        setHealth(false);
+        setDbError(String(e?.message ?? e));
+        setDbInitializing(false);
+      }
     };
     check();
-    const id = setInterval(check, 3000);
-    return () => clearInterval(id);
+    const id = setInterval(check, 1500);
+    return () => { mounted = false; clearInterval(id); };
   }, []);
 
   // Abrir teclado tactil de Windows al enfocar un input
@@ -240,6 +254,11 @@ export default function App() {
     setStep(stepNumber('batch')); setPhase('READY');
   };
   const scanBatch = async (code: string) => {
+    if (!health) {
+      setError('SQL Express todavía no está listo. Espere unos segundos o use Reintentar.');
+      setPhase('ERROR');
+      return;
+    }
     if (!recipe?.id) {
       setError('No hay receta cargada. Escanea el modelo primero.');
       setPhase('ERROR');
@@ -369,11 +388,14 @@ export default function App() {
   };
 
   const retryHealth = async () => {
+    setDbError(null);
+    setDbInitializing(true);
+    setHealth(false);
     try {
-      const r = await invoke<any>('app_health');
-      setHealth(!!r && (r.status === 'healthy' || r.database === true));
-    } catch {
-      setHealth(false);
+      await invoke('db_retry');
+    } catch (e: any) {
+      setDbError(String(e?.message ?? e));
+      setDbInitializing(false);
     }
   };
 
@@ -399,7 +421,7 @@ export default function App() {
         <span className="app-clock">{clock}</span>
         <span className="rail-status" style={{ fontSize: 12, color: health ? '#86efac' : '#fca5a5' }}>
           <span className={`dot ${health ? 'ok' : 'bad'}`} />
-          {health ? 'Sistema OK' : 'BD sin conexión'}
+          {health ? 'Sistema OK' : dbInitializing ? 'Conectando BD…' : 'BD sin conexión'}
         </span>
         <button className="btn" onClick={() => setShowHistory(true)}>Historial</button>
         <button className="btn" onClick={() => setShowReprint(true)}>Reimprimir</button>
@@ -417,10 +439,20 @@ export default function App() {
             style={{ overflow: 'hidden' }}
           >
             <div className="alert" style={{ margin: 0, borderRadius: 0, borderLeftWidth: 4, alignItems: 'center' }}>
-              <b>SQL Express no está disponible.</b>
-              <span style={{ fontWeight: 500 }}>Revise el servicio o la configuración en Sistema → Base de datos local.</span>
-              <span className="spacer" />
-              <button className="btn sm" onClick={retryHealth}>Reintentar</button>
+              {dbInitializing ? (
+                <>
+                  <b>Conectando a SQL Express…</b>
+                  <span style={{ fontWeight: 500 }}>La app sigue respondiendo. Esto puede tardar unos segundos.</span>
+                </>
+              ) : (
+                <>
+                  <b>SQL Express no está disponible.</b>
+                  <span style={{ fontWeight: 500 }}>{dbError || 'Revise el servicio o la configuración en Sistema → Base de datos local.'}</span>
+                  <span className="spacer" />
+                  <button className="btn sm" onClick={retryHealth}>Reintentar</button>
+                  <button className="btn sm accent" onClick={() => setShowDbSetup(true)}>Configurar SQL</button>
+                </>
+              )}
             </div>
           </motion.div>
         )}
@@ -434,16 +466,17 @@ export default function App() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
             transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+            style={{ height: '100%', minHeight: 0 }}
           >
         {view === 'home' && (
           <HomeScreen step={step} recipe={recipe} models={models} selectedModel={selectedModel}
-            serial={serial} batch={batch} error={error}
+            serial={serial} batch={batch} error={error} hardwareReady={health}
             onSelectModel={selectModel} onChangeModel={changeModel}
             onScanSerial={scanSerial} onScanBatch={scanBatch} />
         )}
         {view === 'test' && (
           <TestScreen phase={phase === 'HIPOT_RUNNING' ? 'HIPOT_RUNNING' : 'PLC_RUNNING'}
-            recipe={recipe} values={values} limits={limits} onStop={reset} />
+            recipe={recipe} values={values} limits={limits} onStop={reset} hardwareReady={health} />
         )}
         {view === 'result' && (
           <ResultScreen status={final} duration={elapsed} holdSeconds={holdSeconds} printStatus={printStatus}
@@ -457,7 +490,7 @@ export default function App() {
             onNext={reset} onReprint={reprintCurrent} />
         )}
         {view === 'admin' && <AdminPanel onBack={reset} adminBatch={adminBatch} />}
-        {view === 'manual' && <ManualScreen onBack={reset} />}
+        {view === 'manual' && <ManualScreen onBack={reset} hardwareReady={health} />}
           </motion.div>
         </AnimatePresence>
       </main>
@@ -468,18 +501,27 @@ export default function App() {
         </span>
         <span className="rail-status" style={{ fontSize: 12, color: 'var(--on-rail-muted)' }}>
           <span className={`dot ${health ? 'ok' : 'bad'}`} />
-          {health ? 'SQL Express conectado' : 'SQL Express sin conexión'}
+          {health ? 'SQL Express conectado' : dbInitializing ? 'Conectando SQL Express…' : 'SQL Express sin conexión'}
         </span>
         {estop.connected === false && (
           <span className="pill warn" style={{ fontSize: 11 }}>Paro de emergencia no disponible</span>
         )}
         <span className="spacer" />
-        <span style={{ color: 'var(--muted-2)', fontSize: 11 }}>Offline-first · Windows 11 · v1.0.31 · Ctrl+Shift+K → GodMode</span>
+        <span style={{ color: 'var(--muted-2)', fontSize: 11 }}>Offline-first · Windows 11 · v1.0.34 · Ctrl+Shift+K → GodMode</span>
       </footer>
 
       <ReprintPopup open={showReprint} onClose={() => setShowReprint(false)} />
       <LogPopup open={showLog} onClose={() => setShowLog(false)} />
       <HistoryPopup open={showHistory} onClose={() => setShowHistory(false)} />
+      <DbSetupDialog
+        open={showDbSetup}
+        onClose={() => setShowDbSetup(false)}
+        onSaved={() => {
+          setShowDbSetup(false);
+          setDbInitializing(true);
+          setHealth(false);
+        }}
+      />
       <ConfigGatePopup
         open={gateTarget !== null}
         target={gateTarget ?? 'config'}

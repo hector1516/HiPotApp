@@ -17,12 +17,7 @@ pub struct LocalConfig {
     pub password: String,
 }
 
-pub fn config() -> LocalConfig {
-    let path = crate::db::paths::db_config_path();
-    let value = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-        .unwrap_or_else(|| json!({}));
+pub fn config_from_value(value: &Value) -> LocalConfig {
     let get = |key: &str, default: &str| {
         value
             .get(key)
@@ -39,21 +34,109 @@ pub fn config() -> LocalConfig {
     }
 }
 
+pub fn config() -> LocalConfig {
+    let path = crate::db::paths::db_config_path();
+    let value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .unwrap_or_else(|| json!({}));
+    config_from_value(&value)
+}
+
 impl LocalConfig {
-    pub fn connection_string(&self) -> String {
+    fn connection_string_to(&self, database: &str) -> String {
         let driver = "ODBC Driver 17 for SQL Server";
         if self.user.is_empty() {
             format!(
                 "Driver={{{}}};Server={};Database={};Trusted_Connection=yes;TrustServerCertificate=yes;",
-                driver, self.server, self.name
+                driver, self.server, database
             )
         } else {
             format!(
                 "Driver={{{}}};Server={};Database={};Uid={};Pwd={};TrustServerCertificate=yes;",
-                driver, self.server, self.name, self.user, self.password
+                driver, self.server, database, self.user, self.password
             )
         }
     }
+
+    pub fn connection_string(&self) -> String {
+        self.connection_string_to(&self.name)
+    }
+
+    pub fn master_connection_string(&self) -> String {
+        self.connection_string_to("master")
+    }
+}
+
+fn try_connect(conn_str: &str) -> Result<(), String> {
+    let env = Environment::new().map_err(|e| format!("Error ODBC: {}", e))?;
+    let options = ConnectionOptions {
+        login_timeout_sec: Some(3),
+        packet_size: None,
+    };
+    env.connect_with_connection_string(conn_str, options)
+        .map(|_| ())
+        .map_err(|e| format!("{}", e))
+}
+
+/// Prueba el login y la base indicada por un JSON de configuración.
+pub fn test_target_config(value: &Value) -> Result<String, String> {
+    let cfg = config_from_value(value);
+    if cfg.use_sqlite {
+        return Err("Use SQL Express; SQLite ya no se usa en producción.".to_string());
+    }
+    try_connect(&cfg.connection_string()).map(|_| "OK".to_string())
+}
+
+/// Prueba el login. Si la BD no existe pero el login a master funciona,
+/// devuelve un mensaje indicando que se puede crear.
+pub fn test_config(value: &Value) -> Result<String, String> {
+    let cfg = config_from_value(value);
+    if cfg.use_sqlite {
+        return Err("Use SQL Express; SQLite ya no se usa en producción.".to_string());
+    }
+    match try_connect(&cfg.connection_string()) {
+        Ok(_) => Ok("OK".to_string()),
+        Err(target_error) => match try_connect(&cfg.master_connection_string()) {
+            Ok(_) => Ok(format!(
+                "Login correcto, pero no se pudo abrir '{}'. Marque “Crear base de datos si no existe”. Detalle: {}",
+                cfg.name, target_error
+            )),
+            Err(master_error) => Err(format!(
+                "Login falló. Detalle: {}",
+                master_error
+            )),
+        },
+    }
+}
+
+/// Crea la base de datos (si no existe) usando la conexión a master.
+pub fn ensure_database(value: &Value) -> Result<String, String> {
+    let cfg = config_from_value(value);
+    if cfg.name.is_empty()
+        || !cfg
+            .name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return Err("Nombre de base de datos inválido".to_string());
+    }
+    let env = Environment::new().map_err(|e| format!("Error ODBC: {}", e))?;
+    let options = ConnectionOptions {
+        login_timeout_sec: Some(3),
+        packet_size: None,
+    };
+    let mut conn = env
+        .connect_with_connection_string(&cfg.master_connection_string(), options)
+        .map_err(|e| format!("No se pudo conectar a master: {}", e))?;
+    let sql = format!(
+        "IF DB_ID(N'{}') IS NULL CREATE DATABASE [{}]",
+        cfg.name.replace('\'', "''"),
+        cfg.name
+    );
+    conn.execute(&sql, (), Some(30))
+        .map_err(|e| format!("No se pudo crear la base '{}': {}", cfg.name, e))?;
+    Ok(format!("Base '{}' disponible", cfg.name))
 }
 
 /// Abre una conexión local, ejecuta la operación y la cierra.
@@ -68,8 +151,12 @@ pub fn with_connection<T>(
         );
     }
     let env = Environment::new().map_err(|e| format!("Error ODBC: {}", e))?;
+    let options = ConnectionOptions {
+        login_timeout_sec: Some(3),
+        packet_size: None,
+    };
     let mut conn = env
-        .connect_with_connection_string(&cfg.connection_string(), ConnectionOptions::default())
+        .connect_with_connection_string(&cfg.connection_string(), options)
         .map_err(|e| format!("No se pudo conectar a SQL Express: {}", e))?;
     f(&mut conn)
 }
@@ -82,13 +169,13 @@ pub fn test_connection() -> Result<String, String> {
 }
 
 pub fn execute(conn: &mut Connection<'_>, sql: &str) -> Result<(), String> {
-    conn.execute(sql, (), None).map_err(|e| e.to_string())?;
+    conn.execute(sql, (), Some(10)).map_err(|e| e.to_string())?;
     Ok(())
 }
 
 /// Ejecuta una consulta y devuelve filas como objetos JSON.
 pub fn query_json(conn: &mut Connection<'_>, sql: &str) -> Result<Vec<Value>, String> {
-    let mut cursor = match conn.execute(sql, (), None).map_err(|e| e.to_string())? {
+    let mut cursor = match conn.execute(sql, (), Some(10)).map_err(|e| e.to_string())? {
         Some(cursor) => cursor,
         None => return Ok(Vec::new()),
     };

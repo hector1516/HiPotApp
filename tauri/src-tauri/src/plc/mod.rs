@@ -89,9 +89,15 @@ pub fn connect(cfg: &PlcConfig, timeout_ms: u64) -> Result<PlcClient, String> {
         .ip
         .parse::<std::net::IpAddr>()
         .map_err(|_| format!("IP inválida: {}", cfg.ip))?;
+    // El crate s7 usa TcpStream::connect sin timeout; si la IP no existe,
+    // Windows puede tardar 20-120 s. Hacemos un pre-chequeo acotado.
+    let timeout = Duration::from_millis(timeout_ms.max(200));
+    let sock = std::net::SocketAddr::new(addr, 102);
+    std::net::TcpStream::connect_timeout(&sock, timeout)
+        .map_err(|e| format!("PLC no responde en {}:102: {}", cfg.ip, e))?;
     let mut opts = s7::tcp::Options::new(addr, cfg.rack, cfg.slot, s7::transport::Connection::OP);
-    opts.read_timeout = Duration::from_millis(timeout_ms);
-    opts.write_timeout = Duration::from_millis(timeout_ms);
+    opts.read_timeout = timeout;
+    opts.write_timeout = timeout;
     let transport = s7::tcp::Transport::connect(opts).map_err(|e| e.to_string())?;
     s7::client::Client::new(transport).map_err(|e| e.to_string())
 }

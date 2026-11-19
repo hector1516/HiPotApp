@@ -21,7 +21,7 @@ const NAV_GROUPS: { label: string; tabs: Tab[] }[] = [
 export function AdminPanel({ onBack, adminBatch }: { onBack: () => void; adminBatch?: string }) {
   const [tab, setTab] = useState<Tab>('Recetas');
   return (
-    <div className="admin-panel" style={{ display: 'flex', minHeight: 'calc(100vh - 58px)', minWidth: 0 }}>
+    <div className="admin-panel" style={{ display: 'flex', height: '100%', minHeight: 0, minWidth: 0 }}>
       <aside style={{
         width: 232, flexShrink: 0, background: 'linear-gradient(180deg, var(--rail) 0%, var(--rail-2) 100%)',
         borderRight: '1px solid rgba(255,255,255,.08)', padding: 12, display: 'flex', flexDirection: 'column', gap: 4,
@@ -431,6 +431,7 @@ function PlcTab() {
     rack: 0,
     slot: 1,
   });
+  const [enabled, setEnabled] = useState(false);
   const [tags, setTags] = useState<any[]>([]);
   const [writeVals, setWriteVals] = useState<Record<number, string>>({});
   const [msg, setMsg] = useState('');
@@ -438,6 +439,9 @@ function PlcTab() {
   const loadConfig = () => {
     invoke<any>('plc_config_get')
       .then((res: any) => { if (res) setCfg(res); })
+      .catch(() => {});
+    invoke<any>('get_config')
+      .then((c: any) => setEnabled(c?.plc_enabled === '1'))
       .catch(() => {});
   };
 
@@ -458,7 +462,9 @@ function PlcTab() {
     try {
       const r = await invoke<string>('plc_config_set', { ip: cfg.ip, rack: cfg.rack, slot: cfg.slot });
       if (r !== 'saved') throw new Error(r);
-      setMsg('Configuración de PLC guardada correctamente');
+      const r2 = await invoke<string>('set_config', { values: { plc_enabled: enabled ? '1' : '0' } });
+      if (r2 !== 'saved') throw new Error(r2);
+      setMsg(enabled ? 'PLC guardado y habilitado' : 'PLC guardado (deshabilitado)');
       invoke<any>('plc_status_info').then(setSt).catch(() => {});
     } catch (e: any) {
       setMsg(`Error al guardar: ${String(e?.message ?? e)}`);
@@ -519,12 +525,19 @@ function PlcTab() {
             <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)' }}>Slot</label>
             <input className="input" type="number" inputMode="numeric" value={cfg.slot} onChange={e => setCfg({ ...cfg, slot: parseInt(e.target.value) || 1 })} style={{ width: 64 }} />
           </div>
+          <label style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 16, fontWeight: 600 }}>
+            <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} style={{ width: 18, height: 18 }} />
+            Habilitar PLC
+          </label>
           <div style={{ display: 'flex', gap: 6, marginTop: 16 }}>
             <button className="btn primary" onClick={saveConfig}>Guardar Red PLC</button>
             <button className="btn" onClick={() => invoke<any>('plc_status_info').then(setSt).catch(() => {})}>Probar Conexión</button>
           </div>
         </div>
         {st && <pre style={{ marginTop: 8, fontSize: 12, background: 'var(--surface-2)', padding: 8, borderRadius: 6, overflow: 'auto' }}>{JSON.stringify(st, null, 2)}</pre>}
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>
+          Si está deshabilitado, la app no intentará conectarse al PLC ni bloqueará la interfaz. Habilítelo después de verificar la IP con “Probar Conexión”.
+        </div>
       </div>
 
       {/* Tabla de Variables PLC */}
@@ -629,6 +642,7 @@ function HipotTab() {
     port: 'COM3', baud: 38400,
   });
   const [ports, setPorts] = useState<string[]>([]);
+  const [enabled, setEnabled] = useState(false);
   const [cmd, setCmd] = useState('*IDN?');
   const [resp, setResp] = useState<any>(null);
   const [msg, setMsg] = useState('');
@@ -639,6 +653,7 @@ function HipotTab() {
   useEffect(() => {
     invoke<any>('hipot_config_get').then(c => c && setCfg(c)).catch(() => {});
     invoke<string[]>('hipot_list_ports').then(p => setPorts(p || [])).catch(() => {});
+    invoke<any>('get_config').then(c => setEnabled(c?.hipot_enabled === '1')).catch(() => {});
     loadLogs();
     const id = window.setInterval(loadLogs, 3000);
     return () => window.clearInterval(id);
@@ -648,7 +663,9 @@ function HipotTab() {
     try {
       const r = await invoke<string>('hipot_config_set', { port: cfg.port, baud: cfg.baud });
       if (r !== 'saved') throw new Error(r);
-      setMsg('Configuración Hipot guardada');
+      const r2 = await invoke<string>('set_config', { values: { hipot_enabled: enabled ? '1' : '0' } });
+      if (r2 !== 'saved') throw new Error(r2);
+      setMsg(enabled ? 'Configuración Hipot guardada y habilitada' : 'Configuración Hipot guardada (deshabilitada)');
       invoke<any>('hipot_status').then(setSt).catch(() => {});
     } catch (e: any) { setMsg(String(e?.message ?? e)); }
   };
@@ -686,6 +703,10 @@ function HipotTab() {
             <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)' }}>Baudios</label>
             <input className="input" type="number" inputMode="numeric" value={cfg.baud} onChange={e => setCfg({ ...cfg, baud: parseInt(e.target.value) || 38400 })} style={{ width: 100 }} />
           </div>
+          <label style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 16, fontWeight: 600 }}>
+            <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} style={{ width: 18, height: 18 }} />
+            Habilitar Hipot
+          </label>
           <div style={{ display: 'flex', gap: 6, marginTop: 16, flexWrap: 'wrap' }}>
             <button className="btn primary" onClick={save}>Guardar</button>
             <button className="btn" onClick={() => { invoke<any>('hipot_probe').then(setSt).catch(() => {}); loadLogs(); }}>Probar Hipot</button>

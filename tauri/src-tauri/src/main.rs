@@ -8,14 +8,51 @@ mod hipot;
 mod plc;
 
 use tauri::{Emitter, Manager};
+use std::sync::{Mutex, OnceLock};
+
+static CONFIG_CACHE: OnceLock<Mutex<serde_json::Value>> = OnceLock::new();
+
+fn default_config_json() -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    for (key, value) in db::seed::DEFAULT_CONFIGS {
+        map.insert(
+            (*key).to_string(),
+            serde_json::Value::String((*value).to_string()),
+        );
+    }
+    serde_json::Value::Object(map)
+}
+
+fn config_cache() -> &'static Mutex<serde_json::Value> {
+    CONFIG_CACHE.get_or_init(|| Mutex::new(default_config_json()))
+}
+
+/// Configuración en memoria. Nunca bloquea esperando SQL Express.
 #[tauri::command]
 fn get_config() -> serde_json::Value {
-    db::repo::config_get_all()
+    config_cache()
+        .lock()
+        .map(|guard| guard.clone())
+        .unwrap_or_else(|_| default_config_json())
+}
+
+fn reload_config_from_db() {
+    let value = db::repo::config_get_all();
+    let non_empty = value
+        .as_object()
+        .map(|obj| !obj.is_empty())
+        .unwrap_or(false);
+    if non_empty {
+        if let Ok(mut guard) = config_cache().lock() {
+            *guard = value;
+        }
+    }
 }
 
 #[tauri::command]
 fn app_health() -> serde_json::Value {
-    let db_ok = db::odbc_local::test_connection().is_ok();
+    let db_ready = db::is_ready();
+    let db_error = db::last_error();
     let cfg = get_config();
     let plc_ip = cfg
         .get("plc_ip")
@@ -23,10 +60,13 @@ fn app_health() -> serde_json::Value {
         .unwrap_or("")
         .to_string();
     serde_json::json!({
-        "status": if db_ok { "healthy" } else { "degraded" },
+        "status": if db_ready { "healthy" } else if db_error.is_some() { "error" } else { "starting" },
         "runtime": "rust",
-        "database": db_ok,
+        "database": db_ready,
         "database_engine": "SQL Express",
+        "db_ready": db_ready,
+        "db_initializing": !db_ready && db_error.is_none(),
+        "db_error": db_error,
         "plc_configured": !plc_ip.is_empty(),
         "version": env!("CARGO_PKG_VERSION"),
         "timestamp": std::time::SystemTime::now()
@@ -36,10 +76,36 @@ fn app_health() -> serde_json::Value {
     })
 }
 
+fn initialize_db_in_background() {
+    std::thread::spawn(|| match db::init() {
+        Ok(()) => {
+            reload_config_from_db();
+            db::set_ready(true);
+        }
+        Err(e) if e.contains("ya se está inicializando") => {}
+        Err(e) => db::set_error(e),
+    });
+}
+
+#[tauri::command]
+fn db_retry() -> String {
+    initialize_db_in_background();
+    "retrying".to_string()
+}
+
 #[tauri::command]
 fn set_config(values: serde_json::Value) -> String {
     match db::repo::config_set(&values) {
-        Ok(_) => "saved".to_string(),
+        Ok(_) => {
+            if let Ok(mut cache) = config_cache().lock() {
+                if let (Some(dst), Some(src)) = (cache.as_object_mut(), values.as_object()) {
+                    for (key, value) in src {
+                        dst.insert(key.clone(), value.clone());
+                    }
+                }
+            }
+            "saved".to_string()
+        }
         Err(e) => format!("error: {}", e),
     }
 }
@@ -103,6 +169,14 @@ fn open_external(url: String) {
 
 // --- PLC admin / I/O / manual (Rust, producción) ---
 
+fn config_flag(key: &str) -> bool {
+    get_config()
+        .get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or("0")
+        == "1"
+}
+
 fn plc_cfg() -> plc::PlcConfig {
     plc::config_from(&get_config())
 }
@@ -124,21 +198,29 @@ fn plc_config_set(ip: String, rack: u16, slot: u16) -> String {
 #[tauri::command]
 fn plc_status_info() -> serde_json::Value {
     let cfg = plc_cfg();
+    if !config_flag("plc_enabled") {
+        return serde_json::json!({
+            "connected": false, "enabled": false, "configured": false,
+            "ip": cfg.ip, "rack": cfg.rack, "slot": cfg.slot,
+            "error": "PLC no habilitado. Actívelo en Configuración → PLC."
+        });
+    }
     match plc::connect(&cfg, 1500) {
         Ok(_) => serde_json::json!({
-            "connected": true, "ip": cfg.ip, "rack": cfg.rack, "slot": cfg.slot
+            "connected": true, "enabled": true, "configured": true,
+            "ip": cfg.ip, "rack": cfg.rack, "slot": cfg.slot
         }),
         Err(e) => serde_json::json!({
-            "connected": false, "ip": cfg.ip, "rack": cfg.rack,
-            "slot": cfg.slot, "error": e
+            "connected": false, "enabled": true, "configured": true,
+            "ip": cfg.ip, "rack": cfg.rack, "slot": cfg.slot, "error": e
         }),
     }
 }
 
 #[tauri::command]
 fn plc_emergency_stop() -> serde_json::Value {
-    let cfg = plc_cfg();
     let config = get_config();
+    let cfg = plc::config_from(&config);
     let address = config
         .get("estop_input")
         .and_then(|v| v.as_str())
@@ -150,6 +232,17 @@ fn plc_emergency_stop() -> serde_json::Value {
         .and_then(|v| v.as_str())
         .unwrap_or("1")
         != "0";
+    if !config_flag("plc_enabled") {
+        return serde_json::json!({
+            "active": false,
+            "raw": null,
+            "address": address,
+            "connected": false,
+            "enabled": false,
+            "inverted": nc,
+            "error": "PLC no habilitado. Actívelo en Configuración → PLC."
+        });
+    }
     match plc::connect(&cfg, 800) {
         Ok(mut client) => {
             let raw = plc::read_i(&mut client, &address);
@@ -180,7 +273,13 @@ fn resolve_model_by_serial(_serial: String) -> Option<String> {
 
 #[tauri::command]
 fn plc_tags_list() -> serde_json::Value {
+    if !db::is_ready() {
+        return serde_json::json!([]);
+    }
     let mut rows = db::repo::plc_tags_list();
+    if !config_flag("plc_enabled") {
+        return rows;
+    }
     let cfg = plc_cfg();
     let mut client = plc::connect(&cfg, 1500).ok();
     if let Some(arr) = rows.as_array_mut() {
@@ -266,6 +365,15 @@ fn plc_tag_read_by_id(tag_id: i64) -> serde_json::Value {
 #[tauri::command]
 fn plc_io_status() -> serde_json::Value {
     let cfg = plc_cfg();
+    if !config_flag("plc_enabled") {
+        let mut v = plc::empty_io();
+        if let Some(obj) = v.as_object_mut() {
+            obj.insert("connected".to_string(), serde_json::json!(false));
+            obj.insert("enabled".to_string(), serde_json::json!(false));
+            obj.insert("error".to_string(), serde_json::json!("PLC no habilitado. Actívelo en Configuración → PLC."));
+        }
+        return v;
+    }
     match plc::connect(&cfg, 1500) {
         Ok(mut c) => {
             let mut v = plc::read_io(&mut c);
@@ -287,6 +395,9 @@ fn plc_io_status() -> serde_json::Value {
 
 #[tauri::command]
 fn plc_io_write(q: String, value: bool) -> String {
+    if !config_flag("plc_enabled") {
+        return "error: PLC no habilitado".to_string();
+    }
     let cfg = plc_cfg();
     match plc::connect(&cfg, 1500) {
         Ok(mut c) => match plc::write_q(&mut c, &q, value) {
@@ -427,6 +538,12 @@ fn hipot_config_set(port: String, baud: u32) -> String {
 fn hipot_status() -> serde_json::Value {
     let cfg = hipot::config_from(&get_config());
     let ports = hipot::list_ports();
+    if !config_flag("hipot_enabled") {
+        return serde_json::json!({
+            "connected": false, "enabled": false, "port": cfg.port, "baud": cfg.baud,
+            "ports": ports, "error": "Hipot no habilitado. Actívelo en Configuración → Hipot."
+        });
+    }
     match hipot::check_connection(&cfg) {
         Ok(_) => serde_json::json!({
             "connected": true, "port": cfg.port, "baud": cfg.baud, "ports": ports
@@ -557,6 +674,7 @@ fn run_test_cycle(
         Some(execution_id), None, None, None, true, None,
     );
 
+    if config_flag("hipot_enabled") {
     match hipot::run_test(&hipot_cfg, hipot_voltage, hipot_current, hipot_time) {
         Ok(v) => {
             hipot_parsed = v
@@ -572,6 +690,10 @@ fn run_test_cycle(
             errors.push(format!("Hipot: {}", e));
             hipot_pass = false;
         }
+    }
+    } else {
+        errors.push("Hipot no habilitado. Actívelo en Configuración → Hipot.".to_string());
+        hipot_pass = false;
     }
 
     let hipot_duration = hipot_parsed
@@ -631,6 +753,7 @@ fn run_test_cycle(
 
     // --- Prueba eléctrica (solo si Hipot pasó) ---
     let _ = app.emit("test-phase", "PLC_RUNNING");
+    if config_flag("plc_enabled") {
     let cfg = plc_cfg();
     match plc::connect(&cfg, 2000) {
         Ok(mut client) => {
@@ -731,6 +854,10 @@ fn run_test_cycle(
             errors.push(format!("PLC no conectado: {}", e));
             let _ = save_plc_result(execution_id, false, serde_json::json!([]));
         }
+    }
+    } else {
+        errors.push("PLC no habilitado. Actívelo en Configuración → PLC.".to_string());
+        let _ = save_plc_result(execution_id, false, serde_json::json!([]));
     }
 
     let final_status = if plc_pass && hipot_pass { "GOOD" } else { "BAD" };
@@ -856,6 +983,23 @@ fn local_db_status() -> serde_json::Value {
 #[tauri::command]
 fn local_db_test_connection() -> Result<String, String> {
     db::odbc_local::test_connection()
+}
+
+#[tauri::command]
+fn local_db_test_config(config: serde_json::Value) -> Result<String, String> {
+    db::odbc_local::test_config(&config)
+}
+
+#[tauri::command]
+fn local_db_setup(config: serde_json::Value, create_database: bool) -> Result<String, String> {
+    if create_database {
+        db::odbc_local::ensure_database(&config)?;
+    }
+    db::odbc_local::test_target_config(&config)?;
+    let path = db::paths::db_config_path();
+    let text = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    std::fs::write(&path, text).map_err(|e| e.to_string())?;
+    Ok("saved".to_string())
 }
 
 #[tauri::command]
@@ -1333,6 +1477,7 @@ fn main() {
             get_config,
             set_config,
             app_health,
+            db_retry,
             show_touch_keyboard,
             plc_status,
             plc_status_info,
@@ -1405,6 +1550,8 @@ fn main() {
             local_db_config_set,
             local_db_status,
             local_db_test_connection,
+            local_db_test_config,
+            local_db_setup,
             local_db_ensure_tables,
             local_db_migrate,
             audit_table_names,
@@ -1421,8 +1568,9 @@ fn main() {
             canvas_to_zpl
         ])
         .setup(|app| {
-            // Esquema + seed una sola vez, antes de que la UI llame comandos.
-            db::init();
+            // La BD se inicializa en segundo plano. Nunca bloquea el hilo principal
+            // ni el splash: si SQL Express tarda o no está, la UI sigue respondiendo.
+            initialize_db_in_background();
             // Auto-sync loop: intervalo configurable (sync_interval_minutes)
             std::thread::spawn(move || {
                 loop {

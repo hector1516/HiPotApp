@@ -13,6 +13,41 @@ pub mod schema;
 pub mod seed;
 
 use rusqlite::Connection;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
+
+static DB_READY: AtomicBool = AtomicBool::new(false);
+static DB_INITIALIZING: AtomicBool = AtomicBool::new(false);
+static DB_ERROR: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+
+fn error_slot() -> &'static Mutex<Option<String>> {
+    DB_ERROR.get_or_init(|| Mutex::new(None))
+}
+
+pub fn is_ready() -> bool {
+    DB_READY.load(Ordering::SeqCst)
+}
+
+pub fn last_error() -> Option<String> {
+    error_slot().lock().ok().and_then(|guard| guard.clone())
+}
+
+pub fn set_ready(ready: bool) {
+    DB_READY.store(ready, Ordering::SeqCst);
+    if ready {
+        if let Ok(mut guard) = error_slot().lock() {
+            *guard = None;
+        }
+    }
+}
+
+pub fn set_error(error: String) {
+    eprintln!("[db] {}", error);
+    if let Ok(mut guard) = error_slot().lock() {
+        *guard = Some(error);
+    }
+    DB_READY.store(false, Ordering::SeqCst);
+}
 
 /// Abre la BD local con el esquema garantizado.
 pub fn open() -> rusqlite::Result<Connection> {
@@ -29,18 +64,23 @@ pub fn open() -> rusqlite::Result<Connection> {
 }
 
 /// Inicialización de arranque: esquema SQL Express + valores por defecto.
-pub fn init() {
-    if let Err(e) = odbc_local::ensure_schema() {
-        eprintln!("[db] SQL Express no disponible: {}", e);
-        return;
+/// Debe ejecutarse fuera del hilo principal: puede tardar si SQL Express no está listo.
+pub fn init() -> Result<(), String> {
+    if DB_INITIALIZING
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return Err("La base de datos ya se está inicializando".to_string());
     }
-    if let Err(e) = seed_express() {
-        eprintln!("[db] seed SQL Express: {}", e);
-    }
-    if let Err(e) = defaults::seed_express() {
-        eprintln!("[db] seed recetas/tags de fábrica: {}", e);
-    }
-    let _ = repo::logs_prune(30, 5000);
+    let result = (|| -> Result<(), String> {
+        odbc_local::ensure_schema()?;
+        seed_express()?;
+        defaults::seed_express()?;
+        let _ = repo::logs_prune(30, 5000);
+        Ok(())
+    })();
+    DB_INITIALIZING.store(false, Ordering::SeqCst);
+    result
 }
 
 fn seed_express() -> Result<(), String> {

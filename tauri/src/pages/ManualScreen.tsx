@@ -9,7 +9,7 @@ import { useHipot } from '../hooks/useHipot';
 
 type PendingAction = 'START' | 'STOP' | null;
 
-export function ManualScreen({ onBack }: { onBack: () => void }) {
+export function ManualScreen({ onBack, hardwareReady = true }: { onBack: () => void; hardwareReady?: boolean }) {
   const [recipes, setRecipes] = useState<any[]>([]);
   const [rid, setRid] = useState<number | null>(null);
   const [voltage, setVoltage] = useState(120);
@@ -18,7 +18,7 @@ export function ManualScreen({ onBack }: { onBack: () => void }) {
   const [hipot, setHipot] = useState<{ raw: string; parsed: any } | null>(null);
   const [err, setErr] = useState('');
   const [pending, setPending] = useState<PendingAction>(null);
-  const hipotStatus = useHipot();
+  const hipotStatus = useHipot(hardwareReady);
 
   useEffect(() => {
     invoke('plc_set_mode', { mode: 2 }).catch(() => {});

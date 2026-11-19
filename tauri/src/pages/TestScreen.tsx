@@ -7,16 +7,17 @@ import { SafetyNote } from '../components/SafetyNote';
 import { usePLC } from '../hooks/usePLC';
 import { useHipot } from '../hooks/useHipot';
 
-export function TestScreen({ phase, recipe, values, limits, onStop }: {
+export function TestScreen({ phase, recipe, values, limits, onStop, hardwareReady = true }: {
   phase: 'PLC_RUNNING' | 'HIPOT_RUNNING';
   recipe: any;
   values: Record<string, number>;
   limits: Record<string, { min: number; max: number }>;
   onStop: () => void;
+  hardwareReady?: boolean;
 }) {
   const [secs, setSecs] = useState(0);
-  const plc = usePLC();
-  const hipot = useHipot();
+  const plc = usePLC(hardwareReady);
+  const hipot = useHipot(hardwareReady);
 
   useEffect(() => {
     const id = setInterval(() => setSecs(s => s + 1), 1000);

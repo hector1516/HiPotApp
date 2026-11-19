@@ -28,7 +28,7 @@ function EquipmentRow({ label, on, detail }: { label: string; on: boolean | null
 }
 
 export function HomeScreen({
-  step, recipe, models, selectedModel, serial, batch, error,
+  step, recipe, models, selectedModel, serial, batch, error, hardwareReady = true,
   onSelectModel, onChangeModel, onScanSerial, onScanBatch,
 }: {
   step: number;
@@ -38,13 +38,14 @@ export function HomeScreen({
   serial: string;
   batch: string;
   error: string;
+  hardwareReady?: boolean;
   onSelectModel: (model: string) => void;
   onChangeModel: () => void;
   onScanSerial: (code: string) => void;
   onScanBatch: (code: string) => void;
 }) {
-  const plc = usePLC();
-  const hipot = useHipot();
+  const plc = usePLC(hardwareReady);
+  const hipot = useHipot(hardwareReady);
   const [modelChoice, setModelChoice] = useState(selectedModel || models[0]?.model || '');
   const prompt = stepAt(step - 1).prompt;
 
