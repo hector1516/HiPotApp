@@ -1163,7 +1163,43 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .invoke_handler(tauri::generate_handler![open_external, read_backend_log, get_config, set_config, plc_status, restart_backend, list_operators, add_operator, list_users, add_user, delete_user, start_execution, save_plc_result, save_hipot_result, list_executions, list_logs, log_action, canvas_to_zpl])
+        .invoke_handler(tauri::generate_handler![
+            open_external,
+            read_backend_log,
+            get_config,
+            set_config,
+            show_touch_keyboard,
+            restart_backend,
+            plc_status,
+            plc_read_tag,
+            plc_write_tag,
+            list_recipes,
+            get_recipe_by_model,
+            create_recipe,
+            update_recipe,
+            delete_recipe,
+            duplicate_recipe,
+            list_operators,
+            add_operator,
+            list_users,
+            add_user,
+            delete_user,
+            start_execution,
+            save_plc_result,
+            save_hipot_result,
+            list_executions,
+            list_logs,
+            log_action,
+            test_odbc_connection,
+            execute_sql,
+            ensure_remote_tables,
+            sync_pending,
+            print_zpl_ethernet,
+            print_zpl_windows,
+            print_test_zebra,
+            reprint_zebra,
+            canvas_to_zpl
+        ])
         .manage(Backend(Mutex::new(None)))
         .setup(|app| {
             match backend_path(app.handle()) {
