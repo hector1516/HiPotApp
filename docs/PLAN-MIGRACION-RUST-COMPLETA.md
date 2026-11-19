@@ -381,26 +381,43 @@ Cambios frontend:
 
 ---
 
-### Fase 7 - BD local SQL Express + sync multitable (3-4 sesiones)
+### Fase 7 - BD local SQL Express + sync multitable (EN CURSO: 7A completada)
 
 Esta es la fase más grande y la que cumple el requisito "solo SQL Express".
 
-- [ ] Implementar `db/odbc.rs` con `odbc-api`:
-  - [ ] Conexión con `Trusted_Connection` o usuario/password.
-  - [ ] Pool simple (Mutex<Connection>) o reconexión por comando.
-  - [ ] Timeouts y mensajes de error claros.
-- [ ] Implementar repositorios para las 18 tablas.
-- [ ] Migrar todos los comandos CRUD de `rusqlite` a ODBC.
-- [ ] `ensure_local_schema()` al arranque.
-- [ ] Migración única SQLite → SQL Express (leer `hipot_local.db`, insertar, marcar flag).
-- [ ] `db_config.json` administrado por Rust.
-- [ ] Sync multitable: `executions`, `plc_readings`, `hipot_results`, `barcode_logs`, `recipes`, `operators`, `batches`, `users`, `label_prints`.
+#### 7A — Infraestructura SQL Express (COMPLETADA)
+
+- [x] `db/odbc_local.rs` con `odbc-api`:
+  - [x] Conexión `Trusted_Connection` o usuario/password.
+  - [x] Lectura de `db_config.json` por Rust.
+  - [x] `test_connection`, `execute`, `query_json`, `query_one`, `last_id`.
+  - [x] `ensure_schema()` usando `schema.sql` y `sys.tables`.
+- [x] Migración única SQLite → SQL Express (`migrate_from_sqlite`):
+  - [x] Recetas + componentes + totales.
+  - [x] Configuración, usuarios, operadores, batches.
+  - [x] Ejecuciones, lecturas PLC, resultados Hipot.
+  - [x] Barcode, logs, plantillas, impresiones, tags PLC, import/export.
+  - [x] `IDENTITY_INSERT` para conservar IDs.
+- [x] Comandos nuevos: `local_db_status`, `local_db_test_connection`, `local_db_ensure_tables`, `local_db_migrate`.
+- [x] UI en Sistema → Base de datos local: probar, crear tablas y migrar.
+
+#### 7B — Migrar comandos CRUD a ODBC (PENDIENTE)
+
+- [ ] Repositorios ODBC para las 18 tablas.
+- [ ] Reemplazar `rusqlite` en config, usuarios, recetas, ejecuciones, logs, tags, plantillas, historial, barcode.
+- [ ] `db::open()` con backend SQL Express.
+- [ ] Eliminar `rusqlite` del runtime (solo queda para migración).
+
+#### 7C — Sync multitable (PENDIENTE)
+
+- [ ] Sync local SQL Express → SQL Server remoto:
+  `executions`, `plc_readings`, `hipot_results`, `barcode_logs`, `recipes`, `operators`, `batches`, `users`, `label_prints`.
 - [ ] Escribir `sync_log` (dirección, tabla, registros, estado, error).
 - [ ] Actualizar `synced_at`.
-- [ ] Reintentos y modo offline (si remoto no responde, no bloquear la UI).
+- [ ] Reintentos y modo offline.
 - [ ] `sync_now` manual y loop cada `sync_interval_minutes`.
 
-**Criterio de aceptación:** con SQL Express local vacío, la app crea el esquema, opera 100% offline y sincroniza a SQL Server remoto.
+**Criterio de aceptación (7 completa):** con SQL Express local vacío, la app crea el esquema, opera 100% offline y sincroniza a SQL Server remoto. **Aún no cumplido: 7B/7C pendientes.**
 
 ---
 

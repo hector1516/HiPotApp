@@ -1039,6 +1039,32 @@ fn local_db_config_set(config: serde_json::Value) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn local_db_status() -> serde_json::Value {
+    let cfg = db::odbc_local::config();
+    serde_json::json!({
+        "use_sqlite": cfg.use_sqlite,
+        "server": cfg.server,
+        "name": cfg.name,
+    })
+}
+
+#[tauri::command]
+fn local_db_test_connection() -> Result<String, String> {
+    db::odbc_local::test_connection()
+}
+
+#[tauri::command]
+fn local_db_ensure_tables() -> Result<serde_json::Value, String> {
+    let created = db::odbc_local::ensure_schema()?;
+    Ok(serde_json::json!({ "status": "ok", "created": created }))
+}
+
+#[tauri::command]
+fn local_db_migrate() -> Result<serde_json::Value, String> {
+    db::odbc_local::migrate_from_sqlite()
+}
+
+#[tauri::command]
 fn audit_table_names() -> serde_json::Value {
     let conn = match db::open() {
         Ok(c) => c,
@@ -2169,6 +2195,10 @@ fn main() {
             sync_log_list,
             local_db_config_get,
             local_db_config_set,
+            local_db_status,
+            local_db_test_connection,
+            local_db_ensure_tables,
+            local_db_migrate,
             audit_table_names,
             audit_tables_status,
             audit_ensure_tables,

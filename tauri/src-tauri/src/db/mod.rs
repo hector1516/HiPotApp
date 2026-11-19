@@ -7,6 +7,7 @@
 //! interna de este módulo; los comandos no se tocan.
 
 pub mod config;
+pub mod odbc_local;
 pub mod paths;
 pub mod schema;
 pub mod seed;

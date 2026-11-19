@@ -888,10 +888,29 @@ function SystemTab() {
               alert(r === 'saved' ? 'Guardado. Reinicia la app para aplicar.' : r);
             } catch (e: any) { alert('Error: ' + (e?.message || e)); }
           }}>Guardar</button>
+          <button className="btn" onClick={async () => {
+            try {
+              const r = await invoke<string>('local_db_test_connection');
+              alert(`SQL Express: ${r}`);
+            } catch (e: any) { alert('Error: ' + (e?.message || e)); }
+          }}>Probar SQL Express</button>
+          <button className="btn" onClick={async () => {
+            try {
+              const r = await invoke<any>('local_db_ensure_tables');
+              alert(`Tablas locales verificadas. Creadas: ${r.created ?? 0}`);
+            } catch (e: any) { alert('Error: ' + (e?.message || e)); }
+          }}>Crear tablas locales</button>
+          <button className="btn" onClick={async () => {
+            if (!confirm('¿Migrar los datos de hipot_local.db (SQLite) a SQL Express? Se omite lo que ya exista.')) return;
+            try {
+              const r = await invoke<any>('local_db_migrate');
+              alert(`Migración completada:\n${JSON.stringify(r, null, 2)}`);
+            } catch (e: any) { alert('Error: ' + (e?.message || e)); }
+          }}>Migrar SQLite → SQL Express</button>
           <button className="btn ghost" onClick={() => (window as any).__TAURI__?.core?.invoke?.('open_external', { url: 'https://www.microsoft.com/es-es/sql-server/sql-server-downloads' }).catch?.(() => window.open('https://www.microsoft.com/es-es/sql-server/sql-server-downloads', '_blank'))}>Descargar SQL Express 2025</button>
         </div>
         <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>
-          Las tablas se crean automáticamente al arrancar. Los cambios aplican al reiniciar.
+          Fase 7: prepara SQL Express, crea las tablas y migra los datos. La app seguirá usando SQLite hasta completar la migración de comandos (7B/7C).
         </div>
       </div>
       <div className="card" style={{ marginBottom: 10 }}>
