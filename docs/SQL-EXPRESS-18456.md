@@ -24,6 +24,46 @@ Significa que SQL Server está encendido, pero **no acepta el usuario de Windows
 
 Si `sa` no tiene permiso para crear la base, usa una cuenta con `dbcreator`/`sysadmin` o crea la base manualmente (ver abajo).
 
+## Cuenta SQL por defecto (`eccsa`)
+
+A partir de v1.0.35 la app usa por defecto:
+
+| Campo | Valor |
+|---|---|
+| Servidor | `.\SQLEXPRESS` |
+| Base | `HiPotDB` |
+| Autenticación | SQL Server |
+| Usuario | `eccsa` |
+| Contraseña | `Qwe123456?` |
+
+La app también detecta las instancias locales y las muestra en una lista.
+
+### Requisitos en SQL Server
+
+1. SQL Server debe estar en **modo mixto** (SQL Server y Windows Authentication). Si está solo en Windows, el login `eccsa` no podrá entrar.
+2. El login `eccsa` debe estar habilitado.
+3. Para que la app cree `HiPotDB` automáticamente, `eccsa` necesita `dbcreator` o `sysadmin`:
+
+```sql
+ALTER SERVER ROLE dbcreator ADD MEMBER [eccsa];
+```
+
+O crea la base manualmente y dale `db_owner`:
+
+```sql
+IF DB_ID(N'HiPotDB') IS NULL CREATE DATABASE [HiPotDB];
+GO
+USE [HiPotDB];
+IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name = N'eccsa')
+    CREATE USER [eccsa] FOR LOGIN [eccsa];
+ALTER ROLE db_owner ADD MEMBER [eccsa];
+GO
+```
+
+### Seguridad
+
+La contraseña `Qwe123456?` queda en la configuración local y en el instalador. Si el repositorio o el instalador son públicos, cámbiala después de instalar y actualiza la app en **Configurar SQL**.
+
 ## Script automático (recomendado)
 
 En la PC donde está SQL Express, abre **PowerShell** (no necesita estar elevado) y pega:

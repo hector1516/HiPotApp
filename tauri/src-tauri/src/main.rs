@@ -943,6 +943,46 @@ fn sync_log_list(limit: Option<i64>) -> serde_json::Value {
 }
 
 #[tauri::command]
+fn local_db_scan_servers() -> serde_json::Value {
+    let mut servers: Vec<String> = Vec::new();
+    for key in [
+        r"HKLM\SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL",
+        r"HKLM\SOFTWARE\WOW6432Node\Microsoft\Microsoft SQL Server\Instance Names\SQL",
+    ] {
+        if let Ok(output) = std::process::Command::new("reg")
+            .args(["query", key])
+            .output()
+        {
+            let text = String::from_utf8_lossy(&output.stdout);
+            for line in text.lines() {
+                let line = line.trim();
+                if line.is_empty() || line.starts_with("HKEY") {
+                    continue;
+                }
+                if let Some(name) = line.split_whitespace().next() {
+                    let server = if name.eq_ignore_ascii_case("MSSQLSERVER") {
+                        ".".to_string()
+                    } else {
+                        format!(".\\{}", name)
+                    };
+                    if !servers.iter().any(|s| s.eq_ignore_ascii_case(&server)) {
+                        servers.push(server);
+                    }
+                }
+            }
+        }
+    }
+    if !servers.iter().any(|s| s.eq_ignore_ascii_case(".\\SQLEXPRESS")) {
+        servers.push(".\\SQLEXPRESS".to_string());
+    }
+    servers.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    serde_json::json!({
+        "servers": servers,
+        "default": ".\\SQLEXPRESS",
+    })
+}
+
+#[tauri::command]
 fn local_db_config_get() -> serde_json::Value {
     let path = db::paths::db_config_path();
     if let Ok(text) = std::fs::read_to_string(&path) {
@@ -955,16 +995,24 @@ fn local_db_config_get() -> serde_json::Value {
     }
     serde_json::json!({
         "use_sqlite": "0",
-        "server": ".\\SQLEXPRESS",
-        "name": "HiPotDB",
-        "user": "",
-        "password": "",
+        "server": db::odbc_local::DEFAULT_DB_SERVER,
+        "name": db::odbc_local::DEFAULT_DB_NAME,
+        "user": db::odbc_local::DEFAULT_DB_USER,
+        "password": db::odbc_local::DEFAULT_DB_PASSWORD,
+        "auth_defaults_version": "2",
     })
 }
 
 #[tauri::command]
 fn local_db_config_set(config: serde_json::Value) -> Result<String, String> {
     let path = db::paths::db_config_path();
+    let mut config = config;
+    if let Some(obj) = config.as_object_mut() {
+        obj.insert(
+            "auth_defaults_version".to_string(),
+            serde_json::json!("2"),
+        );
+    }
     let text = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
     std::fs::write(&path, text).map_err(|e| e.to_string())?;
     Ok("saved".to_string())
@@ -992,6 +1040,13 @@ fn local_db_test_config(config: serde_json::Value) -> Result<String, String> {
 
 #[tauri::command]
 fn local_db_setup(config: serde_json::Value, create_database: bool) -> Result<String, String> {
+    let mut config = config;
+    if let Some(obj) = config.as_object_mut() {
+        obj.insert(
+            "auth_defaults_version".to_string(),
+            serde_json::json!("2"),
+        );
+    }
     if create_database {
         db::odbc_local::ensure_database(&config)?;
     }
@@ -1547,6 +1602,7 @@ fn main() {
             history_list,
             sync_log_list,
             local_db_config_get,
+            local_db_scan_servers,
             local_db_config_set,
             local_db_status,
             local_db_test_connection,
@@ -1568,6 +1624,8 @@ fn main() {
             canvas_to_zpl
         ])
         .setup(|app| {
+            // Credenciales/instancia local por defecto y migración de Windows auth vacía.
+            db::odbc_local::ensure_default_config_file();
             // La BD se inicializa en segundo plano. Nunca bloquea el hilo principal
             // ni el splash: si SQL Express tarda o no está, la UI sigue respondiendo.
             initialize_db_in_background();

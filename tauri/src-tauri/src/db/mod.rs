@@ -73,6 +73,10 @@ pub fn init() -> Result<(), String> {
         return Err("La base de datos ya se está inicializando".to_string());
     }
     let result = (|| -> Result<(), String> {
+        let config = odbc_local::config_value();
+        if let Err(e) = odbc_local::ensure_database(&config) {
+            eprintln!("[db] no se pudo asegurar HiPotDB: {}", e);
+        }
         odbc_local::ensure_schema()?;
         seed_express()?;
         defaults::seed_express()?;

@@ -9,6 +9,8 @@ export function DbSetupDialog({ open, onClose, onSaved, errorHint }: {
   errorHint?: string | null;
 }) {
   const [server, setServer] = useState('.\\SQLEXPRESS');
+  const [servers, setServers] = useState<string[]>(['.\\SQLEXPRESS']);
+  const [scanning, setScanning] = useState(false);
   const [name, setName] = useState('HiPotDB');
   const [auth, setAuth] = useState<'windows' | 'sql'>('windows');
   const [user, setUser] = useState('sa');
@@ -27,6 +29,13 @@ export function DbSetupDialog({ open, onClose, onSaved, errorHint }: {
     if (!open) return;
     setMsg('');
     setOk(false);
+    invoke<any>('local_db_scan_servers').then(r => {
+      const list: string[] = Array.isArray(r?.servers) ? r.servers : [];
+      if (list.length) {
+        setServers(list);
+        setServer(prev => list.includes(prev) ? prev : (r.default || list[0]));
+      }
+    }).catch(() => {});
     invoke<any>('local_db_config_get').then(c => {
       if (!c) return;
       setServer(c.server ?? '.\\SQLEXPRESS');
@@ -37,6 +46,22 @@ export function DbSetupDialog({ open, onClose, onSaved, errorHint }: {
       setPassword(c.password ?? '');
     }).catch(() => {});
   }, [open]);
+
+  const scanServers = async () => {
+    setScanning(true);
+    try {
+      const r = await invoke<any>('local_db_scan_servers');
+      const list: string[] = Array.isArray(r?.servers) ? r.servers : [];
+      if (list.length) {
+        setServers(list);
+        setServer(prev => list.includes(prev) ? prev : (r.default || list[0]));
+      }
+    } catch {
+      // Si el registro no responde, se conserva la lista actual.
+    } finally {
+      setScanning(false);
+    }
+  };
 
   const config = () => ({
     use_sqlite: '0',
@@ -79,9 +104,9 @@ export function DbSetupDialog({ open, onClose, onSaved, errorHint }: {
             className="card" style={{ width: 'min(560px, 96vw)', maxHeight: '92vh', overflow: 'auto' }}>
             <h3 style={{ margin: '0 0 6px 0' }}>Configurar SQL Express</h3>
             <p className="page-sub" style={{ marginTop: 0 }}>
-              La app no pudo iniciar sesión en SQL Server. El error 18456 significa que SQL Server rechazó
-              el usuario de Windows con el que estás logeado. <b>No necesitas usuario ni contraseña de la app</b>
-              si usas autenticación de Windows: hay que dar de alta tu cuenta de Windows en SQL Server.
+              Revisa el servidor local, la base y las credenciales. Por defecto la app usa
+              <b> .\SQLEXPRESS / HiPotDB / eccsa</b>. Si prefieres autenticación de Windows,
+              selecciónala y deja usuario/contraseña vacíos.
             </p>
 
             {auth === 'windows' && failedUser && (
@@ -106,8 +131,19 @@ ALTER SERVER ROLE sysadmin ADD MEMBER [${failedUser}];`}
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               <div className="field" style={{ gridColumn: '1 / -1' }}>
-                <label>Servidor</label>
-                <input className="input" value={server} onChange={e => setServer(e.target.value)} placeholder=".\\SQLEXPRESS" />
+                <label>Servidor SQL local</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <select className="input" value={server} onChange={e => setServer(e.target.value)} style={{ flex: 1 }}>
+                    {servers.map(s => <option key={s} value={s}>{s}</option>)}
+                    {!servers.includes(server) && <option value={server}>{server}</option>}
+                  </select>
+                  <button className="btn" type="button" onClick={scanServers} disabled={scanning}>
+                    {scanning ? 'Buscando…' : 'Buscar'}
+                  </button>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                  Detectados: {servers.join(' · ') || 'ninguno'}
+                </div>
               </div>
               <div className="field">
                 <label>Base de datos</label>

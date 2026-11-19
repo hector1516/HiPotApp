@@ -17,6 +17,78 @@ pub struct LocalConfig {
     pub password: String,
 }
 
+pub const DEFAULT_DB_SERVER: &str = ".\\SQLEXPRESS";
+pub const DEFAULT_DB_NAME: &str = "HiPotDB";
+pub const DEFAULT_DB_USER: &str = "eccsa";
+pub const DEFAULT_DB_PASSWORD: &str = "Qwe123456?";
+
+pub fn default_config_value() -> Value {
+    json!({
+        "use_sqlite": "0",
+        "server": DEFAULT_DB_SERVER,
+        "name": DEFAULT_DB_NAME,
+        "user": DEFAULT_DB_USER,
+        "password": DEFAULT_DB_PASSWORD,
+        "auth_defaults_version": "2",
+    })
+}
+
+/// Crea el archivo de configuración si no existe y migra la autenticación
+/// Windows vacía a la cuenta SQL local por defecto.
+pub fn ensure_default_config_file() {
+    let path = crate::db::paths::db_config_path();
+    if !path.exists() {
+        let text = serde_json::to_string_pretty(&default_config_value())
+            .unwrap_or_else(|_| "{}".to_string());
+        let _ = std::fs::write(path, text);
+        return;
+    }
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    let Ok(mut value) = serde_json::from_str::<Value>(&text) else {
+        return;
+    };
+    let Some(obj) = value.as_object_mut() else {
+        return;
+    };
+    let marker = obj
+        .get("auth_defaults_version")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if marker.is_empty() {
+        let user = obj
+            .get("user")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let pass_empty = obj
+            .get("password")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().is_empty())
+            .unwrap_or(true);
+        let use_default = user.is_empty()
+            || ((user.eq_ignore_ascii_case("sa") || user.eq_ignore_ascii_case("eccsa"))
+                && pass_empty);
+        if use_default {
+            obj.insert("user".to_string(), json!(DEFAULT_DB_USER));
+            obj.insert("password".to_string(), json!(DEFAULT_DB_PASSWORD));
+        }
+        if !obj.contains_key("server") {
+            obj.insert("server".to_string(), json!(DEFAULT_DB_SERVER));
+        }
+        if !obj.contains_key("name") {
+            obj.insert("name".to_string(), json!(DEFAULT_DB_NAME));
+        }
+        obj.insert("use_sqlite".to_string(), json!("0"));
+        obj.insert("auth_defaults_version".to_string(), json!("2"));
+        if let Ok(text) = serde_json::to_string_pretty(&value) {
+            let _ = std::fs::write(path, text);
+        }
+    }
+}
+
 pub fn config_from_value(value: &Value) -> LocalConfig {
     let get = |key: &str, default: &str| {
         value
@@ -27,20 +99,23 @@ pub fn config_from_value(value: &Value) -> LocalConfig {
     };
     LocalConfig {
         use_sqlite: get("use_sqlite", "0") == "1",
-        server: get("server", ".\\SQLEXPRESS"),
-        name: get("name", "HiPotDB"),
-        user: get("user", ""),
-        password: get("password", ""),
+        server: get("server", DEFAULT_DB_SERVER),
+        name: get("name", DEFAULT_DB_NAME),
+        user: get("user", DEFAULT_DB_USER),
+        password: get("password", DEFAULT_DB_PASSWORD),
     }
 }
 
-pub fn config() -> LocalConfig {
+pub fn config_value() -> Value {
     let path = crate::db::paths::db_config_path();
-    let value = std::fs::read_to_string(&path)
+    std::fs::read_to_string(&path)
         .ok()
         .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-        .unwrap_or_else(|| json!({}));
-    config_from_value(&value)
+        .unwrap_or_else(default_config_value)
+}
+
+pub fn config() -> LocalConfig {
+    config_from_value(&config_value())
 }
 
 impl LocalConfig {
