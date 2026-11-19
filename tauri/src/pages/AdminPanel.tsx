@@ -496,7 +496,14 @@ function HipotTab() {
       <div className="card" style={{ marginBottom: 10 }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn" onClick={() => api.get('/status/hipot').then(setSt)}>Probar Hipot</button>
-          <button className="btn" onClick={() => api.post('/admin/print-test').then(r => alert(JSON.stringify(r)))}>Test Zebra</button>
+          <button className="btn" onClick={async () => {
+            const cfg = await invoke<any>('get_config').catch(() => ({}));
+            const ip = cfg?.printer_ip || '';
+            const port = parseInt(cfg?.printer_port || '9100', 10);
+            const name = cfg?.printer_name || 'Zebra ZT231';
+            const r = await invoke<string>('print_test_zebra', { printerIp: ip, printerPort: port, printerName: name });
+            alert(r);
+          }}>Test Zebra (Rust)</button>
         </div>
         {st && <pre style={{ marginTop: 8, fontSize: 12, background: '#f1f5f9', padding: 8, borderRadius: 6, overflow: 'auto' }}>{JSON.stringify(st, null, 2)}</pre>}
       </div>
