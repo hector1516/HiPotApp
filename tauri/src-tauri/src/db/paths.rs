@@ -20,17 +20,7 @@ pub fn db_path() -> PathBuf {
     app_dir().join("hipot_local.db")
 }
 
-/// Configuración de la BD local/remota (compatible con el sidecar anterior).
+/// Configuración de la BD local/remota.
 pub fn db_config_path() -> PathBuf {
     app_dir().join("db_config.json")
-}
-
-/// Log del sidecar anterior (se conserva para diagnóstico durante la transición).
-pub fn backend_log_path() -> PathBuf {
-    app_dir().join("backend.log")
-}
-
-/// Log propio del núcleo Rust.
-pub fn app_log_path() -> PathBuf {
-    app_dir().join("app.log")
 }

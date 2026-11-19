@@ -22,29 +22,26 @@ Mientras esos tres puntos no se resuelvan, cualquier migración adicional se con
 
 ---
 
-## 2. Arquitectura actual
+## 2. Arquitectura final (alcanzada)
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ HiPotApp.exe (Tauri 2)                                       │
+│ HiPotApp.exe (Tauri 2) — un solo binario                     │
 │                                                              │
-│  React UI ── invoke() ──► 37 comandos Rust                   │
-│      │                        ├─ rusqlite (SQLite local)     │
-│      │                        ├─ s7 (PLC S7-1200)            │
-│      │                        ├─ odbc-api (SQL remoto)       │
-│      │                        └─ TCP 9100 / print (Zebra)    │
-│      │                                                       │
-│      └── fetch() ──► http://127.0.0.1:8765 ──► sidecar .exe  │
-│                        FastAPI + SQLAlchemy                  │
-│                        ├─ SQL Express / SQLite               │
-│                        ├─ snap7 (PLC)                        │
-│                        ├─ pyserial (Hipot 3865)              │
-│                        ├─ pyodbc (SQL Server remoto)         │
-│                        └─ bcrypt / JWT                       │
+│  React UI ── invoke() ──► comandos Rust                      │
+│                              ├─ rusqlite (SQLite local)      │
+│                              ├─ s7 (PLC S7-1200)             │
+│                              ├─ serialport (Hipot 3865)       │
+│                              ├─ odbc-api (SQL Server remoto) │
+│                              └─ TCP 9100 / print (Zebra)      │
+│                                                              │
+│  Sin Python · sin sidecar · sin puerto 8765                  │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**Problema:** el sidecar es un segundo `.exe` de ~40–60 MB, abre el puerto 8765, duplica lógica y es la causa del indicador **"Sin conexión"** cuando no arranca.
+**Estado:** el sidecar Python ya fue eliminado. Toda la lógica corre en Rust.
+La única deuda estructural pendiente es migrar la BD local de SQLite a
+SQL Express (Fase 7).
 
 ---
 
@@ -430,22 +427,23 @@ Cambios frontend:
 
 ---
 
-### Fase 9 - Eliminar el sidecar Python (1 sesión)
+### Fase 9 - Eliminar el sidecar Python (COMPLETADA)
 
-- [ ] `main.rs`: eliminar `Backend`, `backend_path`, `kill_backend`, arranque en `setup`, `restart_backend`, `read_backend_log`.
-- [ ] Crear `app_log_read` para el log propio en `%APPDATA%\HiPotApp\app.log`.
-- [ ] `tauri.conf.json`: quitar `resources` del backend.
-- [ ] `.github/workflows/build.yml`: quitar pasos de Python/PyInstaller y `Copy backend sidecar`.
-- [ ] Borrar `backend_entry.py`, `App/python/sidecar.py` y el árbol `App/python` (mover a rama `legacy-python` o zip en `docs/legacy/`).
-- [ ] Borrar `tauri/src/api.ts` y todas las referencias.
-- [ ] Quitar `VITE_API_URL` y el proxy de `vite.config.ts`.
-- [ ] Verificar que `dist` no contiene `8765` ni `fetch(` al backend.
+- [x] `main.rs`: eliminados `Backend`, `backend_path`, `kill_backend`, arranque en `setup`, `restart_backend`, `read_backend_log`.
+- [x] Eliminado el auto-arranque y el kill del backend al cerrar.
+- [x] `tauri.conf.json`: quitado `resources` del backend.
+- [x] `.github/workflows/build.yml`: quitados Python/PyInstaller y `Copy backend sidecar`.
+- [x] Borrados `backend_entry.py` y todo el árbol `App/python`.
+- [x] Borrado `tauri/src/api.ts` y todas las referencias.
+- [x] Quitado el proxy `8765` de `vite.config.ts`.
+- [x] Verificado: cero referencias a `8765`, `sidecar`, `read_backend_log` o `restart_backend` en `tauri/src` y `main.rs`.
+- [x] `cargo build` y `npm run build` correctos.
 
-**Criterio de aceptación:** `npm run tauri build` genera un instalador que funciona en una VM **sin Python instalado**.
+**Criterio de aceptación:** `npm run tauri build` genera un instalador que funciona en una VM **sin Python instalado**. **La app ya no lanza ni empaqueta Python.**
 
 ---
 
-### Fase 10 — Hardening y release (1–2 sesiones)
+### Fase 10 - Hardening y release (1-2 sesiones)
 
 - [ ] Logging de UI: visor con fecha/hora, categoría, parámetros, valores enviados/recibidos, duración y error.
 - [ ] Rotación de logs (tamaño/fecha).

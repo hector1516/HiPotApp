@@ -1,5 +1,5 @@
-// HiPotApp: ventana Tauri + arranque/parada automática del backend Python
-// empaquetado como recurso (todo-en-uno, offline-first).
+// HiPotApp: aplicación Tauri 2 + núcleo Rust (PLC, Hipot, BD, impresión).
+// Un solo ejecutable, sin sidecar Python ni puertos HTTP.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod config_io;
@@ -8,14 +8,7 @@ mod hipot;
 mod plc;
 
 use db::paths::db_path;
-use std::process::{Child, Command};
-use std::sync::Mutex;
-use tauri::{Emitter, Manager, State, WindowEvent};
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
-
-const BACKEND_BIN: &str = "hipot-backend-x86_64-pc-windows-msvc.exe";
-
+use tauri::{Emitter, Manager};
 #[tauri::command]
 fn get_config() -> serde_json::Value {
     match db::open() {
@@ -42,7 +35,6 @@ fn app_health() -> serde_json::Value {
         "database": db_ok,
         "database_path": db_path().display().to_string(),
         "plc_configured": !plc_ip.is_empty(),
-        "legacy_sidecar": false,
         "version": env!("CARGO_PKG_VERSION"),
         "timestamp": std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -59,53 +51,6 @@ fn set_config(values: serde_json::Value) -> String {
             Err(e) => format!("error: {}", e),
         },
         Err(e) => format!("error: {}", e),
-    }
-}
-
-#[tauri::command]
-fn read_backend_log() -> String {
-    std::fs::read_to_string(db::paths::backend_log_path())
-        .unwrap_or_else(|_| "No hay log disponible.".to_string())
-}
-
-#[tauri::command]
-fn restart_backend(app: tauri::AppHandle) -> String {
-    // Kill existing
-    if let Some(mut child) = app.state::<Backend>().0.lock().unwrap().take() {
-        let _ = child.kill();
-        let _ = child.wait();
-    }
-    // Find binary
-    if let Some(path) = backend_path(&app) {
-        use std::fs::OpenOptions;
-        use std::io::Write;
-        let log_path = db::paths::backend_log_path();
-        let stderr_file = OpenOptions::new().create(true).append(true).open(&log_path).ok();
-        let mut cmd = Command::new(&path);
-        #[cfg(target_os = "windows")]
-        cmd.creation_flags(0x08000000);
-        if let Some(f) = stderr_file {
-            cmd.stderr(std::process::Stdio::from(f));
-        }
-        match cmd.spawn() {
-            Ok(child) => {
-                *app.state::<Backend>().0.lock().unwrap() = Some(child);
-                let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_default();
-                if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&log_path) {
-                    let _ = writeln!(f, "[{}] backend reiniciado manualmente: {}", ts, path.display());
-                }
-                "OK: backend reiniciado".to_string()
-            }
-            Err(e) => {
-                let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_default();
-                if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&log_path) {
-                    let _ = writeln!(f, "[{}] error reiniciando backend: {}", ts, e);
-                }
-                format!("Error: {}", e)
-            }
-        }
-    } else {
-        "Error: binario del backend no encontrado".to_string()
     }
 }
 
@@ -1656,7 +1601,7 @@ fn save_plc_result(eid: i64, passed: bool, readings: serde_json::Value) -> Strin
     let ex = conn.query_row("SELECT plc_start_time FROM executions WHERE id = ?1", rusqlite::params![eid], |row| row.get::<_, Option<String>>(0));
     let plc_start = ex.ok().flatten();
     let mut duration = 0.0;
-    if let Some(start) = plc_start {
+    if let Some(_start) = plc_start {
         // parse not exact, skip duration calc for simplicity
         duration = 0.0;
     }
@@ -2151,65 +2096,16 @@ fn duplicate_recipe(id: i64, new_model: String) -> i64 {
 
     new_id
 }
-struct Backend(Mutex<Option<Child>>);
-
-fn backend_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
-    use tauri::path::BaseDirectory;
-    // 1. Directorio de recursos (app instalada / bundle)
-    if let Ok(p) = app
-        .path()
-        .resolve(format!("binaries/{BACKEND_BIN}"), BaseDirectory::Resource)
-    {
-        if p.exists() {
-            return Some(p);
-        }
-    }
-    // 2. Junto al .exe o subiendo hasta 4 niveles (cubre target/release → tauri/binaries)
-    if let Ok(exe) = std::env::current_exe() {
-        let mut dir = exe.parent().map(|p| p.to_path_buf());
-        for _ in 0..5 {
-            if let Some(d) = dir.clone() {
-                let p = d.join(BACKEND_BIN);
-                if p.exists() { return Some(p); }
-                let p = d.join(format!("binaries/{BACKEND_BIN}"));
-                if p.exists() { return Some(p); }
-                dir = d.parent().map(|p| p.to_path_buf());
-            }
-        }
-    }
-    // 3. Fallback dev: cwd
-    if let Ok(cwd) = std::env::current_dir() {
-        let p = cwd.join(format!("../binaries/{BACKEND_BIN}"));
-        if p.exists() { return Some(p); }
-        let p = cwd.join(format!("binaries/{BACKEND_BIN}"));
-        if p.exists() { return Some(p); }
-    }
-    None
-}
-
-fn kill_backend(state: &State<Backend>) {
-    let mut guard = match state.0.lock() {
-        Ok(g) => g,
-        Err(_) => return,
-    };
-    if let Some(mut child) = guard.take() {
-        let _ = child.kill();
-        let _ = child.wait();
-    }
-}
-
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             open_external,
-            read_backend_log,
             get_config,
             set_config,
             app_health,
             show_touch_keyboard,
-            restart_backend,
             plc_status,
             plc_status_info,
             plc_config_get,
@@ -2286,54 +2182,9 @@ fn main() {
             reprint_zebra,
             canvas_to_zpl
         ])
-        .manage(Backend(Mutex::new(None)))
         .setup(|app| {
             // Esquema + seed una sola vez, antes de que la UI llame comandos.
             db::init();
-            match backend_path(app.handle()) {
-                Some(path) => {
-                    // Redirigir stderr a un archivo de log para diagnóstico
-                    use std::fs::OpenOptions;
-                    use std::io::Write;
-                    let log_path = db::paths::backend_log_path();
-                    let stderr_file = OpenOptions::new()
-                        .create(true).append(true).open(&log_path).ok();
-                    let mut cmd = Command::new(&path);
-                    if let Some(f) = stderr_file {
-                        cmd.stderr(std::process::Stdio::from(f));
-                    }
-                    match cmd.spawn() {
-                        Ok(child) => {
-                            *app.state::<Backend>().0.lock().unwrap() = Some(child);
-                            eprintln!("[hipot] backend iniciado: {}", path.display());
-                            use std::io::Write;
-                            let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_default();
-                            let _ = writeln!(std::fs::OpenOptions::new().create(true).append(true).open(&log_path).unwrap(), "[{}] backend iniciado: {}", ts, path.display());
-                        }
-                        Err(e) => {
-                            eprintln!("[hipot] no se pudo arrancar el backend: {e}");
-                            use std::io::Write;
-                            let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_default();
-                            let _ = writeln!(std::fs::OpenOptions::new().create(true).append(true).open(&log_path).unwrap(), "[{}] error arrancando backend: {}", ts, e);
-                        }
-                    }
-                }
-                None => {
-                    eprintln!(
-                        "[hipot] backend no encontrado; arráncalo manual: uvicorn App.python.main:app"
-                    );
-                    // Escribir en log
-                    use std::fs::OpenOptions;
-                    use std::io::Write;
-                    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(db::paths::backend_log_path()) {
-                        let ts = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_secs().to_string())
-                            .unwrap_or_default();
-                        let _ = writeln!(f, "[{}] backend no encontrado en ninguna ruta", ts);
-                    }
-                }
-            }
             // Auto-sync loop: cada 5 minutos sincronizar pendientes a SQL Server remoto
             std::thread::spawn(move || {
                 loop {
@@ -2368,11 +2219,6 @@ fn main() {
                 }
             });
             Ok(())
-        })
-        .on_window_event(|window, event| {
-            if matches!(event, WindowEvent::Destroyed) {
-                kill_backend(&window.state::<Backend>());
-            }
         })
         .run(tauri::generate_context!())
         .expect("error while running HiPotApp");
