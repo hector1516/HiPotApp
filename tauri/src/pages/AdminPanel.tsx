@@ -364,20 +364,22 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
                     onChange={e => setEditing({ ...editing, hipotVoltage: e.target.value })} />
                 </div>
                 <div className="field" style={{ flex: '1 1 160px' }}>
-                  <label>Límite de corriente</label>
-                  <input className="input" type="number" inputMode="decimal" placeholder="Ej. 0.005"
+                  <label>Límite de corriente (mA, ACW)</label>
+                  <input className="input" type="number" inputMode="decimal" placeholder="Ej. 3.5"
                     value={editing.hipotCurrent}
                     onChange={e => setEditing({ ...editing, hipotCurrent: e.target.value })} />
                 </div>
                 <div className="field" style={{ flex: '1 1 140px' }}>
-                  <label>Tiempo de prueba (s)</label>
+                  <label>Tiempo de prueba / Dwell (s)</label>
                   <input className="input" type="number" inputMode="decimal" placeholder="Ej. 60"
                     value={editing.hipotTime}
                     onChange={e => setEditing({ ...editing, hipotTime: e.target.value })} />
                 </div>
               </div>
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
-                Se envían al Hipot antes de START. Vacío o 0 = no se envía ese parámetro. El límite de corriente usa la unidad del equipo (A/mA según el manual).
+                Se usan para crear el paso <b>ACW</b> del 3865 con <code>ADD</code> antes de cada <code>TEST</code>.
+                Vacío o 0 = el ciclo Hipot falla por falta de configuración. El límite de corriente va en <b>mA</b>
+                (rango ACW del 3865: 0–20 mA).
               </div>
             </div>
 
@@ -596,10 +598,10 @@ function TagForm({ onDone }: { onDone: () => void }) {
 function HipotTab() {
   const [st, setSt] = useState<any>(null);
   const [cfg, setCfg] = useState<{ port: string; baud: number }>({
-    port: 'COM3', baud: 9600,
+    port: 'COM3', baud: 38400,
   });
   const [ports, setPorts] = useState<string[]>([]);
-  const [cmd, setCmd] = useState('STATUS?');
+  const [cmd, setCmd] = useState('*IDN?');
   const [resp, setResp] = useState<any>(null);
   const [msg, setMsg] = useState('');
   const [logs, setLogs] = useState<any[]>([]);
@@ -629,9 +631,16 @@ function HipotTab() {
     finally { loadLogs(); }
   };
 
+  const sendCmd = async (c: string) => {
+    setCmd(c);
+    try { setResp(await invoke<any>('hipot_command', { command: c })); }
+    catch (e: any) { setResp({ error: String(e?.message ?? e) }); }
+    finally { loadLogs(); }
+  };
+
   return (
     <div style={{ minWidth: 0 }}>
-      <h2 className="page-title" style={{ marginBottom: 14 }}>Hipot 3865 - RS-232</h2>
+      <h2 className="page-title" style={{ marginBottom: 14 }}>Hipot 3865 - USB/RS-232</h2>
       <SafetyNote compact />
       {msg && <div className="toast-err" style={{ background: msg.startsWith('Configuración') ? '#e6f4ea' : undefined, borderColor: msg.startsWith('Configuración') ? '#a8d0b4' : undefined, color: msg.startsWith('Configuración') ? 'var(--ok)' : undefined }}>{msg}</div>}
 
@@ -647,7 +656,7 @@ function HipotTab() {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)' }}>Baudios</label>
-            <input className="input" type="number" inputMode="numeric" value={cfg.baud} onChange={e => setCfg({ ...cfg, baud: parseInt(e.target.value) || 9600 })} style={{ width: 100 }} />
+            <input className="input" type="number" inputMode="numeric" value={cfg.baud} onChange={e => setCfg({ ...cfg, baud: parseInt(e.target.value) || 38400 })} style={{ width: 100 }} />
           </div>
           <div style={{ display: 'flex', gap: 6, marginTop: 16, flexWrap: 'wrap' }}>
             <button className="btn primary" onClick={save}>Guardar</button>
@@ -663,14 +672,26 @@ function HipotTab() {
             }}>Probar Zebra</button>
           </div>
         </div>
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>
+          3865: 38400 baud, 8N1, sin handshaking. Terminador LF. Respuesta ACK/NAK.
+          Comandos reales: <code>*IDN?</code>, <code>TD?</code>, <code>TEST</code>, <code>RESET</code>, <code>FL</code>, <code>ADD</code>.
+        </div>
         {st && <pre style={{ marginTop: 8, fontSize: 12, background: 'var(--surface-2)', padding: 8, borderRadius: 6, overflow: 'auto' }}>{JSON.stringify(st, null, 2)}</pre>}
       </div>
 
       <div className="card">
         <h3>Comando manual</h3>
+        <div className="row" style={{ marginBottom: 8, flexWrap: 'wrap' }}>
+          {['*IDN?', 'TD?', 'LF?', 'ST?', 'TEST', 'RESET'].map(c => (
+            <button key={c} className="btn sm" onClick={() => sendCmd(c)}>{c}</button>
+          ))}
+        </div>
         <div style={{ display: 'flex', gap: 8, minWidth: 0 }}>
           <input className="input" value={cmd} onChange={e => setCmd(e.target.value.toUpperCase())} style={{ flex: 1, minWidth: 0 }} />
           <button className="btn primary" style={{ flexShrink: 0 }} onClick={send}>Enviar</button>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
+          <b>TEST</b> inicia alto voltaje. <b>RESET</b> detiene/aborta. El comando manual no reemplaza la secuencia automática.
         </div>
         {resp && <pre style={{ marginTop: 8, fontSize: 12, background: 'var(--surface-2)', padding: 8, borderRadius: 6, overflow: 'auto' }}>{JSON.stringify(resp, null, 2)}</pre>}
       </div>

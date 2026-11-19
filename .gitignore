@@ -37,6 +37,9 @@ Desktop.ini
 *.msi
 Hypot_Manual.pdf
 H4_IVI_Driver_Getting_Started_Guide.pdf
+docs/manuals/Hipot3865/*.pdf
+docs/manuals/Hipot3865/*.txt
+docs/manuals/Hipot3865/drivers/
 Gemini_Generated_Image_*.jpg
 
 # Temporales de extracción

@@ -109,206 +109,100 @@ Offset  Tamaño   Tag                      Tipo
 224     4        Result_TOTAL             REAL
 ```
 
-## 3. Hipot 3865 (pyserial)
+## 3. Hipot 3865 (USB/RS-232)
 
-### Configuración
+> **Corrección 2026-11-19:** el protocolo real del 3865 está en el Apéndice D del manual oficial. La versión anterior de este documento describía comandos que **no existen** en el equipo (`START`, `STOP`, `ABORT`, `VOLTAGE:`, `CURRENT_MAX:`, `TIME:`, `STATUS?`, `MEASURE?`, `RESULT?`). La implementación Rust ya usa el protocolo real. Ver `docs/manuals/Hipot3865/README.md` y `docs/manuals/Hipot3865/Hypot_Manual.pdf`.
 
-```python
-import serial
-import serial.tools.list_ports
-import threading
-import time
-from queue import Queue
+### Configuración del puerto
 
-class HipotManager:
-    def __init__(self, port='COM3', baudrate=9600):
-        self.port = port
-        self.baudrate = baudrate
-        self.serial = None
-        self.connected = False
-        self.read_thread = None
-        self.data_queue = Queue()
-        self.running = False
-    
-    def list_ports(self):
-        """Lista puertos COM disponibles"""
-        ports = serial.tools.list_ports.comports()
-        return [p.device for p in ports]
-    
-    def connect(self):
-        try:
-            self.serial = serial.Serial(
-                port=self.port,
-                baudrate=self.baudrate,
-                bytesize=serial.EIGHTBITS,
-                parity=serial.PARITY_NONE,
-                stopbits=serial.STOPBITS_ONE,
-                timeout=1
-            )
-            self.connected = True
-            self.start_reading()
-            return True
-        except Exception as e:
-            self.connected = False
-            return False
-    
-    def disconnect(self):
-        self.running = False
-        if self.read_thread:
-            self.read_thread.join(timeout=2)
-        if self.serial and self.serial.is_open:
-            self.serial.close()
-        self.connected = False
-    
-    def send_command(self, command):
-        """Envía comando al Hipot"""
-        if not self.connected:
-            return False
-        try:
-            self.serial.write(f'{command}\r\n'.encode('ascii'))
-            return True
-        except:
-            return False
-    
-    def read_response(self):
-        """Lee respuesta del Hipot"""
-        if not self.connected:
-            return None
-        try:
-            response = self.serial.readline().decode('ascii').strip()
-            return response
-        except:
-            return None
-    
-    def start_reading(self):
-        """Inicia hilo de lectura continua"""
-        self.running = True
-        self.read_thread = threading.Thread(target=self._read_loop)
-        self.read_thread.daemon = True
-        self.read_thread.start()
-    
-    def _read_loop(self):
-        """Loop de lectura en hilo separado"""
-        while self.running and self.connected:
-            try:
-                if self.serial.in_waiting:
-                    data = self.serial.readline().decode('ascii').strip()
-                    if data:
-                        self.data_queue.put(data)
-                time.sleep(0.1)  # 100ms
-            except:
-                self.connected = False
-                break
-    
-    def get_measurement(self):
-        """Obtiene medición del queue"""
-        if not self.data_queue.empty():
-            return self.data_queue.get()
-        return None
-    
-    def start_test(self):
-        """Inicia prueba en el Hipot"""
-        return self.send_command('START')
-    
-    def stop_test(self):
-        """Para prueba en el Hipot"""
-        return self.send_command('STOP')
-    
-    def abort_test(self):
-        """Paro de emergencia"""
-        return self.send_command('ABORT')
-    
-    def set_voltage(self, voltage):
-        """Configura voltaje"""
-        return self.send_command(f'VOLTAGE:{voltage}')
-    
-    def set_current_limit(self, limit):
-        """Configura límite de corriente"""
-        return self.send_command(f'CURRENT_MAX:{limit}')
-    
-    def get_status(self):
-        """Obtiene estado actual"""
-        self.send_command('STATUS?')
-        time.sleep(0.1)
-        return self.read_response()
-    
-    def test_connection(self):
-        """Prueba si el Hipot responde"""
-        self.send_command('STATUS?')
-        time.sleep(0.5)
-        response = self.read_response()
-        return response is not None and len(response) > 0
-    
-    def parse_measurement(self, data):
-        """Parsea string de medición"""
-        # Formato típico: V:120.5 I:1.23 R:456.7 KΩ PASS
-        result = {}
-        try:
-            parts = data.split()
-            for part in parts:
-                if part.startswith('V:'):
-                    result['voltage'] = float(part[2:])
-                elif part.startswith('I:'):
-                    result['current'] = float(part[2:])
-                elif part.startswith('R:'):
-                    result['resistance'] = float(part[2:])
-                elif part == 'PASS':
-                    result['pass'] = True
-                elif part == 'FAIL':
-                    result['pass'] = False
-        except:
-            pass
-        return result
-```
-
-### Comandos RS-232
-
-```
-// Comandos de control
-START\r\n          // Iniciar prueba
-STOP\r\n           // Parar prueba normal
-ABORT\r\n          // Paro de emergencia
-
-// Configuración
-VOLTAGE:120\r\n    // Seleccionar voltaje (120, 208, 220, 240)
-CURRENT_MAX:10.5\r\n  // Límite de corriente
-TIME:30\r\n        // Tiempo máximo de prueba (segundos)
-
-// Consulta
-STATUS?\r\n        // Estado del equipo
-MEASURE?\r\n       // Obtener medición actual
-RESULT?\r\n        // Obtener resultado final
-
-// Respuesta típica
-V:120.5 I:1.23 R:456.7 KΩ PASS\r\n
-V:0.0 I:0.0 R:0.0 FAIL\r\n
-```
-
-### 3.1 Implementación Rust (verificada contra este documento)
-
-Archivo: `tauri/src-tauri/src/hipot/mod.rs`.
-
-| Punto | Implementación |
+| Parámetro | Valor |
 |---|---|
-| Puerto | `serialport`, 8N1, sin paridad, sin flow control, timeout de lectura 1000 ms |
-| Fin de comando | `\r\n` |
-| Lectura | Descarta datos viejos antes de enviar; lee hasta `\n` (CRLF) o timeout |
-| Comandos | `START`, `STOP`, `ABORT`, `VOLTAGE:`, `CURRENT_MAX:`, `TIME:`, `STATUS?`, `MEASURE?`, `RESULT?` |
-| Parseo | `V:`, `I:`, `R:`, `PASS`, `FAIL`; ignora tokens como `KΩ` |
-| Errores | Si el equipo responde `ERROR`, `ERR`, `?` o `INVALID`, el parámetro/START se considera rechazado |
-| Parámetros | La receta guarda `hipot_voltage`, `hipot_current_max`, `hipot_time` y se envían antes de cada `START` |
-| Prueba de comunicación | `hipot_probe` envía `STATUS?` y exige respuesta |
-| Paro de emergencia | `hipot_abort` envía `ABORT` |
-| Log | Cada TX/RX se guarda en `app_logs` categoría `HIPOT`, acción `tx_rx`, con `value_sent`, `value_received`, `duration_ms` y `error_message` |
+| Baudios | **38400** |
+| Bits de datos | 8 |
+| Paridad | Ninguna |
+| Bits de parada | 1 |
+| Handshaking | Ninguno (sin XON/XOFF) |
+| Terminador de comando | **NL / LF (0x0A)** |
+| Respuesta a comando | **ACK (0x06)** o **NAK (0x15)** |
+| Respuesta a consulta | ACK/NAK + datos terminados en NL |
 
-Pendiente de confirmar con el equipo físico 3865:
+El puerto USB del 3865 aparece en Windows como un puerto COM virtual (USB-to-RS-232). La tarjeta RS-232 opcional usa el mismo protocolo. El driver USB/RS-232 está en `docs/manuals/Hipot3865/drivers/AR_USB_Driver.zip`.
 
-1. Que `STATUS?` devuelva también `V:`, `I:`, `R:` y `PASS/FAIL`, o si hay que usar `MEASURE?` / `RESULT?` para el resultado final.
-2. Unidad real de `CURRENT_MAX` (A o mA).
-3. Valores de voltaje aceptados por el equipo (el documento menciona 120/208/220/240; la receta permite cualquier valor).
-4. Si `TIME:` es el comando correcto para el tiempo máximo de prueba.
+### Comandos principales
 
-El log TX/RX permite validar estos cuatro puntos en cuanto se conecte el equipo real.
+| Comando | Función |
+|---|---|
+| `*IDN?` | Identificación: empresa, modelo, serie, firmware |
+| `TEST` | Inicia la secuencia en el paso seleccionado |
+| `RESET` | Detiene/aborta la prueba y limpia fallas |
+| `TD?` | Lee la medición/estado actual o el último resultado |
+| `RD <paso>?` | Lee el resultado guardado de un paso |
+| `LF?` | Nombre del archivo activo en RAM |
+| `LF <memoria>?` | Nombre de un archivo por número de memoria |
+| `FL <memoria>` | Carga un archivo de memoria a RAM |
+| `FN <memoria>,<nombre>` | Crea un archivo nuevo (nombre máx. 8 caracteres) |
+| `ST?` | Total de pasos del archivo activo |
+| `SS <paso>` | Selecciona el paso activo |
+| `SD <paso>` | Borra un paso |
+| `ADD <tipo>,<parámetros...>` | Agrega un paso completo |
+| `EV`, `EH`, `EL`, `ERU`, `EDW`, `ERD`, etc. | Edición individual de parámetros |
+| `*OPC?` | Consulta si terminó la operación pendiente |
+
+### Formato de `TD?` / `RD n?`
+
+```text
+<paso>, <tipo>, <estado>, <medidor1>, <medidor2>, <medidor3>
+```
+
+Ejemplos del manual:
+
+```text
+1, ACW, PASS, 0.30, 0.296, 0.5
+2, ACW, HI-LMT, 0.30, 0.192, 0.2
+3, ACW, Abort, 0.30, 0.296, 0.2
+1, ACW, Dwell, 0.30, 0.296, 0.5
+```
+
+| Tipo | Medidor 1 | Medidor 2 | Medidor 3 |
+|---|---|---|---|
+| ACW | Voltaje en kV | Corriente en mA | Tiempo en s |
+| DCW | Voltaje en kV | Corriente en µA | Tiempo en s |
+| IR | Voltaje en V | Resistencia en MΩ | Tiempo en s |
+
+Estados de proceso: `Dwell`, `Ramp`, `Delay`.  
+Estados terminales: `PASS`, `HI-LMT`, `LO-LMT`, `OTP`, `CONT-F`, `Abort`, `OUT-ERROR`, etc.
+
+### Secuencia usada por la app
+
+1. `*IDN?` para verificar comunicación.
+2. Cargar el archivo temporal `HIPOTAPP` con `FL` (se crea una vez con `FN` si no existe).
+3. Borrar los pasos anteriores con `ST?` + `SD 1`.
+4. Crear el paso ACW con `ADD ACW,<voltaje>,<mA>,0,0.1,<dwell>,0.0,5,OFF,60,OFF,1.50,0.00,0.00`.
+5. Seleccionar el paso con `SS 1`.
+6. Iniciar con `TEST`.
+7. Consultar `TD?` cada 500 ms hasta `PASS` o estado terminal; timeout = dwell + 30 s.
+8. Enviar `RESET` al terminar o al abortar.
+
+### Paso ACW: orden de parámetros
+
+```text
+ADD ACW,Voltaje(V),HI-Limit(mA),LO-Limit(mA),RampUp(s),Dwell(s),RampDown(s),
+ArcSense,ArcDetect,Frecuencia(Hz),Continuidad,ContHI(Ω),ContLO(Ω),ContOffset(Ω)
+```
+
+Ejemplo del manual:
+
+```text
+ADD ACW,1240,0.10,0.010,0.1,1.0,0.0,5,OFF,60,OFF,1.50,0.00,0.00
+```
+
+### Notas de integración
+
+- La memoria no volátil tiene ciclos de escritura limitados. Crear el archivo temporal una vez y usar `FL` + `ADD` en RAM; evitar `FS`, `FSA`, `FN`, `FD`, `SAO`, `SSG2` en cada ciclo.
+- Si la seguridad del instrumento está restringida, los comandos de edición pueden responder NAK. Para control por bus se requiere el nivel de acceso adecuado.
+- El manual recomienda no ajustar parámetros individuales repetidamente; para producción usar `ADD`/`FL`.
+- Verificar **PLC Remote** (`SPR`). Si el 3865 está configurado para iniciar solo por la entrada remota del panel trasero, `TEST` por bus puede no arrancar. Probar `SPR 0` una vez desde Configuración → Hipot → Comando manual.
+- La app usa **ACW** por defecto. Si se requiere DCW o IR, se debe extender la receta y el comando `ADD` correspondiente.
 
 ## 4. Barcode Scanner (USB HID)
 

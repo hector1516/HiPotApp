@@ -82,6 +82,22 @@ export function ManualScreen({ onBack }: { onBack: () => void }) {
     const action = pending;
     setPending(null);
     if (!action) return;
+    if (action === 'START') {
+      const v = Number(detail?.hipot_voltage ?? 0);
+      const i = Number(detail?.hipot_current_max ?? 0);
+      const t = Number(detail?.hipot_time ?? 0);
+      if (v <= 0 || i <= 0 || t <= 0) {
+        setErr('La receta no tiene voltaje, corriente y tiempo Hipot configurados.');
+        return;
+      }
+      try {
+        const prep = await invoke<any>('hipot_prepare', { voltage: v, currentMax: i, time: t });
+        if (prep?.error) throw new Error(prep.error);
+      } catch (e: any) {
+        setErr(String(e?.message ?? e));
+        return;
+      }
+    }
     await hipotCmd(action);
   };
 
@@ -123,6 +139,9 @@ export function ManualScreen({ onBack }: { onBack: () => void }) {
 
       <div className="stack" style={{ gap: 8 }}>
         <div className="rail-eyebrow">Hipot manual</div>
+        <div style={{ fontSize: 11, color: 'var(--on-rail-muted)' }}>
+          Receta: {detail?.hipot_voltage ?? '—'} V · {detail?.hipot_current_max ?? '—'} mA · {detail?.hipot_time ?? '—'} s
+        </div>
         <div className="row" style={{ gap: 8 }}>
           <button className="btn ok" style={{ flex: 1 }} onClick={() => setPending('START')}>Iniciar</button>
           <button className="btn danger" style={{ flex: 1 }} onClick={() => setPending('STOP')}>Detener</button>

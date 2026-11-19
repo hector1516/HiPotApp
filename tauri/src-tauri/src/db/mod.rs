@@ -45,6 +45,33 @@ fn seed_express() -> Result<(), String> {
 
     with_transaction(|conn| {
         let now = sql_text(&chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string());
+
+        // Migración única: el 3865 usa 38400 baud (manual, Apéndice D).
+        let baud_migrated = query_one(
+            conn,
+            "SELECT COUNT(*) AS n FROM configurations WHERE config_key = 'migration_hipot_baud_38400'",
+        )?
+        .and_then(|row| row.get("n").and_then(|v| v.as_i64()))
+        .unwrap_or(0);
+        if baud_migrated == 0 {
+            execute(
+                conn,
+                &format!(
+                    "UPDATE configurations SET config_value = '38400', updated_at = {now} \
+                     WHERE config_key = 'hipot_baud' AND config_value = '9600'",
+                    now = now
+                ),
+            )?;
+            execute(
+                conn,
+                &format!(
+                    "INSERT INTO configurations (config_key, config_value, updated_at) \
+                     VALUES ('migration_hipot_baud_38400', '1', {now})",
+                    now = now
+                ),
+            )?;
+        }
+
         for (key, value) in DEFAULT_CONFIGS {
             execute(
                 conn,

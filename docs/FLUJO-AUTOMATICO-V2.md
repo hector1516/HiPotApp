@@ -26,11 +26,27 @@ Cada receta guarda:
 
 | Campo | Uso |
 |---|---|
-| `hipot_voltage` | Voltaje de prueba que se envía con `VOLTAGE:<valor>` |
-| `hipot_current_max` | Límite de corriente que se envía con `CURRENT_MAX:<valor>` |
-| `hipot_time` | Tiempo que se envía con `TIME:<valor>` |
+| `hipot_voltage` | Voltaje de prueba (V) del paso ACW |
+| `hipot_current_max` | Límite de corriente en **mA** (ACW) |
+| `hipot_time` | Tiempo de prueba / Dwell en segundos |
 
-Antes de cada `START`, `run_test_cycle` lee estos valores de la receta y los envía al Hipot. Si un valor está vacío o en 0, no se envía ese comando.
+Antes de cada prueba, `run_test_cycle` lee estos valores y crea un paso ACW en el 3865 con:
+
+```text
+ADD ACW,<voltaje>,<mA>,0,0.1,<dwell>,0.0,5,OFF,60,OFF,1.50,0.00,0.00
+```
+
+Después envía `SS 1` y `TEST`. Si falta voltaje, corriente o tiempo, el ciclo Hipot falla y **no se ejecuta la prueba eléctrica**.
+
+## Ejecución y resultado Hipot
+
+- `TEST` inicia el paso ACW seleccionado.
+- La app consulta `TD?` cada 500 ms.
+- `TD?` devuelve: `<paso>, <tipo>, <estado>, <voltaje>, <corriente>, <tiempo>`.
+- Para ACW, el voltaje viene en kV y la corriente en mA; la app convierte el voltaje a V para guardarlo.
+- `PASS` = aprobado. Cualquier otro estado terminal (`HI-LMT`, `LO-LMT`, `OTP`, `CONT-F`, `Abort`, `OUT-ERROR`, etc.) = fallado.
+- `Dwell`, `Ramp` y `Delay` son estados en proceso.
+- Al terminar o al vencer el timeout (dwell + 30 s), la app envía `RESET`.
 
 ## Log de comandos Hipot
 
@@ -48,7 +64,7 @@ Se puede ver en:
 - **Logs → categoría HIPOT**
 - **Configuración → Hipot → Últimos comandos Hipot**
 
-La prueba de comunicación de **Configuración → Hipot → Probar Hipot** envía `STATUS?` y exige respuesta del equipo (no solo abre el puerto).
+La prueba de comunicación de **Configuración → Hipot → Probar Hipot** envía `*IDN?` y exige respuesta del equipo (no solo abre el puerto).
 
 ## Paro de emergencia
 
@@ -56,7 +72,7 @@ La prueba de comunicación de **Configuración → Hipot → Probar Hipot** env�
 - Tipo de contacto configurable (`estop_nc`: `1` = NC, `0` = NO).
 - Se consulta cada 800 ms.
 - Al activarse:
-  - Se aborta el PLC y se envía `ABORT` al Hipot.
+  - Se aborta el PLC y se envía `RESET` al Hipot.
   - Overlay rojo a pantalla completa, animado, con flecha inferior apuntando al botón físico.
   - Bloquea la interacción hasta que la entrada se libere.
 - Si el PLC no responde, no se muestra la alarma roja; se indica “Paro de emergencia no disponible”.

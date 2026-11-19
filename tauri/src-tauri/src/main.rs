@@ -442,19 +442,19 @@ fn hipot_status() -> serde_json::Value {
 fn hipot_probe() -> serde_json::Value {
     let cfg = hipot::config_from(&get_config());
     let ports = hipot::list_ports();
-    match hipot::command(&cfg, "STATUS?") {
+    match hipot::command(&cfg, "*IDN?") {
         Ok(value) => {
             let response = value
                 .get("response")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             serde_json::json!({
-                "connected": !response.is_empty(),
-                "responding": !response.is_empty(),
+                "connected": true,
+                "responding": !response.is_empty() && response != "ACK",
                 "port": cfg.port,
                 "baud": cfg.baud,
                 "ports": ports,
-                "response": response,
+                "idn": response,
                 "parsed": value.get("parsed").cloned().unwrap_or_else(|| serde_json::json!({})),
             })
         }
@@ -486,6 +486,15 @@ fn hipot_command(command: String) -> serde_json::Value {
 }
 
 #[tauri::command]
+fn hipot_prepare(voltage: f64, current_max: f64, time: f64) -> serde_json::Value {
+    let cfg = hipot::config_from(&get_config());
+    match hipot::prepare_test(&cfg, voltage, current_max, time) {
+        Ok(value) => serde_json::json!({ "ok": true, "detail": value }),
+        Err(e) => serde_json::json!({ "ok": false, "error": e }),
+    }
+}
+
+#[tauri::command]
 fn hipot_test(action: String) -> serde_json::Value {
     let cfg = hipot::config_from(&get_config());
     match hipot::test_action(&cfg, &action) {
@@ -498,7 +507,7 @@ fn hipot_test(action: String) -> serde_json::Value {
 
 #[tauri::command]
 fn hipot_abort() -> serde_json::Value {
-    hipot_test("ABORT".to_string())
+    hipot_test("RESET".to_string())
 }
 
 #[tauri::command]
@@ -548,59 +557,27 @@ fn run_test_cycle(
         Some(execution_id), None, None, None, true, None,
     );
 
-    let settings_ok = match hipot::apply_settings(&hipot_cfg, hipot_voltage, hipot_current, hipot_time) {
-        Ok(_) => true,
-        Err(e) => {
-            errors.push(format!("Hipot settings: {}", e));
-            false
-        }
-    };
-
-    if settings_ok {
-        match hipot::test_action(&hipot_cfg, "START") {
+    match hipot::run_test(&hipot_cfg, hipot_voltage, hipot_current, hipot_time) {
         Ok(v) => {
             hipot_parsed = v
-                .get("parsed")
+                .get("result")
                 .cloned()
                 .unwrap_or_else(|| serde_json::json!({}));
-            if hipot_parsed
-                .get("pass")
-                .and_then(|p| p.as_bool())
-                .is_none()
-            {
-                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-                loop {
-                    std::thread::sleep(std::time::Duration::from_millis(1000));
-                    match hipot::command(&hipot_cfg, "STATUS?") {
-                        Ok(s) => {
-                            let parsed = s
-                                .get("parsed")
-                                .cloned()
-                                .unwrap_or_else(|| serde_json::json!({}));
-                            if parsed.get("pass").and_then(|p| p.as_bool()).is_some() {
-                                hipot_parsed = parsed;
-                                break;
-                            }
-                            hipot_parsed = parsed;
-                        }
-                        Err(e) => errors.push(format!("Hipot status: {}", e)),
-                    }
-                    if std::time::Instant::now() >= deadline {
-                        errors.push("Hipot: timeout esperando PASS/FAIL".to_string());
-                        break;
-                    }
-                }
-            }
             hipot_pass = hipot_parsed
                 .get("pass")
                 .and_then(|p| p.as_bool())
                 .unwrap_or(false);
         }
-        Err(e) => errors.push(format!("Hipot start: {}", e)),
+        Err(e) => {
+            errors.push(format!("Hipot: {}", e));
+            hipot_pass = false;
         }
     }
 
-    let hipot_duration = started.elapsed().as_secs_f64();
+    let hipot_duration = hipot_parsed
+        .get("duration")
+        .and_then(|v| v.as_f64())
+        .unwrap_or_else(|| started.elapsed().as_secs_f64());
     let _ = save_hipot_result(
         execution_id,
         serde_json::json!({
@@ -1371,6 +1348,7 @@ fn main() {
             hipot_config_set,
             hipot_status,
             hipot_probe,
+            hipot_prepare,
             hipot_command,
             hipot_test,
             hipot_abort,

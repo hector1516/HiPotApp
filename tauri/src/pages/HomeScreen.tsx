@@ -203,7 +203,7 @@ export function HomeScreen({
           {(recipe.hipot_voltage || recipe.hipot_current_max || recipe.hipot_time) && (
             <div className="row" style={{ marginBottom: 10 }}>
               <span className="pill warn">Hipot: {recipe.hipot_voltage ?? 0} V</span>
-              <span className="pill">I máx: {recipe.hipot_current_max ?? 0}</span>
+              <span className="pill">I máx: {recipe.hipot_current_max ?? 0} mA</span>
               <span className="pill">Tiempo: {recipe.hipot_time ?? 0} s</span>
             </div>
           )}
