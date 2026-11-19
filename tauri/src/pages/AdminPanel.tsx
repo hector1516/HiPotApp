@@ -611,13 +611,33 @@ function LabelsTab() {
   const [objs, setObjs] = useState<LObj[] | null>(null);
   const [msg, setMsg] = useState('');
   const [key, setKey] = useState(0);
-  const load = () => api.get('/admin/templates').then(setList).catch(() => setList([]));
+  const load = () => invoke<any[]>('template_list').then(setList).catch(() => setList([]));
   useEffect(() => { load(); }, []);
   const openNew = () => { setSelId(null); setObjs(null); setName('Nueva plantilla'); setIsDef(false); setKey(k => k + 1); };
-  const openTpl = async (id: number) => { const t = await api.get(`/admin/templates/${id}`); setSelId(id); setName(t.name); setIsDef(!!t.is_default); setObjs(templateToObjs(t.canvas_data || '{"objects":[]}')); setKey(k => k + 1); };
+  const openTpl = async (id: number) => {
+    try {
+      const t = await invoke<any>('template_get', { tid: id });
+      setSelId(id); setName(t.name); setIsDef(!!t.is_default);
+      setObjs(templateToObjs(t.canvas_data || '{"objects":[]}')); setKey(k => k + 1);
+    } catch (e: any) { setMsg(String(e?.message ?? e)); }
+  };
   const save = async (o: LObj[]) => {
-    const body = { name, width_mm: 100, height_mm: 60, canvas_data: objsToTemplate(o), is_default: isDef };
-    try { if (selId) await api.put(`/admin/templates/${selId}`, body); else { const r = await api.post('/admin/templates', body); setSelId(r.id); } setMsg('Plantilla guardada'); load(); } catch (e) { setMsg(String(e)); }
+    const canvas = objsToTemplate(o);
+    try {
+      if (selId) {
+        await invoke('template_update', {
+          tid: selId, name, widthMm: 100, heightMm: 60,
+          canvasData: canvas, isDefault: isDef,
+        });
+      } else {
+        const id = await invoke<number>('template_create', {
+          name, widthMm: 100, heightMm: 60,
+          canvasData: canvas, isDefault: isDef,
+        });
+        setSelId(id);
+      }
+      setMsg('Plantilla guardada'); load();
+    } catch (e: any) { setMsg(String(e?.message ?? e)); }
   };
   return (
     <div style={{ minWidth: 0 }}>
@@ -632,7 +652,7 @@ function LabelsTab() {
           <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontWeight: 600, fontSize: 13, flexShrink: 0 }}>
             <input type="checkbox" checked={isDef} onChange={e => setIsDef(e.target.checked)} style={{ width: 18, height: 18 }} /> Default
           </label>
-          {selId && <button className="btn danger sm" style={{ flexShrink: 0 }} onClick={() => api.del(`/admin/templates/${selId}`).then(() => { openNew(); load(); })}>Eliminar</button>}
+          {selId && <button className="btn danger sm" style={{ flexShrink: 0 }} onClick={() => invoke('template_delete', { tid: selId }).then(() => { openNew(); load(); }).catch((e:any) => setMsg(String(e?.message ?? e)))}>Eliminar</button>}
         </div>
       </div>
       <LabelEditor key={key} initial={objs ?? undefined} onSave={save} />
@@ -702,7 +722,7 @@ function SystemTab() {
   const [tableNames, setTableNames] = useState<string[]>([]);
   const [previewStatus, setPreviewStatus] = useState<'GOOD' | 'BAD' | null>(null);
   const [kbMode, setKbMode] = useState(() => localStorage.getItem('keyboard_mode') || 'integrated');
-  const loadLog = () => api.get('/admin/import-export-log').then(setImpLog).catch(() => setImpLog([]));
+  const loadLog = () => invoke<any[]>('import_export_log_list', { limit: 20 }).then(setImpLog).catch(() => setImpLog([]));
   useEffect(() => {
     loadLog();
     invoke<any>('get_config').then(c => { setHold(String(c?.result_hold_seconds ?? '10')); setCfg(c || {}); }).catch(() => {});
@@ -713,8 +733,23 @@ function SystemTab() {
     invoke<any>('plc_status_info').then(setPlcStatus).catch(() => {});
     invoke<any>('hipot_status').then(setHipotStatus).catch(() => {});
   }, []);
-  const doExport = async () => { const r = await api.get('/admin/export'); const blob = new Blob([r.data], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `config_export_${new Date().toISOString().slice(0,10)}.json`; a.click(); };
-  const doImport = async (f: File) => { try { const t = await f.text(); const r = await api.post('/admin/import', { data: t, mode }); setMsg(`Import OK: ${r.imported} · Conflictos: ${(r.conflicts ?? []).length}`); loadLog(); } catch (e) { setMsg(String(e)); } };
+  const doExport = async () => {
+    try {
+      const data = await invoke<string>('config_export');
+      const blob = new Blob([data], { type: 'application/json' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+      a.download = `config_export_${new Date().toISOString().slice(0,10)}.json`; a.click();
+      loadLog();
+    } catch (e: any) { setMsg(String(e?.message ?? e)); }
+  };
+  const doImport = async (f: File) => {
+    try {
+      const t = await f.text();
+      const r: any = await invoke('config_import', { data: t, mode });
+      setMsg(`Import OK: ${r.imported} · Conflictos: ${(r.conflicts ?? []).length}`);
+      loadLog();
+    } catch (e: any) { setMsg(String(e?.message ?? e)); }
+  };
   return (
     <div style={{ minWidth: 0 }}>
       <h2 style={{ margin: '0 0 10px 0', fontSize: 16 }}>Sistema</h2>

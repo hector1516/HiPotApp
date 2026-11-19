@@ -331,31 +331,34 @@ Reglas de producción implementadas:
 
 ---
 
-### Fase 5 - Plantillas de etiqueta e import/export (2 sesiones)
+### Fase 5 - Plantillas de etiqueta e import/export (COMPLETADA)
 
-Comandos:
+| Comando | Reemplaza | Estado |
+|---|---|---|
+| `template_list` | `GET /admin/templates` | ✅ |
+| `template_get` | `GET /admin/templates/{id}` | ✅ |
+| `template_create` | `POST /admin/templates` | ✅ |
+| `template_update` | `PUT /admin/templates/{id}` | ✅ |
+| `template_delete` | `DELETE /admin/templates/{id}` | ✅ |
+| `config_export` | `GET /admin/export` | ✅ |
+| `config_import` | `POST /admin/import` | ✅ |
+| `import_export_log_list` | `GET /admin/import-export-log` | ✅ |
 
-| Comando | Reemplaza |
-|---|---|
-| `template_list` | `GET /admin/templates` |
-| `template_get` | `GET /admin/templates/{id}` |
-| `template_create` | `POST /admin/templates` |
-| `template_update` | `PUT /admin/templates/{id}` |
-| `template_delete` | `DELETE /admin/templates/{id}` |
-| `config_export` | `GET /admin/export` |
-| `config_import` | `POST /admin/import` |
-| `import_export_log_list` | `GET /admin/import-export-log` |
+Implementación:
 
-Cambios frontend:
+- [x] Exporta recetas + componentes + totales, configuración, plantillas, usuarios y tags PLC.
+- [x] Importa con modos `add / merge / overwrite`.
+- [x] Detecta conflictos por `model` de receta.
+- [x] Import transaccional (rollback ante error).
+- [x] Registra cada export/import en `import_export_logs`.
+- [x] `LabelsTab` y `SystemTab` usan `invoke`.
+- [x] Test de roundtrip export/import.
 
-- `AdminPanel.tsx` → `LabelsTab`, `SystemTab` (import/export).
-- `LabelEditor.tsx` si aplica.
-
-**Criterio de aceptación:** CRUD de plantillas, exportar/importar configuración y registrar la operación.
+**Criterio de aceptación:** CRUD de plantillas, exportar/importar configuración y registrar la operación. **Cumplido en código; la ejecución del test está bloqueada por la política de Control de Aplicaciones del equipo, pero compila.**
 
 ---
 
-### Fase 6 — Historial, logs y auditoría (1–2 sesiones)
+### Fase 6 - Historial, logs y auditoría (1-2 sesiones)
 
 Comandos:
 

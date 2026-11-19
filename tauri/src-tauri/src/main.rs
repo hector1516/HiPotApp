@@ -2,6 +2,7 @@
 // empaquetado como recurso (todo-en-uno, offline-first).
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod config_io;
 mod db;
 mod hipot;
 mod plc;
@@ -759,6 +760,183 @@ fn run_test_cycle(
         "duration": duration,
         "errors": errors,
     })
+}
+
+#[tauri::command]
+fn template_list() -> serde_json::Value {
+    let conn = match db::open() {
+        Ok(c) => c,
+        Err(_) => return serde_json::json!([]),
+    };
+    let mut arr = Vec::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT id, name, width_mm, height_mm, is_default FROM label_templates ORDER BY id",
+    ) {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+            ))
+        }) {
+            for (id, name, width, height, is_default) in rows.flatten() {
+                arr.push(serde_json::json!({
+                    "id": id, "name": name, "w": width, "h": height,
+                    "is_default": is_default != 0,
+                }));
+            }
+        }
+    }
+    serde_json::Value::Array(arr)
+}
+
+#[tauri::command]
+fn template_get(tid: i64) -> Result<serde_json::Value, String> {
+    let conn = db::open().map_err(|e| e.to_string())?;
+    conn.query_row(
+        "SELECT id, name, width_mm, height_mm, canvas_data, is_default \
+         FROM label_templates WHERE id = ?1",
+        rusqlite::params![tid],
+        |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "width_mm": row.get::<_, i64>(2)?,
+                "height_mm": row.get::<_, i64>(3)?,
+                "canvas_data": row.get::<_, Option<String>>(4)?,
+                "is_default": row.get::<_, i64>(5)? != 0,
+            }))
+        },
+    )
+    .map_err(|_| "Plantilla no encontrada".to_string())
+}
+
+#[tauri::command]
+fn template_create(
+    name: String,
+    width_mm: i64,
+    height_mm: i64,
+    canvas_data: String,
+    is_default: bool,
+) -> Result<i64, String> {
+    let mut conn = db::open().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    if is_default {
+        tx.execute("UPDATE label_templates SET is_default = 0", [])
+            .map_err(|e| e.to_string())?;
+    }
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    tx.execute(
+        "INSERT INTO label_templates
+         (name, width_mm, height_mm, canvas_data, is_default, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+        rusqlite::params![name, width_mm, height_mm, canvas_data, if is_default {1} else {0}, now],
+    )
+    .map_err(|e| e.to_string())?;
+    let id = tx.last_insert_rowid();
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(id)
+}
+
+#[tauri::command]
+fn template_update(
+    tid: i64,
+    name: String,
+    width_mm: i64,
+    height_mm: i64,
+    canvas_data: String,
+    is_default: bool,
+) -> Result<String, String> {
+    let mut conn = db::open().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    if is_default {
+        tx.execute(
+            "UPDATE label_templates SET is_default = 0 WHERE id <> ?1",
+            rusqlite::params![tid],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let changed = tx
+        .execute(
+            "UPDATE label_templates
+             SET name = ?1, width_mm = ?2, height_mm = ?3, canvas_data = ?4,
+                 is_default = ?5, updated_at = ?6
+             WHERE id = ?7",
+            rusqlite::params![
+                name,
+                width_mm,
+                height_mm,
+                canvas_data,
+                if is_default {1} else {0},
+                now,
+                tid
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err("Plantilla no encontrada".to_string());
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok("saved".to_string())
+}
+
+#[tauri::command]
+fn template_delete(tid: i64) -> Result<String, String> {
+    let conn = db::open().map_err(|e| e.to_string())?;
+    let changed = conn
+        .execute(
+            "DELETE FROM label_templates WHERE id = ?1",
+            rusqlite::params![tid],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err("Plantilla no encontrada".to_string());
+    }
+    Ok("deleted".to_string())
+}
+
+#[tauri::command]
+fn config_export() -> Result<String, String> {
+    let conn = db::open().map_err(|e| e.to_string())?;
+    config_io::export(&conn)
+}
+
+#[tauri::command]
+fn config_import(data: String, mode: String) -> Result<serde_json::Value, String> {
+    let mut conn = db::open().map_err(|e| e.to_string())?;
+    config_io::import(&mut conn, &data, &mode)
+}
+
+#[tauri::command]
+fn import_export_log_list(limit: i64) -> serde_json::Value {
+    let conn = match db::open() {
+        Ok(c) => c,
+        Err(_) => return serde_json::json!([]),
+    };
+    let mut arr = Vec::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT id, operation_type, mode, data_summary, status, performed_at \
+         FROM import_export_logs ORDER BY id DESC LIMIT ?1",
+    ) {
+        if let Ok(rows) = stmt.query_map(rusqlite::params![limit], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "op": row.get::<_, String>(1)?,
+                "mode": row.get::<_, Option<String>>(2)?,
+                "summary": row.get::<_, Option<String>>(3)?,
+                "status": row.get::<_, Option<String>>(4)?,
+                "at": row.get::<_, Option<String>>(5)?,
+            }))
+        }) {
+            for row in rows.flatten() {
+                arr.push(row);
+            }
+        }
+    }
+    serde_json::Value::Array(arr)
 }
 
 // --- Recipes (SQLite) ---
@@ -1824,6 +2002,14 @@ fn main() {
             list_executions,
             list_logs,
             log_action,
+            template_list,
+            template_get,
+            template_create,
+            template_update,
+            template_delete,
+            config_export,
+            config_import,
+            import_export_log_list,
             test_odbc_connection,
             execute_sql,
             ensure_remote_tables,
