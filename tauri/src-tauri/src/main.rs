@@ -939,6 +939,217 @@ fn import_export_log_list(limit: i64) -> serde_json::Value {
     serde_json::Value::Array(arr)
 }
 
+#[tauri::command]
+fn history_list(
+    model: Option<String>,
+    serial: Option<String>,
+    start: Option<String>,
+    end: Option<String>,
+    limit: Option<i64>,
+) -> serde_json::Value {
+    let conn = match db::open() {
+        Ok(c) => c,
+        Err(_) => return serde_json::json!({"rows": [], "total": 0, "good": 0, "bad": 0}),
+    };
+
+    let mut sql = String::from(
+        "SELECT e.id, e.recipe_id, COALESCE(r.model, '-') AS recipe_model, \
+         COALESCE(e.serial_number, '-') AS serial, COALESCE(b.batch_number, '-') AS batch, \
+         e.plc_pass_fail, e.hipot_pass_fail, COALESCE(e.final_status, '-') AS final, \
+         e.created_at, e.total_duration \
+         FROM executions e \
+         LEFT JOIN recipes r ON r.id = e.recipe_id \
+         LEFT JOIN batches b ON b.id = e.batch_id \
+         WHERE 1 = 1",
+    );
+    let mut params: Vec<rusqlite::types::Value> = Vec::new();
+
+    if let Some(s) = serial.filter(|s| !s.trim().is_empty()) {
+        sql.push_str(" AND e.serial_number LIKE ?");
+        params.push(rusqlite::types::Value::Text(format!(
+            "%{}%",
+            s.trim().to_uppercase()
+        )));
+    }
+    if let Some(m) = model.filter(|s| !s.trim().is_empty()) {
+        sql.push_str(" AND r.model LIKE ?");
+        params.push(rusqlite::types::Value::Text(format!(
+            "%{}%",
+            m.trim().to_uppercase()
+        )));
+    }
+    if let Some(s) = start.filter(|s| !s.trim().is_empty()) {
+        sql.push_str(" AND e.created_at >= ?");
+        params.push(rusqlite::types::Value::Text(s));
+    }
+    if let Some(e) = end.filter(|s| !s.trim().is_empty()) {
+        if let Ok(day) = chrono::NaiveDate::parse_from_str(&e, "%Y-%m-%d") {
+            if let Some(next) = day.succ_opt() {
+                sql.push_str(" AND e.created_at < ?");
+                params.push(rusqlite::types::Value::Text(
+                    next.format("%Y-%m-%d").to_string(),
+                ));
+            }
+        }
+    }
+
+    sql.push_str(" ORDER BY e.id DESC LIMIT ?");
+    params.push(rusqlite::types::Value::Integer(
+        limit.unwrap_or(200).clamp(1, 5000),
+    ));
+
+    let mut rows = Vec::new();
+    if let Ok(mut stmt) = conn.prepare(&sql) {
+        if let Ok(iter) = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "recipe_id": row.get::<_, Option<i64>>(1)?,
+                "recipe_model": row.get::<_, String>(2)?,
+                "serial": row.get::<_, String>(3)?,
+                "batch": row.get::<_, String>(4)?,
+                "plc": row.get::<_, Option<i64>>(5)?.map(|v| v != 0),
+                "hipot": row.get::<_, Option<i64>>(6)?.map(|v| v != 0),
+                "final": row.get::<_, String>(7)?,
+                "created": row.get::<_, Option<String>>(8)?,
+                "total_duration": row.get::<_, Option<f64>>(9)?,
+            }))
+        }) {
+            for row in iter.flatten() {
+                rows.push(row);
+            }
+        }
+    }
+
+    let good = rows
+        .iter()
+        .filter(|r| r.get("final").and_then(|v| v.as_str()) == Some("GOOD"))
+        .count();
+    let bad = rows
+        .iter()
+        .filter(|r| r.get("final").and_then(|v| v.as_str()) == Some("BAD"))
+        .count();
+    serde_json::json!({
+        "rows": rows,
+        "total": rows.len(),
+        "good": good,
+        "bad": bad,
+    })
+}
+
+#[tauri::command]
+fn sync_log_list(limit: Option<i64>) -> serde_json::Value {
+    let conn = match db::open() {
+        Ok(c) => c,
+        Err(_) => return serde_json::json!([]),
+    };
+    let mut arr = Vec::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT id, direction, table_name, records_synced, status, error_message \
+         FROM sync_log ORDER BY id DESC LIMIT ?1",
+    ) {
+        if let Ok(rows) = stmt.query_map(
+            rusqlite::params![limit.unwrap_or(20).clamp(1, 500)],
+            |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, i64>(0)?,
+                    "dir": row.get::<_, Option<String>>(1)?,
+                    "table": row.get::<_, Option<String>>(2)?,
+                    "n": row.get::<_, Option<i64>>(3)?,
+                    "status": row.get::<_, Option<String>>(4)?,
+                    "err": row.get::<_, Option<String>>(5)?,
+                }))
+            },
+        ) {
+            for row in rows.flatten() {
+                arr.push(row);
+            }
+        }
+    }
+    serde_json::Value::Array(arr)
+}
+
+#[tauri::command]
+fn local_db_config_get() -> serde_json::Value {
+    let path = db::paths::db_config_path();
+    if let Ok(text) = std::fs::read_to_string(&path) {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
+            return value;
+        }
+    }
+    serde_json::json!({
+        "use_sqlite": "0",
+        "server": ".\\SQLEXPRESS",
+        "name": "HiPotDB",
+        "user": "",
+        "password": "",
+    })
+}
+
+#[tauri::command]
+fn local_db_config_set(config: serde_json::Value) -> Result<String, String> {
+    let path = db::paths::db_config_path();
+    let text = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    std::fs::write(&path, text).map_err(|e| e.to_string())?;
+    Ok("saved".to_string())
+}
+
+#[tauri::command]
+fn audit_table_names() -> serde_json::Value {
+    let conn = match db::open() {
+        Ok(c) => c,
+        Err(_) => return serde_json::json!({"tables": []}),
+    };
+    let mut tables = Vec::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT name FROM sqlite_master \
+         WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name <> 'app_meta' \
+         ORDER BY name",
+    ) {
+        if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+            for table in rows.flatten() {
+                tables.push(table);
+            }
+        }
+    }
+    serde_json::json!({ "tables": tables })
+}
+
+#[tauri::command]
+fn audit_tables_status(conn_str: String) -> serde_json::Value {
+    use odbc_api::Environment;
+    let env = match Environment::new() {
+        Ok(e) => e,
+        Err(e) => {
+            return serde_json::json!({
+                "connected": false, "table_exists": false, "error": e.to_string()
+            })
+        }
+    };
+    let conn = match env.connect_with_connection_string(
+        &conn_str,
+        odbc_api::ConnectionOptions::default(),
+    ) {
+        Ok(c) => c,
+        Err(e) => {
+            return serde_json::json!({
+                "connected": false, "table_exists": false, "error": e.to_string()
+            })
+        }
+    };
+    let table_exists = conn.execute("SELECT 1 FROM executions", (), None).is_ok();
+    serde_json::json!({ "connected": true, "table_exists": table_exists })
+}
+
+#[tauri::command]
+fn audit_ensure_tables(conn_str: String) -> Result<serde_json::Value, String> {
+    let result = ensure_remote_tables(conn_str);
+    if result.starts_with("OK") {
+        Ok(serde_json::json!({ "exists": true, "detail": result }))
+    } else {
+        Err(result)
+    }
+}
+
 // --- Recipes (SQLite) ---
 #[tauri::command]
 fn list_recipes() -> serde_json::Value {
@@ -2010,6 +2221,13 @@ fn main() {
             config_export,
             config_import,
             import_export_log_list,
+            history_list,
+            sync_log_list,
+            local_db_config_get,
+            local_db_config_set,
+            audit_table_names,
+            audit_tables_status,
+            audit_ensure_tables,
             test_odbc_connection,
             execute_sql,
             ensure_remote_tables,

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { api } from '../api';
+import { invoke } from '@tauri-apps/api/core';
 
 export function LogPopup({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [logs, setLogs] = useState<any[]>([]);
@@ -9,7 +9,7 @@ export function LogPopup({ open, onClose }: { open: boolean; onClose: () => void
   const [level, setLevel] = useState('');
   const load = async () => {
     try {
-      const r = await api.get(`/admin/logs?category=${encodeURIComponent(cat)}&level=${encodeURIComponent(level)}&q=${encodeURIComponent(q)}&limit=120`);
+      const r = await invoke<any[]>('list_logs', { category: cat, level, q, limit: 120 });
       setLogs(Array.isArray(r) ? r : []);
     } catch { setLogs([]); }
   };

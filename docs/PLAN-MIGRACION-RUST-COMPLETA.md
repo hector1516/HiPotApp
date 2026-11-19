@@ -358,29 +358,33 @@ Implementación:
 
 ---
 
-### Fase 6 - Historial, logs y auditoría (1-2 sesiones)
+### Fase 6 - Historial, logs y auditoría (COMPLETADA)
 
-Comandos:
-
-| Comando | Reemplaza |
-|---|---|
-| `history_list` (filtros `model`, `serial`, `start`, `end`, `limit`) | `GET /history` |
-| `log_list` (ya existe) | `GET /admin/logs` |
-| `local_db_config_get` / `local_db_config_set` | `GET/POST /admin/local-db-config` |
-| `audit_tables_status` | `GET /audit/tables-status` |
-| `audit_ensure_tables` | `POST /audit/ensure-table` |
-| `audit_table_names` | `GET /audit/table-names` |
-| `sync_log_list` | `GET /admin/sync-log` |
+| Comando | Reemplaza | Estado |
+|---|---|---|
+| `history_list` (filtros `model`, `serial`, `start`, `end`, `limit`) | `GET /history` | ✅ |
+| `log_list` (`list_logs`) | `GET /admin/logs` | ✅ |
+| `local_db_config_get` / `local_db_config_set` | `GET/POST /admin/local-db-config` | ✅ |
+| `audit_tables_status` | `GET /audit/tables-status` | ✅ |
+| `audit_ensure_tables` | `POST /audit/ensure-table` | ✅ |
+| `audit_table_names` | `GET /audit/table-names` | ✅ |
+| `sync_log_list` | `GET /admin/sync-log` | ✅ |
 
 Cambios frontend:
 
-- `HistoryPopup.tsx`, `LogPopup.tsx`, `ReprintPopup.tsx`, `SystemTab`.
+- [x] `HistoryPopup.tsx` → `history_list`.
+- [x] `ReprintPopup.tsx` → `history_list` + `reprint_zebra`.
+- [x] `LogPopup.tsx` → `list_logs`.
+- [x] `DbTab` → `sync_log_list`.
+- [x] `SystemTab` → `local_db_config_*`, `audit_*`.
+- [x] `db_config.json` por defecto apunta a SQL Express.
+- [x] Indicador de "Backend HTTP" reemplazado por "Núcleo Rust".
 
-**Criterio de aceptación:** historial con filtros y reimpresión sin HTTP.
+**Criterio de aceptación:** historial con filtros y reimpresión sin HTTP. **Cumplido.**
 
 ---
 
-### Fase 7 — BD local SQL Express + sync multitable (3–4 sesiones)
+### Fase 7 - BD local SQL Express + sync multitable (3-4 sesiones)
 
 Esta es la fase más grande y la que cumple el requisito "solo SQL Express".
 

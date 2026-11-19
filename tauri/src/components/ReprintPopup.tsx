@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { api } from '../api';
 import { invoke } from '@tauri-apps/api/core';
 
 export function ReprintPopup({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -12,7 +11,7 @@ export function ReprintPopup({ open, onClose }: { open: boolean; onClose: () => 
   const load = async () => {
     setMsg('');
     try {
-      const r:any = await api.get('/history?limit=50');
+      const r:any = await invoke('history_list', { model: '', serial: '', start: '', end: '', limit: 50 });
       const arr = Array.isArray(r) ? r : (r.rows || []);
       const goods = arr.filter((x: any) => x.final === 'GOOD').slice(0, 20);
       setList(goods);

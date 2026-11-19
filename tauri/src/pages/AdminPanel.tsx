@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { api } from '../api';
 import { invoke } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import { check } from '@tauri-apps/plugin-updater';
@@ -158,7 +157,7 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
   const [q,setQ]=useState('');
   const [msg,setMsg]=useState('');
   const [editing,setEditing]=useState<null|{id:number|null,name:string,model:string,product:string,m:any,t:any}>(null);
-  const load=()=>invoke<any>('list_recipes').then(setList).catch(()=>api.get('/recipes').then(setList).catch(()=>setList([])));
+  const load=()=>invoke<any[]>('list_recipes').then(setList).catch(()=>setList([]));
   useEffect(()=>{load();},[]);
   const rows=list.filter(r=>!q||r.model.includes(q));
   const openNew=()=>{
@@ -569,7 +568,7 @@ function DbTab() {
   const [cfg, setCfg] = useState<any>(null);
   const [log, setLog] = useState('');
   const [syncs, setSyncs] = useState<any[]>([]);
-  const load = () => { invoke<any>('get_config').then(setCfg).catch(() => setCfg(null)); api.get('/admin/sync-log').then(setSyncs).catch(() => setSyncs([])); };
+  const load = () => { invoke<any>('get_config').then(setCfg).catch(() => setCfg(null)); invoke<any[]>('sync_log_list', { limit: 20 }).then(setSyncs).catch(() => setSyncs([])); };
   useEffect(() => { load(); }, []);
   return (
     <div style={{ minWidth: 0 }}>
@@ -718,16 +717,26 @@ function SystemTab() {
   const [plcStatus, setPlcStatus] = useState<any>(null);
   const [hipotStatus, setHipotStatus] = useState<any>(null);
   const [cfg, setCfg] = useState<any>({});
-  const [localDbCfg, setLocalDbCfg] = useState<any>({ use_sqlite: '1', server: '', name: '', user: '', password: '' });
+  const [localDbCfg, setLocalDbCfg] = useState<any>({ use_sqlite: '0', server: '.\\SQLEXPRESS', name: 'HiPotDB', user: '', password: '' });
   const [tableNames, setTableNames] = useState<string[]>([]);
   const [previewStatus, setPreviewStatus] = useState<'GOOD' | 'BAD' | null>(null);
   const [kbMode, setKbMode] = useState(() => localStorage.getItem('keyboard_mode') || 'integrated');
+  const remoteConnStr = () => {
+    const driver = 'ODBC Driver 17 for SQL Server';
+    const server = cfg?.sql_server || '192.168.1.200';
+    const db = cfg?.sql_database || 'HiPotDB_Central';
+    const user = cfg?.sql_user || '';
+    const pwd = cfg?.sql_password || '';
+    return user
+      ? `Driver={${driver}};Server=${server};Database=${db};Uid=${user};Pwd=${pwd};`
+      : `Driver={${driver}};Server=${server};Database=${db};Trusted_Connection=yes;`;
+  };
   const loadLog = () => invoke<any[]>('import_export_log_list', { limit: 20 }).then(setImpLog).catch(() => setImpLog([]));
   useEffect(() => {
     loadLog();
     invoke<any>('get_config').then(c => { setHold(String(c?.result_hold_seconds ?? '10')); setCfg(c || {}); }).catch(() => {});
-    api.get('/admin/local-db-config').then(r => setLocalDbCfg(r || { use_sqlite: '1', server: '', name: '', user: '', password: '' })).catch(() => {});
-    api.get('/audit/table-names').then(r => setTableNames(r?.tables ?? [])).catch(() => {});
+    invoke<any>('local_db_config_get').then(r => setLocalDbCfg(r || { use_sqlite: '0', server: '.\\SQLEXPRESS', name: 'HiPotDB', user: '', password: '' })).catch(() => {});
+    invoke<any>('audit_table_names').then(r => setTableNames(r?.tables ?? [])).catch(() => {});
    
     getVersion().then(setAppVersion).catch(() => setAppVersion('1.0.0'));
     invoke<any>('plc_status_info').then(setPlcStatus).catch(() => {});
@@ -798,7 +807,7 @@ function SystemTab() {
       <div className="card" style={{ marginBottom: 10 }}>
         <h3>Datos de debug</h3>
         <div style={{ fontSize: 12, color: '#475569', display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div>Backend: <span className="font-mono">http://127.0.0.1:8765</span></div>
+          <div>Núcleo: <span className="font-mono">Rust (sin HTTP)</span></div>
           <div>PLC: <span className="font-mono">{plcStatus?.ip || cfg?.plc_ip || '-'}</span> ({plcStatus?.connected ? 'conectado' : 'desconectado'})</div>
           <div>Hipot: <span className="font-mono">{hipotStatus?.port || '-'}</span></div>
           <div>SQL: <span className="font-mono">{cfg?.sql_server || '-'}</span> / {cfg?.sql_database || '-'}</div>
@@ -824,9 +833,9 @@ function SystemTab() {
       <div className="card" style={{ marginBottom: 10 }}>
         <h3>Previsualizacion de resultado</h3>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button className="btn" title="Simular OK" aria-label="Simular OK" onClick={() => setPreviewStatus('GOOD')}
+          <button className="btn" title="Previsualizar OK" aria-label="Previsualizar OK" onClick={() => setPreviewStatus('GOOD')}
             style={{ fontSize: 20, padding: '4px 10px' }}>✅</button>
-          <button className="btn" title="Simular NO OK" aria-label="Simular NO OK" onClick={() => setPreviewStatus('BAD')}
+          <button className="btn" title="Previsualizar NO OK" aria-label="Previsualizar NO OK" onClick={() => setPreviewStatus('BAD')}
             style={{ fontSize: 20, padding: '4px 10px' }}>❌</button>
           {previewStatus && (
             <div style={{
@@ -874,7 +883,10 @@ function SystemTab() {
         )}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <button className="btn ok" onClick={async () => {
-            try { await api.post('/admin/local-db-config', localDbCfg); alert('Guardado. Reinicia la app para aplicar.'); } catch (e: any) { alert('Error: ' + (e?.message || e)); }
+            try {
+              const r = await invoke<string>('local_db_config_set', { config: localDbCfg });
+              alert(r === 'saved' ? 'Guardado. Reinicia la app para aplicar.' : r);
+            } catch (e: any) { alert('Error: ' + (e?.message || e)); }
           }}>Guardar</button>
           <button className="btn ghost" onClick={() => (window as any).__TAURI__?.core?.invoke?.('open_external', { url: 'https://www.microsoft.com/es-es/sql-server/sql-server-downloads' }).catch?.(() => window.open('https://www.microsoft.com/es-es/sql-server/sql-server-downloads', '_blank'))}>Descargar SQL Express 2025</button>
         </div>
@@ -919,10 +931,16 @@ function SystemTab() {
             try { await invoke('set_config', { values: vals }); alert('Guardado'); } catch (e: any) { alert('Error: ' + (e?.message || e)); }
           }}>Guardar</button>
           <button className="btn ghost" onClick={async () => {
-            try { const r = await api.post('/audit/ensure-table'); alert(r.exists ? 'Tablas creadas/verificadas' : 'No se pudo crear'); } catch (e: any) { alert('Error: ' + (e?.message || e)); }
+            try {
+              const r = await invoke<any>('audit_ensure_tables', { connStr: remoteConnStr() });
+              alert(r.exists ? 'Tablas creadas/verificadas' : 'No se pudo crear');
+            } catch (e: any) { alert('Error: ' + (e?.message || e)); }
           }}>Crear tablas en remoto</button>
           <button className="btn ghost" onClick={async () => {
-            try { const r = await api.get('/audit/tables-status'); alert(`Conexión: ${r.connected ? 'OK' : 'Sin conexión'}\\nTabla: ${r.table_exists ? 'Existe' : 'No existe'}`); } catch (e: any) { alert('Error: ' + (e?.message || e)); }
+            try {
+              const r = await invoke<any>('audit_tables_status', { connStr: remoteConnStr() });
+              alert(`Conexión: ${r.connected ? 'OK' : 'Sin conexión'}\nTabla: ${r.table_exists ? 'Existe' : 'No existe'}${r.error ? '\n' + r.error : ''}`);
+            } catch (e: any) { alert('Error: ' + (e?.message || e)); }
           }}>Verificar conexión</button>
           <button className="btn ghost" onClick={() => { (window as any).__TAURI__?.core?.invoke?.('open_external', { url: 'https://www.microsoft.com/es-es/sql-server/sql-server-downloads' }).catch?.(() => window.open('https://www.microsoft.com/es-es/sql-server/sql-server-downloads', '_blank')); }}>Descargar SQL Express 2025</button>
           <button className="btn ghost" onClick={async () => {

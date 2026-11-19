@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { api } from '../api';
+import { invoke } from '@tauri-apps/api/core';
 
 function toCSV(rows: any[]) {
   const headers = ['ID','Fecha','Modelo','Serie','Batch','PLC','Hipot','Final','Duración(s)'];
@@ -32,7 +32,7 @@ export function HistoryPopup({ open, onClose }: { open: boolean; onClose: () => 
     setBusy(true); setPlayed(true); setMsg('');
     setTimeout(()=>setPlayed(false), 1400);
     try {
-      const r:any = await api.get(`/history?start=${start}&end=${end}&limit=500`);
+      const r:any = await invoke('history_list', { model: '', serial: '', start, end, limit: 500 });
       const list = Array.isArray(r) ? r : (r.rows || []);
       const t = Array.isArray(r) ? { total: list.length, good: list.filter((x:any)=>x.final==='GOOD').length, bad: list.filter((x:any)=>x.final==='BAD').length } : { total: r.total, good: r.good, bad: r.bad };
       setRows(list); setTot(t);
