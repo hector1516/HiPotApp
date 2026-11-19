@@ -477,11 +477,11 @@ Cambios frontend:
 - [x] Splash con timeout y cierre forzado.
 - [x] Maximizado, auto-inicio y teclado virtual confirmados en configuración.
 - [x] Versión actualizada a `1.0.31`.
+- [x] Release `v1.0.31` publicado desde GitHub Actions (instalador + `.sig` + `latest.json`).
 - [ ] Pruebas en VM limpia: instalación, SQL Express, ODBC, PLC, Hipot, Zebra.
-- [ ] Prueba de auto-update desde GitHub Releases.
-- [ ] Release con notas (lo genera el workflow al subir el tag).
+- [ ] Prueba de auto-update desde GitHub Releases en estación real.
 
-**Criterio de aceptación:** instalación desde cero en estación limpia + actualización desde la versión anterior. **Pendiente de validación física/CI.**
+**Criterio de aceptación:** instalación desde cero en estación limpia + actualización desde la versión anterior. **El release está publicado; falta la validación física/VM.**
 
 ---
 
