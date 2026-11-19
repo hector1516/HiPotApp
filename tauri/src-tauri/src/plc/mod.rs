@@ -4,7 +4,6 @@
 //! - Offsets de receta y resultados en DB1.
 //! - Lectura/escritura de tags (BOOL / WORD / INT / REAL).
 //! - Mapa de salidas Q, entradas I y analógicas IA.
-//! - Modo simulación para operar sin PLC físico.
 
 
 

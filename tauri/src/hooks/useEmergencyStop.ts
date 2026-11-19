@@ -21,7 +21,7 @@ export function useEmergencyStop(enabled = true) {
         if (r?.active && !wasActive.current) {
           wasActive.current = true;
           invoke('plc_abort').catch(() => {});
-          invoke('hipot_test', { action: 'STOP' }).catch(() => {});
+          invoke('hipot_abort').catch(() => {});
         }
         if (!r?.active) wasActive.current = false;
       } catch {

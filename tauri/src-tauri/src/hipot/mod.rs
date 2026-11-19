@@ -1,10 +1,10 @@
 //! Hipot 3865 por RS-232 (crate `serialport`).
 //!
-//! Replica `App/python/hipot_manager.py`: 8N1, comandos ASCII terminados en
-//! CRLF, lectura de respuesta y parseo de mediciones. Incluye modo simulación.
+//! Protocolo según `docs/06-comunicaciones.md`: 8N1, comandos ASCII terminados
+//! en CRLF, lectura de respuesta hasta CRLF y parseo de mediciones.
 
 use serde_json::{json, Map, Value};
-use serialport::{DataBits, Parity, SerialPort, StopBits};
+use serialport::{ClearBuffer, DataBits, Parity, SerialPort, StopBits};
 use std::io::{Read, Write};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
@@ -105,18 +105,30 @@ fn command_inner(cfg: &HipotConfig, command: &str) -> Result<Value, String> {
         .map_err(|_| "puerto bloqueado".to_string())?;
     let (_, _, port) = guard.as_mut().ok_or_else(|| "puerto no abierto".to_string())?;
 
+    // Descarta datos viejos para no confundir la respuesta de este comando.
+    let _ = port.clear(ClearBuffer::Input);
     port.write_all(format!("{}\r\n", command.trim()).as_bytes())
         .map_err(|e| format!("Error escribiendo: {}", e))?;
     let _ = port.flush();
 
-    std::thread::sleep(Duration::from_millis(450));
-    let mut buf = [0u8; 1024];
-    let response = match port.read(&mut buf) {
-        Ok(0) => String::new(),
-        Ok(n) => String::from_utf8_lossy(&buf[..n]).trim().to_string(),
-        Err(e) if e.kind() == std::io::ErrorKind::TimedOut => String::new(),
-        Err(e) => return Err(format!("Error leyendo: {}", e)),
-    };
+    std::thread::sleep(Duration::from_millis(150));
+    let mut response_bytes: Vec<u8> = Vec::new();
+    let mut buf = [0u8; 256];
+    loop {
+        match port.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                response_bytes.extend_from_slice(&buf[..n]);
+                // El equipo termina cada respuesta con CRLF (readline en el manual).
+                if response_bytes.contains(&b'\n') || response_bytes.len() >= 4096 {
+                    break;
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => break,
+            Err(e) => return Err(format!("Error leyendo: {}", e)),
+        }
+    }
+    let response = String::from_utf8_lossy(&response_bytes).trim().to_string();
 
     Ok(json!({
         "response": response,
@@ -146,6 +158,16 @@ fn log_tx_rx(command: &str, response: &str, error: Option<&str>, duration_ms: i6
     );
 }
 
+/// Detecta respuestas explícitas de error del equipo.
+fn has_error(response: &str) -> bool {
+    let upper = response.trim().to_uppercase();
+    upper == "?"
+        || upper.contains("ERROR")
+        || upper.contains("ERR")
+        || upper.contains("INVALID")
+        || upper.contains("NO RECONOCIDO")
+}
+
 /// Aplica los parámetros de la receta antes de START.
 /// Los valores en 0 o negativos se omiten.
 pub fn apply_settings(
@@ -156,27 +178,50 @@ pub fn apply_settings(
 ) -> Result<Vec<Value>, String> {
     let mut responses = Vec::new();
     if voltage > 0.0 {
-        responses.push(command(cfg, &format!("VOLTAGE:{}", voltage))?);
+        let value = command(cfg, &format!("VOLTAGE:{}", voltage))?;
+        let response = value.get("response").and_then(|v| v.as_str()).unwrap_or("");
+        if has_error(response) {
+            return Err(format!("VOLTAGE rechazado por el Hipot: {}", response));
+        }
+        responses.push(value);
     }
     if current_max > 0.0 {
-        responses.push(command(cfg, &format!("CURRENT_MAX:{}", current_max))?);
+        let value = command(cfg, &format!("CURRENT_MAX:{}", current_max))?;
+        let response = value.get("response").and_then(|v| v.as_str()).unwrap_or("");
+        if has_error(response) {
+            return Err(format!("CURRENT_MAX rechazado por el Hipot: {}", response));
+        }
+        responses.push(value);
     }
     if time > 0.0 {
-        responses.push(command(cfg, &format!("TIME:{}", time))?);
+        let value = command(cfg, &format!("TIME:{}", time))?;
+        let response = value.get("response").and_then(|v| v.as_str()).unwrap_or("");
+        if has_error(response) {
+            return Err(format!("TIME rechazado por el Hipot: {}", response));
+        }
+        responses.push(value);
     }
     Ok(responses)
 }
 
-/// Comando de alto nivel: START / STOP / STATUS.
+/// Comando de alto nivel: START / STOP / ABORT / STATUS / MEASURE / RESULT.
 pub fn test_action(cfg: &HipotConfig, action: &str) -> Result<Value, String> {
     let action = action.trim().to_uppercase();
     let cmd = match action.as_str() {
         "START" => "START",
         "STOP" => "STOP",
         "ABORT" => "ABORT",
+        "MEASURE" | "MEASURE?" => "MEASURE?",
+        "RESULT" | "RESULT?" => "RESULT?",
         _ => "STATUS?",
     };
     let mut value = command(cfg, cmd)?;
+    if cmd == "START" {
+        let response = value.get("response").and_then(|v| v.as_str()).unwrap_or("");
+        if has_error(response) {
+            return Err(format!("START rechazado por el Hipot: {}", response));
+        }
+    }
     if let Some(obj) = value.as_object_mut() {
         obj.insert("action".to_string(), json!(action));
     }
@@ -227,6 +272,12 @@ mod tests {
 
         let f = parse_measurement("V:208 I:0.5 R:100 FAIL");
         assert_eq!(f["pass"], json!(false));
+
+        // El equipo puede incluir la unidad KΩ; debe ignorarse sin afectar el parseo.
+        let k = parse_measurement("V:120.5 I:1.23 R:456.7 KΩ PASS");
+        assert_eq!(k["voltage"], json!(120.5));
+        assert_eq!(k["resistance"], json!(456.7));
+        assert_eq!(k["pass"], json!(true));
     }
 
     #[test]
@@ -234,5 +285,15 @@ mod tests {
         let cfg = config_from(&json!({}));
         assert_eq!(cfg.port, "COM3");
         assert_eq!(cfg.baud, 9600);
+    }
+
+    #[test]
+    fn detects_explicit_errors() {
+        assert!(has_error("ERROR"));
+        assert!(has_error("ERR 01"));
+        assert!(has_error("?"));
+        assert!(!has_error(""));
+        assert!(!has_error("OK"));
+        assert!(!has_error("V:120.5 I:1.23 R:456.7 KΩ PASS"));
     }
 }

@@ -428,27 +428,44 @@ fn hipot_status() -> serde_json::Value {
     let cfg = hipot::config_from(&get_config());
     let ports = hipot::list_ports();
     match hipot::check_connection(&cfg) {
-        Ok(_) => {
-            let _ = db::repo::log_add(
-                "INFO", "HIPOT", "status",
-                Some(&format!("Puerto {} @ {} abierto", cfg.port, cfg.baud)),
-                None, None, None, None, true, None,
-            );
+        Ok(_) => serde_json::json!({
+            "connected": true, "port": cfg.port, "baud": cfg.baud, "ports": ports
+        }),
+        Err(e) => serde_json::json!({
+            "connected": false, "port": cfg.port, "baud": cfg.baud,
+            "ports": ports, "error": e
+        }),
+    }
+}
+
+#[tauri::command]
+fn hipot_probe() -> serde_json::Value {
+    let cfg = hipot::config_from(&get_config());
+    let ports = hipot::list_ports();
+    match hipot::command(&cfg, "STATUS?") {
+        Ok(value) => {
+            let response = value
+                .get("response")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             serde_json::json!({
-                "connected": true, "port": cfg.port, "baud": cfg.baud, "ports": ports
+                "connected": !response.is_empty(),
+                "responding": !response.is_empty(),
+                "port": cfg.port,
+                "baud": cfg.baud,
+                "ports": ports,
+                "response": response,
+                "parsed": value.get("parsed").cloned().unwrap_or_else(|| serde_json::json!({})),
             })
         }
-        Err(e) => {
-            let _ = db::repo::log_add(
-                "ERROR", "HIPOT", "status",
-                Some(&format!("No se pudo abrir {} @ {}", cfg.port, cfg.baud)),
-                None, None, None, None, false, Some(&e),
-            );
-            serde_json::json!({
-                "connected": false, "port": cfg.port, "baud": cfg.baud,
-                "ports": ports, "error": e
-            })
-        }
+        Err(e) => serde_json::json!({
+            "connected": false,
+            "responding": false,
+            "port": cfg.port,
+            "baud": cfg.baud,
+            "ports": ports,
+            "error": e,
+        }),
     }
 }
 
@@ -481,7 +498,7 @@ fn hipot_test(action: String) -> serde_json::Value {
 
 #[tauri::command]
 fn hipot_abort() -> serde_json::Value {
-    hipot_test("STOP".to_string())
+    hipot_test("ABORT".to_string())
 }
 
 #[tauri::command]
@@ -1353,6 +1370,7 @@ fn main() {
             hipot_config_get,
             hipot_config_set,
             hipot_status,
+            hipot_probe,
             hipot_command,
             hipot_test,
             hipot_abort,

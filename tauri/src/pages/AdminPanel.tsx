@@ -651,7 +651,7 @@ function HipotTab() {
           </div>
           <div style={{ display: 'flex', gap: 6, marginTop: 16, flexWrap: 'wrap' }}>
             <button className="btn primary" onClick={save}>Guardar</button>
-            <button className="btn" onClick={() => invoke<any>('hipot_status').then(setSt).catch(() => {})}>Probar Hipot</button>
+            <button className="btn" onClick={() => { invoke<any>('hipot_probe').then(setSt).catch(() => {}); loadLogs(); }}>Probar Hipot</button>
             <button className="btn" onClick={() => invoke('hipot_close').catch(() => {})}>Cerrar puerto</button>
             <button className="btn" onClick={async () => {
               const c = await invoke<any>('get_config').catch(() => ({}));

@@ -48,13 +48,15 @@ Se puede ver en:
 - **Logs → categoría HIPOT**
 - **Configuración → Hipot → Últimos comandos Hipot**
 
+La prueba de comunicación de **Configuración → Hipot → Probar Hipot** envía `STATUS?` y exige respuesta del equipo (no solo abre el puerto).
+
 ## Paro de emergencia
 
 - Entrada PLC configurable (`estop_input`, por defecto `I0.0`).
 - Tipo de contacto configurable (`estop_nc`: `1` = NC, `0` = NO).
 - Se consulta cada 800 ms.
 - Al activarse:
-  - Se aborta PLC y Hipot.
+  - Se aborta el PLC y se envía `ABORT` al Hipot.
   - Overlay rojo a pantalla completa, animado, con flecha inferior apuntando al botón físico.
   - Bloquea la interacción hasta que la entrada se libere.
 - Si el PLC no responde, no se muestra la alarma roja; se indica “Paro de emergencia no disponible”.

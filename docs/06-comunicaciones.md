@@ -214,7 +214,7 @@ class HipotManager:
         """Para prueba en el Hipot"""
         return self.send_command('STOP')
     
-    def abort_test():
+    def abort_test(self):
         """Paro de emergencia"""
         return self.send_command('ABORT')
     
@@ -283,6 +283,32 @@ RESULT?\r\n        // Obtener resultado final
 V:120.5 I:1.23 R:456.7 KΩ PASS\r\n
 V:0.0 I:0.0 R:0.0 FAIL\r\n
 ```
+
+### 3.1 Implementación Rust (verificada contra este documento)
+
+Archivo: `tauri/src-tauri/src/hipot/mod.rs`.
+
+| Punto | Implementación |
+|---|---|
+| Puerto | `serialport`, 8N1, sin paridad, sin flow control, timeout de lectura 1000 ms |
+| Fin de comando | `\r\n` |
+| Lectura | Descarta datos viejos antes de enviar; lee hasta `\n` (CRLF) o timeout |
+| Comandos | `START`, `STOP`, `ABORT`, `VOLTAGE:`, `CURRENT_MAX:`, `TIME:`, `STATUS?`, `MEASURE?`, `RESULT?` |
+| Parseo | `V:`, `I:`, `R:`, `PASS`, `FAIL`; ignora tokens como `KΩ` |
+| Errores | Si el equipo responde `ERROR`, `ERR`, `?` o `INVALID`, el parámetro/START se considera rechazado |
+| Parámetros | La receta guarda `hipot_voltage`, `hipot_current_max`, `hipot_time` y se envían antes de cada `START` |
+| Prueba de comunicación | `hipot_probe` envía `STATUS?` y exige respuesta |
+| Paro de emergencia | `hipot_abort` envía `ABORT` |
+| Log | Cada TX/RX se guarda en `app_logs` categoría `HIPOT`, acción `tx_rx`, con `value_sent`, `value_received`, `duration_ms` y `error_message` |
+
+Pendiente de confirmar con el equipo físico 3865:
+
+1. Que `STATUS?` devuelva también `V:`, `I:`, `R:` y `PASS/FAIL`, o si hay que usar `MEASURE?` / `RESULT?` para el resultado final.
+2. Unidad real de `CURRENT_MAX` (A o mA).
+3. Valores de voltaje aceptados por el equipo (el documento menciona 120/208/220/240; la receta permite cualquier valor).
+4. Si `TIME:` es el comando correcto para el tiempo máximo de prueba.
+
+El log TX/RX permite validar estos cuatro puntos en cuanto se conecte el equipo real.
 
 ## 4. Barcode Scanner (USB HID)
 
