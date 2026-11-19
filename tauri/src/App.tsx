@@ -13,7 +13,6 @@ import { HistoryPopup } from './components/HistoryPopup';
 import { ConfigGatePopup } from './components/ConfigGatePopup';
 import VirtualKeyboard from './components/VirtualKeyboard';
 import { Phase } from './styles/theme';
-import { api } from './api';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
@@ -177,14 +176,14 @@ export default function App() {
   const scanModel = async (code: string) => {
     setError(''); setPhase('SCANNING');
     try {
-      await api.scan(code, 'model', 1);
+      await invoke('barcode_scan', { code, barcodeType: 'model', scanOrder: 1 });
       const r = await invoke<any>('get_recipe_by_model', { model: code });
       setRecipe(r); setStep(2); setPhase('LOADED');
     } catch { setError(`Receta no encontrada: ${code}`); setPhase('ERROR'); later(() => setPhase('IDLE'), 1500); }
   };
   const scanSerial = async (code: string) => {
     setSerial(code);
-    await api.scan(code, 'serial', 2).catch(() => {});
+    await invoke('barcode_scan', { code, barcodeType: 'serial', scanOrder: 2 }).catch(() => {});
     setStep(3); setPhase('READY');
   };
   const scanBatch = async (code: string) => {
@@ -195,7 +194,7 @@ export default function App() {
     }
     setBatch(code);
     setError('');
-    await api.scan(code, 'batch', 3).catch(() => {});
+    await invoke('barcode_scan', { code, barcodeType: 'batch', scanOrder: 3 }).catch(() => {});
     const start = Date.now();
     setT0(start);
 

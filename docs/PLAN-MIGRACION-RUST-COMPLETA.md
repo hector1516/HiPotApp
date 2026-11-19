@@ -407,12 +407,12 @@ Esta es la fase más grande y la que cumple el requisito "solo SQL Express".
 
 ---
 
-### Fase 8 - Barcode y flujo de prueba (EN CURSO)
+### Fase 8 - Barcode y flujo de prueba (COMPLETADA)
 
 | Comando | Reemplaza | Estado |
 |---|---|---|
 | `run_test_cycle` | flujo PLC -> Hipot -> resultados (antes `Math.random()`) | ✅ |
-| `barcode_scan` | `POST /barcode/scan` | ⏳ |
+| `barcode_scan` | `POST /barcode/scan` | ✅ |
 | `manual_mode_set` | `POST /manual/mode` | ✅ (`plc_set_mode`) |
 | `manual_plc_test` | `POST /manual/plc-test` | ✅ (`plc_test_component`) |
 | `manual_hipot` | `POST /manual/hipot` | ✅ (`hipot_test`) |
@@ -422,14 +422,15 @@ Cambios frontend:
 
 - [x] `App.tsx`: flujo real con `run_test_cycle`; sin `Math.random()`.
 - [x] `App.tsx`: reimpresión con `reprint_zebra`.
+- [x] `App.tsx`: `barcode_scan` por `invoke`.
 - [x] `ManualScreen.tsx`: PLC/Hipot por `invoke`.
-- [ ] `App.tsx`: reemplazar `api.scan(...)` por `invoke('barcode_scan', ...)`.
+- [x] **Cero llamadas HTTP en todo el frontend.**
 
-**Criterio de aceptación:** flujo model -> serial -> batch -> prueba -> resultado sin HTTP y sin resultados simulados. **Pendiente solo el log de barcode.**
+**Criterio de aceptación:** flujo model -> serial -> batch -> prueba -> resultado sin HTTP y sin resultados simulados. **Cumplido.**
 
 ---
 
-### Fase 9 — Eliminar el sidecar Python (1 sesión)
+### Fase 9 - Eliminar el sidecar Python (1 sesión)
 
 - [ ] `main.rs`: eliminar `Backend`, `backend_path`, `kill_backend`, arranque en `setup`, `restart_backend`, `read_backend_log`.
 - [ ] Crear `app_log_read` para el log propio en `%APPDATA%\HiPotApp\app.log`.

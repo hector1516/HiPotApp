@@ -1150,6 +1150,53 @@ fn audit_ensure_tables(conn_str: String) -> Result<serde_json::Value, String> {
     }
 }
 
+#[tauri::command]
+fn barcode_scan(
+    code: String,
+    barcode_type: String,
+    scan_order: i64,
+    execution_id: Option<i64>,
+) -> Result<serde_json::Value, String> {
+    let raw = code;
+    let normalized = raw.trim().to_uppercase();
+    if normalized.is_empty() {
+        return Err("Código vacío".to_string());
+    }
+    let conn = db::open().map_err(|e| e.to_string())?;
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    conn.execute(
+        "INSERT INTO barcode_logs
+         (code, barcode_type, scan_order, execution_id, scanned_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![&normalized, &barcode_type, scan_order, execution_id, &now],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let _ = log_action(
+        "INFO".to_string(),
+        "BARCODE".to_string(),
+        format!("scan_{}", barcode_type),
+        Some(format!(
+            "Crudo: '{}' -> Normalizado: '{}'",
+            raw, normalized
+        )),
+        execution_id,
+        None,
+        Some(normalized.clone()),
+        None,
+        Some(true),
+        None,
+    );
+
+    Ok(serde_json::json!({
+        "status": "scanned",
+        "raw": raw,
+        "code": normalized,
+        "barcode_type": barcode_type,
+        "scan_order": scan_order,
+    }))
+}
+
 // --- Recipes (SQLite) ---
 #[tauri::command]
 fn list_recipes() -> serde_json::Value {
@@ -2221,6 +2268,7 @@ fn main() {
             config_export,
             config_import,
             import_export_log_list,
+            barcode_scan,
             history_list,
             sync_log_list,
             local_db_config_get,
