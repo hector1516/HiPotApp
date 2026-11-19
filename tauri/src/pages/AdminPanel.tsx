@@ -171,7 +171,7 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
   const doDup=async(r:any)=>{
     const model=prompt(`Modelo para la copia de ${r.model}:`, `${r.model}-COPIA`);
     if(!model) return;
-    await api.post(`/recipes/${r.id}/duplicate`,{model}); setMsg(`Duplicada como ${model.toUpperCase()}`); load();
+    await invoke('duplicate_recipe', { id: r.id, newModel: model.toUpperCase() }); setMsg(`Duplicada como ${model.toUpperCase()}`); load();
   };
   const doSave=async()=>{
     if(!editing) return;
@@ -197,8 +197,9 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
     }
     const body:any={name:editing.name.trim(),model:editing.model.trim().toUpperCase(),product:editing.product||'',voltage_levels:JSON.stringify(VOLTS.map(v=>String(v))),components,totals,modified_by:(adminBatch||'').toUpperCase()||'ADMIN'};
     try{
-      if(editing.id) await api.put(`/recipes/${editing.id}`,body);
-      else {
+      if(editing.id) {
+        await invoke('update_recipe', { id: editing.id, name: body.name, model: body.model, type_: body.type, product: body.product, voltageLevels: body.voltage_levels, components: body.components, totals: body.totals, modifiedBy: body.modified_by });
+      } else {
         await invoke('create_recipe', { name: body.name, model: body.model, type_: body.type, product: body.product, voltageLevels: body.voltage_levels, components: body.components, totals: body.totals, modifiedBy: body.modified_by });
       }
       setEditing(null); setMsg(editing.id?'Receta actualizada':'Receta creada'); load();
