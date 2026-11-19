@@ -4,7 +4,7 @@
 //! usa SQLite.
 
 use crate::db::odbc_local::{
-    execute, insert_id, query_json, query_one, sql_bool, sql_num, sql_opt, sql_text,
+    execute, insert_id, query_json, query_one, sql_bool, sql_num, sql_opt, sql_opt_num, sql_text,
     with_connection, with_transaction,
 };
 use serde_json::{json, Value};
@@ -31,7 +31,8 @@ pub fn export() -> Result<String, String> {
         let mut recipes = query_json(
             conn,
             "SELECT id, name, model, [type], product, voltage_levels, is_active, \
-             created_at, updated_at, modified_by FROM recipes ORDER BY id",
+             created_at, updated_at, modified_by, hipot_voltage, hipot_current_max, hipot_time \
+             FROM recipes ORDER BY id",
         )?;
         for recipe in recipes.iter_mut() {
             let rid = recipe.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -164,13 +165,17 @@ pub fn import(data: &str, mode: &str) -> Result<Value, String> {
                         conn,
                         &format!(
                             "UPDATE recipes SET name = {}, [type] = {}, product = {}, \
-                             voltage_levels = {}, is_active = {}, updated_at = {} WHERE id = {}",
+                             voltage_levels = {}, is_active = {}, updated_at = {}, \
+                             hipot_voltage = {}, hipot_current_max = {}, hipot_time = {} WHERE id = {}",
                             sql_text(recipe.get("name").and_then(|v| v.as_str()).unwrap_or("")),
                             sql_text(recipe.get("type").and_then(|v| v.as_str()).unwrap_or("current_consumption")),
                             sql_opt(recipe.get("product").and_then(|v| v.as_str())),
                             sql_opt(recipe.get("voltage_levels").and_then(|v| v.as_str())),
                             sql_bool(recipe.get("is_active").and_then(|v| v.as_bool()).unwrap_or(true)),
                             now,
+                            sql_opt_num(recipe.get("hipot_voltage").and_then(|v| v.as_f64())),
+                            sql_opt_num(recipe.get("hipot_current_max").and_then(|v| v.as_f64())),
+                            sql_opt_num(recipe.get("hipot_time").and_then(|v| v.as_f64())),
                             id
                         ),
                     )?;
@@ -182,8 +187,9 @@ pub fn import(data: &str, mode: &str) -> Result<Value, String> {
                         conn,
                         &format!(
                             "INSERT INTO recipes \
-                             (name, model, [type], product, voltage_levels, is_active, created_at, updated_at) \
-                             VALUES ({}, {}, {}, {}, {}, {}, {}, {})",
+                             (name, model, [type], product, voltage_levels, is_active, created_at, updated_at, \
+                              hipot_voltage, hipot_current_max, hipot_time) \
+                             VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
                             sql_text(recipe.get("name").and_then(|v| v.as_str()).unwrap_or("")),
                             sql_text(model),
                             sql_text(recipe.get("type").and_then(|v| v.as_str()).unwrap_or("current_consumption")),
@@ -191,7 +197,10 @@ pub fn import(data: &str, mode: &str) -> Result<Value, String> {
                             sql_opt(recipe.get("voltage_levels").and_then(|v| v.as_str())),
                             sql_bool(recipe.get("is_active").and_then(|v| v.as_bool()).unwrap_or(true)),
                             now,
-                            now
+                            now,
+                            sql_opt_num(recipe.get("hipot_voltage").and_then(|v| v.as_f64())),
+                            sql_opt_num(recipe.get("hipot_current_max").and_then(|v| v.as_f64())),
+                            sql_opt_num(recipe.get("hipot_time").and_then(|v| v.as_f64()))
                         ),
                     )?
                 };

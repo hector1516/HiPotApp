@@ -224,19 +224,22 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
   const [list,setList]=useState<any[]>([]);
   const [q,setQ]=useState('');
   const [msg,setMsg]=useState('');
-  const [editing,setEditing]=useState<null|{id:number|null,name:string,model:string,product:string,m:any,t:any}>(null);
+  const [editing,setEditing]=useState<null|{id:number|null,name:string,model:string,product:string,m:any,t:any,hipotVoltage:string,hipotCurrent:string,hipotTime:string}>(null);
   const load=()=>invoke<any[]>('list_recipes').then(setList).catch(()=>setList([]));
   useEffect(()=>{load();},[]);
   const rows=list.filter(r=>!q||r.model.includes(q));
   const openNew=()=>{
     const m:any={}; const t:any={};
     for(const v of VOLTS){ const vs=String(v); m[vs]={}; t[vs]={min:'',max:''}; for(const c of COMPS) m[vs][c]={min:'',max:'',enabled:false}; }
-    setEditing({id:null,name:'',model:q||'',product:'',m,t});
+    setEditing({id:null,name:'',model:q||'',product:'',m,t,hipotVoltage:'',hipotCurrent:'',hipotTime:''});
   };
   const openEdit=async(r:any)=>{
     const d=await invoke<any>('get_recipe_by_model', { model: r.model });
     const {m,t}=matrixFromDetail(d);
-    setEditing({id:d.id,name:d.name,model:d.model,product:d.product||'',m,t});
+    setEditing({id:d.id,name:d.name,model:d.model,product:d.product||'',m,t,
+      hipotVoltage:d.hipot_voltage!=null?String(d.hipot_voltage):'',
+      hipotCurrent:d.hipot_current_max!=null?String(d.hipot_current_max):'',
+      hipotTime:d.hipot_time!=null?String(d.hipot_time):''});
   };
   const doDelete=async(r:any)=>{
     if(!await askConfirm(`Borrar receta ${r.model} — ${r.name}?`)) return;
@@ -269,12 +272,19 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
         totals.push({voltage:vs,min:mn,max:mx});
       }
     }
-    const body:any={name:editing.name.trim(),model:editing.model.trim().toUpperCase(),product:editing.product||'',voltage_levels:JSON.stringify(VOLTS.map(v=>String(v))),components,totals,modified_by:(adminBatch||'').toUpperCase()||'ADMIN'};
+    const parseNum = (raw: string) => raw.trim() === '' ? null : Number(raw);
+    const hipotVoltage = parseNum(editing.hipotVoltage);
+    const hipotCurrent = parseNum(editing.hipotCurrent);
+    const hipotTime = parseNum(editing.hipotTime);
+    if ([hipotVoltage, hipotCurrent, hipotTime].some(v => v !== null && !Number.isFinite(v))) {
+      setMsg('Parámetros Hipot inválidos'); return;
+    }
+    const body:any={name:editing.name.trim(),model:editing.model.trim().toUpperCase(),type:'current_consumption',product:editing.product||'',voltage_levels:JSON.stringify(VOLTS.map(v=>String(v))),components,totals,modified_by:(adminBatch||'').toUpperCase()||'ADMIN'};
     try{
       if(editing.id) {
-        await invoke('update_recipe', { id: editing.id, name: body.name, model: body.model, type_: body.type, product: body.product, voltageLevels: body.voltage_levels, components: body.components, totals: body.totals, modifiedBy: body.modified_by });
+        await invoke('update_recipe', { id: editing.id, name: body.name, model: body.model, type_: body.type, product: body.product, voltageLevels: body.voltage_levels, components: body.components, totals: body.totals, modifiedBy: body.modified_by, hipotVoltage, hipotCurrentMax: hipotCurrent, hipotTime });
       } else {
-        await invoke('create_recipe', { name: body.name, model: body.model, type_: body.type, product: body.product, voltageLevels: body.voltage_levels, components: body.components, totals: body.totals, modifiedBy: body.modified_by });
+        await invoke('create_recipe', { name: body.name, model: body.model, type_: body.type, product: body.product, voltageLevels: body.voltage_levels, components: body.components, totals: body.totals, modifiedBy: body.modified_by, hipotVoltage, hipotCurrentMax: hipotCurrent, hipotTime });
       }
       setEditing(null); setMsg(editing.id?'Receta actualizada':'Receta creada'); load();
     }catch(err:any){ setMsg(String(err?.message ?? err)); }
@@ -291,9 +301,9 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
         </div>
       </div>
       <div className="card" style={{ overflow:'auto', minWidth:0 }}>
-        <table className="grid"><thead><tr><th>Modelo</th><th>Nombre</th><th>Guardado</th><th style={{ minWidth:220 }}>Acciones</th></tr></thead>
+        <table className="grid"><thead><tr><th>Modelo</th><th>Nombre</th><th>Hipot</th><th>Guardado</th><th style={{ minWidth:220 }}>Acciones</th></tr></thead>
           <tbody>{rows.map(r=>(
-            <tr key={r.id}><td><b>{r.model}</b></td><td>{r.name}</td><td style={{ fontSize:11, color:'var(--muted)' }}>{r.modified_by?`${r.modified_by} · `:''}{r.updated_at?new Date(r.updated_at).toLocaleString('es-MX'):(r.created_at?new Date(r.created_at).toLocaleString('es-MX'):'—')}</td>
+            <tr key={r.id}><td><b>{r.model}</b></td><td>{r.name}</td><td className="mono" style={{ fontSize:12 }}>{r.hipot_voltage!=null?`${r.hipot_voltage} V`:'—'} · {r.hipot_current_max!=null?r.hipot_current_max:'—'} · {r.hipot_time!=null?`${r.hipot_time} s`:'—'}</td><td style={{ fontSize:11, color:'var(--muted)' }}>{r.modified_by?`${r.modified_by} · `:''}{r.updated_at?new Date(r.updated_at).toLocaleString('es-MX'):(r.created_at?new Date(r.created_at).toLocaleString('es-MX'):'—')}</td>
               <td>
                 <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
                   <button className="btn sm primary" onClick={()=>openEdit(r)}>Editar</button>
@@ -301,7 +311,7 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
                   <button className="btn sm danger" onClick={()=>doDelete(r)}>Borrar</button>
                 </div>
               </td></tr>
-          ))}{!rows.length && <tr><td colSpan={4} style={{ textAlign:'center', color:'var(--muted)' }}>Sin recetas — use + Alta</td></tr>}</tbody>
+          ))}{!rows.length && <tr><td colSpan={5} style={{ textAlign:'center', color:'var(--muted)' }}>Sin recetas — use + Alta</td></tr>}</tbody>
         </table>
       </div>
 
@@ -343,6 +353,34 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
                 </tbody>
               </table>
             </div>
+
+            <div className="card" style={{ marginTop: 10, background: 'var(--surface-2)' }}>
+              <h3 style={{ fontSize: 14, marginBottom: 8 }}>Parámetros Hipot</h3>
+              <div className="row" style={{ alignItems: 'flex-end', gap: 10 }}>
+                <div className="field" style={{ flex: '1 1 140px' }}>
+                  <label>Voltaje de prueba (V)</label>
+                  <input className="input" type="number" inputMode="decimal" placeholder="Ej. 500"
+                    value={editing.hipotVoltage}
+                    onChange={e => setEditing({ ...editing, hipotVoltage: e.target.value })} />
+                </div>
+                <div className="field" style={{ flex: '1 1 160px' }}>
+                  <label>Límite de corriente</label>
+                  <input className="input" type="number" inputMode="decimal" placeholder="Ej. 0.005"
+                    value={editing.hipotCurrent}
+                    onChange={e => setEditing({ ...editing, hipotCurrent: e.target.value })} />
+                </div>
+                <div className="field" style={{ flex: '1 1 140px' }}>
+                  <label>Tiempo de prueba (s)</label>
+                  <input className="input" type="number" inputMode="decimal" placeholder="Ej. 60"
+                    value={editing.hipotTime}
+                    onChange={e => setEditing({ ...editing, hipotTime: e.target.value })} />
+                </div>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
+                Se envían al Hipot antes de START. Vacío o 0 = no se envía ese parámetro. El límite de corriente usa la unidad del equipo (A/mA según el manual).
+              </div>
+            </div>
+
             <div style={{ fontSize:11, color:'var(--muted)', marginTop:6 }}>Marque  para incluir ese componente en ese voltaje. Desmarcado = esa parte no se prueba.</div>
             <div style={{ fontSize:11, color:'var(--muted)' }}>Se guarda con fecha/hora y usuario: <b>{(adminBatch||'ADMIN').toUpperCase()}</b></div>
             <div style={{ display:'flex', gap:8, marginTop:12, flexWrap:'wrap', justifyContent:'flex-end' }}>
@@ -564,10 +602,16 @@ function HipotTab() {
   const [cmd, setCmd] = useState('STATUS?');
   const [resp, setResp] = useState<any>(null);
   const [msg, setMsg] = useState('');
+  const [logs, setLogs] = useState<any[]>([]);
+  const loadLogs = () => invoke<any[]>('list_logs', { category: 'HIPOT', level: '', q: '', limit: 30 })
+    .then(setLogs).catch(() => setLogs([]));
 
   useEffect(() => {
     invoke<any>('hipot_config_get').then(c => c && setCfg(c)).catch(() => {});
     invoke<string[]>('hipot_list_ports').then(p => setPorts(p || [])).catch(() => {});
+    loadLogs();
+    const id = window.setInterval(loadLogs, 3000);
+    return () => window.clearInterval(id);
   }, []);
 
   const save = async () => {
@@ -582,6 +626,7 @@ function HipotTab() {
   const send = async () => {
     try { setResp(await invoke<any>('hipot_command', { command: cmd })); }
     catch (e: any) { setResp({ error: String(e?.message ?? e) }); }
+    finally { loadLogs(); }
   };
 
   return (
@@ -628,6 +673,31 @@ function HipotTab() {
           <button className="btn primary" style={{ flexShrink: 0 }} onClick={send}>Enviar</button>
         </div>
         {resp && <pre style={{ marginTop: 8, fontSize: 12, background: 'var(--surface-2)', padding: 8, borderRadius: 6, overflow: 'auto' }}>{JSON.stringify(resp, null, 2)}</pre>}
+      </div>
+
+      <div className="card" style={{ marginTop: 10 }}>
+        <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
+          <h3 style={{ margin: 0 }}>Últimos comandos Hipot</h3>
+          <button className="btn sm" onClick={loadLogs}>Actualizar</button>
+        </div>
+        <div className="table-wrap" style={{ maxHeight: 260 }}>
+          <table className="grid">
+            <thead><tr><th>Hora</th><th>Acción</th><th>Enviado</th><th>Recibido</th><th>Error</th></tr></thead>
+            <tbody>
+              {logs.map((l: any) => (
+                <tr key={l.id}>
+                  <td className="mono" style={{ whiteSpace: 'nowrap' }}>{(l.ts || '').slice(11, 19)}</td>
+                  <td>{l.action}</td>
+                  <td className="mono" style={{ maxWidth: 170, overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.value_sent || '—'}</td>
+                  <td className="mono" style={{ maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.value_received || '—'}</td>
+                  <td style={{ color: 'var(--bad)' }}>{l.error_message || ''}</td>
+                </tr>
+              ))}
+              {!logs.length && <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--muted)' }}>Sin comandos registrados</td></tr>}
+            </tbody>
+          </table>
+        </div>
+        <div className="page-sub" style={{ marginTop: 6 }}>También en Logs → categoría HIPOT.</div>
       </div>
     </div>
   );

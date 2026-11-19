@@ -85,6 +85,9 @@ CREATE TABLE recipes (
 	created_at DATETIME NULL, 
 	updated_at DATETIME NULL, 
 	modified_by NVARCHAR(50) NULL, 
+	hipot_voltage FLOAT NULL, 
+	hipot_current_max FLOAT NULL, 
+	hipot_time FLOAT NULL, 
 	PRIMARY KEY (id), 
 	UNIQUE (model)
 )

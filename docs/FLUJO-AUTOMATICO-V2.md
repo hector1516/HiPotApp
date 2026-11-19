@@ -20,6 +20,34 @@
 - Si el Hipot pasa, se ejecuta la eléctrica y el resultado final es `GOOD` solo si ambas pasan.
 - La etiqueta Zebra se imprime solo con `GOOD`.
 
+## Parámetros Hipot por receta
+
+Cada receta guarda:
+
+| Campo | Uso |
+|---|---|
+| `hipot_voltage` | Voltaje de prueba que se envía con `VOLTAGE:<valor>` |
+| `hipot_current_max` | Límite de corriente que se envía con `CURRENT_MAX:<valor>` |
+| `hipot_time` | Tiempo que se envía con `TIME:<valor>` |
+
+Antes de cada `START`, `run_test_cycle` lee estos valores de la receta y los envía al Hipot. Si un valor está vacío o en 0, no se envía ese comando.
+
+## Log de comandos Hipot
+
+Cada TX/RX del Hipot se guarda en `app_logs` con:
+
+- Categoría `HIPOT`
+- Acción `tx_rx`
+- `value_sent`: comando enviado
+- `value_received`: respuesta cruda
+- `duration_ms`: tiempo de respuesta
+- `error_message`: error si falló
+
+Se puede ver en:
+
+- **Logs → categoría HIPOT**
+- **Configuración → Hipot → Últimos comandos Hipot**
+
 ## Paro de emergencia
 
 - Entrada PLC configurable (`estop_input`, por defecto `I0.0`).

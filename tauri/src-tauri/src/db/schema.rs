@@ -27,7 +27,10 @@ CREATE TABLE IF NOT EXISTS recipes (
     is_active INTEGER DEFAULT 1,
     created_at TEXT,
     updated_at TEXT,
-    modified_by TEXT
+    modified_by TEXT,
+    hipot_voltage REAL,
+    hipot_current_max REAL,
+    hipot_time REAL
 );
 
 CREATE TABLE IF NOT EXISTS recipe_components (
@@ -249,6 +252,9 @@ pub fn ensure_schema(conn: &Connection) {
 
     // Columnas añadidas después de la primera versión del esquema.
     ensure_column(conn, "recipes", "modified_by", "TEXT");
+    ensure_column(conn, "recipes", "hipot_voltage", "REAL");
+    ensure_column(conn, "recipes", "hipot_current_max", "REAL");
+    ensure_column(conn, "recipes", "hipot_time", "REAL");
     ensure_column(conn, "executions", "synced_at", "TEXT");
     ensure_column(conn, "plc_readings", "timestamp", "TEXT");
     ensure_column(conn, "hipot_results", "timestamp", "TEXT");

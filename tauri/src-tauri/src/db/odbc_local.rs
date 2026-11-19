@@ -193,6 +193,10 @@ pub fn sql_num(value: f64) -> String {
     }
 }
 
+pub fn sql_opt_num(value: Option<f64>) -> String {
+    value.map(sql_num).unwrap_or_else(|| "NULL".to_string())
+}
+
 /// Crea las tablas que falten usando `schema.sql` como fuente.
 pub fn ensure_schema() -> Result<usize, String> {
     with_connection(|conn| {
@@ -226,6 +230,9 @@ pub fn ensure_schema() -> Result<usize, String> {
 
         // Columnas añadidas después de la primera versión del esquema.
         let _ = ensure_column(conn, "recipes", "modified_by", "NVARCHAR(50)");
+        let _ = ensure_column(conn, "recipes", "hipot_voltage", "FLOAT");
+        let _ = ensure_column(conn, "recipes", "hipot_current_max", "FLOAT");
+        let _ = ensure_column(conn, "recipes", "hipot_time", "FLOAT");
         let _ = ensure_column(conn, "executions", "synced_at", "DATETIME");
         let _ = ensure_column(conn, "plc_readings", "timestamp", "DATETIME");
         let _ = ensure_column(conn, "hipot_results", "timestamp", "DATETIME");

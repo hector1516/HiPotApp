@@ -83,7 +83,22 @@ pub fn close() {
 }
 
 /// Envía un comando y devuelve la respuesta cruda + mediciones parseadas.
+/// Cada TX/RX queda registrado en app_logs (categoría HIPOT).
 pub fn command(cfg: &HipotConfig, command: &str) -> Result<Value, String> {
+    let started = std::time::Instant::now();
+    let result = command_inner(cfg, command);
+    let elapsed = started.elapsed().as_millis() as i64;
+    match &result {
+        Ok(value) => {
+            let response = value.get("response").and_then(|v| v.as_str()).unwrap_or("");
+            log_tx_rx(command, response, None, elapsed);
+        }
+        Err(error) => log_tx_rx(command, "", Some(error), elapsed),
+    }
+    result
+}
+
+fn command_inner(cfg: &HipotConfig, command: &str) -> Result<Value, String> {
     ensure_open(cfg)?;
     let mut guard = port_slot()
         .lock()
@@ -107,6 +122,49 @@ pub fn command(cfg: &HipotConfig, command: &str) -> Result<Value, String> {
         "response": response,
         "parsed": parse_measurement(&response),
     }))
+}
+
+fn log_tx_rx(command: &str, response: &str, error: Option<&str>, duration_ms: i64) {
+    let detail = if let Some(err) = error {
+        format!("TX: {} | Error: {}", command, err)
+    } else if response.is_empty() {
+        format!("TX: {} | RX: (sin respuesta)", command)
+    } else {
+        format!("TX: {} | RX: {}", command, response)
+    };
+    let _ = crate::db::repo::log_add(
+        if error.is_some() { "ERROR" } else { "INFO" },
+        "HIPOT",
+        "tx_rx",
+        Some(&detail),
+        None,
+        Some(command),
+        Some(response),
+        Some(duration_ms),
+        error.is_none(),
+        error,
+    );
+}
+
+/// Aplica los parámetros de la receta antes de START.
+/// Los valores en 0 o negativos se omiten.
+pub fn apply_settings(
+    cfg: &HipotConfig,
+    voltage: f64,
+    current_max: f64,
+    time: f64,
+) -> Result<Vec<Value>, String> {
+    let mut responses = Vec::new();
+    if voltage > 0.0 {
+        responses.push(command(cfg, &format!("VOLTAGE:{}", voltage))?);
+    }
+    if current_max > 0.0 {
+        responses.push(command(cfg, &format!("CURRENT_MAX:{}", current_max))?);
+    }
+    if time > 0.0 {
+        responses.push(command(cfg, &format!("TIME:{}", time))?);
+    }
+    Ok(responses)
 }
 
 /// Comando de alto nivel: START / STOP / STATUS.

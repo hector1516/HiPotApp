@@ -411,10 +411,16 @@ fn hipot_config_get() -> serde_json::Value {
 
 #[tauri::command]
 fn hipot_config_set(port: String, baud: u32) -> String {
-    set_config(serde_json::json!({
+    let result = set_config(serde_json::json!({
         "hipot_port": port,
         "hipot_baud": baud.to_string(),
-    }))
+    }));
+    let _ = db::repo::log_add(
+        "INFO", "HIPOT", "config",
+        Some(&format!("Puerto {} @ {} baudios", port, baud)),
+        None, None, None, None, result.starts_with("saved"), None,
+    );
+    result
 }
 
 #[tauri::command]
@@ -422,13 +428,27 @@ fn hipot_status() -> serde_json::Value {
     let cfg = hipot::config_from(&get_config());
     let ports = hipot::list_ports();
     match hipot::check_connection(&cfg) {
-        Ok(_) => serde_json::json!({
-            "connected": true, "port": cfg.port, "baud": cfg.baud, "ports": ports
-        }),
-        Err(e) => serde_json::json!({
-            "connected": false, "port": cfg.port, "baud": cfg.baud,
-            "ports": ports, "error": e
-        }),
+        Ok(_) => {
+            let _ = db::repo::log_add(
+                "INFO", "HIPOT", "status",
+                Some(&format!("Puerto {} @ {} abierto", cfg.port, cfg.baud)),
+                None, None, None, None, true, None,
+            );
+            serde_json::json!({
+                "connected": true, "port": cfg.port, "baud": cfg.baud, "ports": ports
+            })
+        }
+        Err(e) => {
+            let _ = db::repo::log_add(
+                "ERROR", "HIPOT", "status",
+                Some(&format!("No se pudo abrir {} @ {}", cfg.port, cfg.baud)),
+                None, None, None, None, false, Some(&e),
+            );
+            serde_json::json!({
+                "connected": false, "port": cfg.port, "baud": cfg.baud,
+                "ports": ports, "error": e
+            })
+        }
     }
 }
 
@@ -467,6 +487,10 @@ fn hipot_abort() -> serde_json::Value {
 #[tauri::command]
 fn hipot_close() -> String {
     hipot::close();
+    let _ = db::repo::log_add(
+        "INFO", "HIPOT", "close", Some("Puerto Hipot cerrado"),
+        None, None, None, None, true, None,
+    );
     "closed".to_string()
 }
 
@@ -487,11 +511,36 @@ fn run_test_cycle(
     let mut plc_values = serde_json::json!({});
     let mut plc_component_values = serde_json::json!({});
 
+    let _ = db::repo::log_add(
+        "INFO", "HIPOT", "cycle_start",
+        Some(&format!("Inicio Hipot · exec #{} · receta #{}", execution_id, recipe_id)),
+        Some(execution_id), None, None, None, true, None,
+    );
+
     // --- Hipot primero: detecta cortos antes de energizar la prueba eléctrica ---
     let _ = app.emit("test-phase", "HIPOT_RUNNING");
     let hipot_cfg = hipot::config_from(&get_config());
+    let (hipot_voltage, hipot_current, hipot_time) =
+        db::repo::recipe_hipot_params(recipe_id).unwrap_or((0.0, 0.0, 0.0));
+    let _ = db::repo::log_add(
+        "INFO", "HIPOT", "recipe_params",
+        Some(&format!(
+            "Receta #{} · V={} · I={} · T={}",
+            recipe_id, hipot_voltage, hipot_current, hipot_time
+        )),
+        Some(execution_id), None, None, None, true, None,
+    );
 
-    match hipot::test_action(&hipot_cfg, "START") {
+    let settings_ok = match hipot::apply_settings(&hipot_cfg, hipot_voltage, hipot_current, hipot_time) {
+        Ok(_) => true,
+        Err(e) => {
+            errors.push(format!("Hipot settings: {}", e));
+            false
+        }
+    };
+
+    if settings_ok {
+        match hipot::test_action(&hipot_cfg, "START") {
         Ok(v) => {
             hipot_parsed = v
                 .get("parsed")
@@ -531,6 +580,7 @@ fn run_test_cycle(
                 .unwrap_or(false);
         }
         Err(e) => errors.push(format!("Hipot start: {}", e)),
+        }
     }
 
     let hipot_duration = started.elapsed().as_secs_f64();
@@ -544,6 +594,26 @@ fn run_test_cycle(
             "insulation": hipot_parsed.get("insulation"),
             "duration": hipot_duration,
         }),
+    );
+
+    let parsed_text = hipot_parsed.to_string();
+    let _ = db::repo::log_add(
+        if hipot_pass { "INFO" } else { "ERROR" },
+        "HIPOT",
+        "result",
+        Some(&format!(
+            "Hipot {} · V={} I={} R={}",
+            if hipot_pass { "PASS" } else { "FAIL" },
+            hipot_parsed.get("voltage").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            hipot_parsed.get("current").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            hipot_parsed.get("resistance").and_then(|v| v.as_f64()).unwrap_or(0.0),
+        )),
+        Some(execution_id),
+        None,
+        Some(parsed_text.as_str()),
+        Some(hipot_duration as i64 * 1000),
+        hipot_pass,
+        None,
     );
 
     if !hipot_pass {
@@ -673,6 +743,12 @@ fn run_test_cycle(
     let _ = db::repo::set_final_status(execution_id, final_status);
     let duration = started.elapsed().as_secs_f64();
     let _ = db::repo::set_total_duration(execution_id, duration);
+    let _ = db::repo::log_add(
+        "INFO", "HIPOT", "cycle_end",
+        Some(&format!("Resultado final {}", final_status)),
+        Some(execution_id), None, None, Some(duration as i64 * 1000),
+        final_status == "GOOD", None,
+    );
 
     serde_json::json!({
         "execution_id": execution_id,
@@ -868,10 +944,11 @@ fn get_recipe_by_model(model: String) -> serde_json::Value {
 }
 
 #[tauri::command]
-fn create_recipe(name: String, model: String, type_: String, product: Option<String>, voltage_levels: String, components: serde_json::Value, totals: serde_json::Value, modified_by: Option<String>) -> i64 {
+fn create_recipe(name: String, model: String, type_: String, product: Option<String>, voltage_levels: String, components: serde_json::Value, totals: serde_json::Value, modified_by: Option<String>, hipot_voltage: Option<f64>, hipot_current_max: Option<f64>, hipot_time: Option<f64>) -> i64 {
     match db::repo::recipe_create(
         &name, &model, &type_, product.as_deref(), &voltage_levels,
         &components, &totals, modified_by.as_deref(),
+        hipot_voltage, hipot_current_max, hipot_time,
     ) {
         Ok(id) => id,
         Err(e) => { eprintln!("[recipe_create] {}", e); -1 }
@@ -968,10 +1045,11 @@ fn list_executions(limit: i64) -> serde_json::Value {
 }
 
 #[tauri::command]
-fn update_recipe(id: i64, name: String, model: String, type_: String, product: Option<String>, voltage_levels: String, components: serde_json::Value, totals: serde_json::Value, modified_by: Option<String>) -> String {
+fn update_recipe(id: i64, name: String, model: String, type_: String, product: Option<String>, voltage_levels: String, components: serde_json::Value, totals: serde_json::Value, modified_by: Option<String>, hipot_voltage: Option<f64>, hipot_current_max: Option<f64>, hipot_time: Option<f64>) -> String {
     match db::repo::recipe_update(
         id, &name, &model, &type_, product.as_deref(), &voltage_levels,
         &components, &totals, modified_by.as_deref(),
+        hipot_voltage, hipot_current_max, hipot_time,
     ) {
         Ok(_) => "updated".to_string(),
         Err(e) => format!("error: {}", e),

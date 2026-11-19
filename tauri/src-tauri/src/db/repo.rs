@@ -4,7 +4,7 @@
 //! pasa por `db::odbc_local`; `rusqlite` queda solo para la migración.
 
 use crate::db::odbc_local::{
-    execute, insert_id, query_json, query_one, sql_bool, sql_num, sql_opt, sql_text,
+    execute, insert_id, query_json, query_one, sql_bool, sql_num, sql_opt, sql_opt_num, sql_text,
     with_connection, with_transaction,
 };
 use serde_json::{json, Map, Value};
@@ -60,7 +60,7 @@ pub fn recipes_list() -> Value {
         query_json(
             conn,
             "SELECT id, name, model, [type], product, voltage_levels, is_active, \
-             created_at, updated_at, modified_by FROM recipes ORDER BY id DESC",
+             created_at, updated_at, modified_by, hipot_voltage, hipot_current_max, hipot_time FROM recipes ORDER BY id DESC",
         )
     })
     .unwrap_or_default();
@@ -73,7 +73,7 @@ pub fn recipe_by_model(model: &str) -> Value {
             conn,
             &format!(
                 "SELECT id, name, model, [type], product, voltage_levels, is_active, \
-                 created_at, updated_at, modified_by FROM recipes WHERE model = {}",
+                 created_at, updated_at, modified_by, hipot_voltage, hipot_current_max, hipot_time FROM recipes WHERE model = {}",
                 sql_text(model)
             ),
         )?;
@@ -131,6 +131,24 @@ pub fn recipe_by_model(model: &str) -> Value {
     result.unwrap_or(Value::Null)
 }
 
+pub fn recipe_hipot_params(recipe_id: i64) -> Result<(f64, f64, f64), String> {
+    with_connection(|conn| {
+        let row = query_one(
+            conn,
+            &format!(
+                "SELECT hipot_voltage, hipot_current_max, hipot_time FROM recipes WHERE id = {}",
+                recipe_id
+            ),
+        )?
+        .ok_or_else(|| "Receta no encontrada".to_string())?;
+        Ok((
+            row.get("hipot_voltage").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            row.get("hipot_current_max").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            row.get("hipot_time").and_then(|v| v.as_f64()).unwrap_or(0.0),
+        ))
+    })
+}
+
 pub fn recipe_create(
     name: &str,
     model: &str,
@@ -140,6 +158,9 @@ pub fn recipe_create(
     components: &Value,
     totals: &Value,
     modified_by: Option<&str>,
+    hipot_voltage: Option<f64>,
+    hipot_current_max: Option<f64>,
+    hipot_time: Option<f64>,
 ) -> Result<i64, String> {
     let now = sql_text(&chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string());
     with_transaction(|conn| {
@@ -147,7 +168,8 @@ pub fn recipe_create(
             conn,
             &format!(
                 "INSERT INTO recipes (name, model, [type], product, voltage_levels, is_active, \
-                 created_at, updated_at, modified_by) VALUES ({}, {}, {}, {}, {}, 1, {}, {}, {})",
+                 created_at, updated_at, modified_by, hipot_voltage, hipot_current_max, hipot_time) \
+                 VALUES ({}, {}, {}, {}, {}, 1, {}, {}, {}, {}, {}, {})",
                 sql_text(name),
                 sql_text(model),
                 sql_text(type_),
@@ -155,7 +177,10 @@ pub fn recipe_create(
                 sql_text(voltage_levels),
                 now,
                 now,
-                sql_opt(modified_by)
+                sql_opt(modified_by),
+                sql_opt_num(hipot_voltage),
+                sql_opt_num(hipot_current_max),
+                sql_opt_num(hipot_time)
             ),
         )?;
         insert_components(conn, id, components)?;
@@ -174,6 +199,9 @@ pub fn recipe_update(
     components: &Value,
     totals: &Value,
     modified_by: Option<&str>,
+    hipot_voltage: Option<f64>,
+    hipot_current_max: Option<f64>,
+    hipot_time: Option<f64>,
 ) -> Result<(), String> {
     let now = sql_text(&chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string());
     with_transaction(|conn| {
@@ -190,7 +218,8 @@ pub fn recipe_update(
             conn,
             &format!(
                 "UPDATE recipes SET name = {}, model = {}, [type] = {}, product = {}, \
-                 voltage_levels = {}, updated_at = {}, modified_by = {} WHERE id = {}",
+                 voltage_levels = {}, updated_at = {}, modified_by = {}, \
+                 hipot_voltage = {}, hipot_current_max = {}, hipot_time = {} WHERE id = {}",
                 sql_text(name),
                 sql_text(model),
                 sql_text(type_),
@@ -198,6 +227,9 @@ pub fn recipe_update(
                 sql_text(voltage_levels),
                 now,
                 sql_opt(modified_by),
+                sql_opt_num(hipot_voltage),
+                sql_opt_num(hipot_current_max),
+                sql_opt_num(hipot_time),
                 id
             ),
         )?;
@@ -236,7 +268,8 @@ pub fn recipe_duplicate(id: i64, new_model: &str) -> Result<i64, String> {
         let original = query_one(
             conn,
             &format!(
-                "SELECT name, [type], product, voltage_levels, modified_by \
+                "SELECT name, [type], product, voltage_levels, modified_by, \
+                 hipot_voltage, hipot_current_max, hipot_time \
                  FROM recipes WHERE id = {}",
                 id
             ),
@@ -252,12 +285,16 @@ pub fn recipe_duplicate(id: i64, new_model: &str) -> Result<i64, String> {
         let product = original.get("product").and_then(|v| v.as_str());
         let voltage = original.get("voltage_levels").and_then(|v| v.as_str()).unwrap_or("");
         let modified = original.get("modified_by").and_then(|v| v.as_str());
+        let hipot_voltage = original.get("hipot_voltage").and_then(|v| v.as_f64());
+        let hipot_current_max = original.get("hipot_current_max").and_then(|v| v.as_f64());
+        let hipot_time = original.get("hipot_time").and_then(|v| v.as_f64());
 
         let new_id = insert_id(
             conn,
             &format!(
                 "INSERT INTO recipes (name, model, [type], product, voltage_levels, is_active, \
-                 created_at, updated_at, modified_by) VALUES ({}, {}, {}, {}, {}, 1, {}, {}, {})",
+                 created_at, updated_at, modified_by, hipot_voltage, hipot_current_max, hipot_time) \
+                 VALUES ({}, {}, {}, {}, {}, 1, {}, {}, {}, {}, {}, {})",
                 sql_text(&new_name),
                 sql_text(new_model),
                 sql_text(type_),
@@ -265,7 +302,10 @@ pub fn recipe_duplicate(id: i64, new_model: &str) -> Result<i64, String> {
                 sql_text(voltage),
                 now,
                 now,
-                sql_opt(modified)
+                sql_opt(modified),
+                sql_opt_num(hipot_voltage),
+                sql_opt_num(hipot_current_max),
+                sql_opt_num(hipot_time)
             ),
         )?;
 
