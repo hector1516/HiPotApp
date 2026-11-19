@@ -500,6 +500,17 @@ function PlcTab() {
     }
   };
 
+  const testConnection = async () => {
+    setMsg('');
+    try {
+      const r = await invoke<any>('plc_probe');
+      setSt(r);
+      setMsg(r?.connected ? 'Conexión PLC correcta' : (r?.error || 'PLC no conectado'));
+    } catch (e: any) {
+      setMsg(`Error al probar PLC: ${String(e?.message ?? e)}`);
+    }
+  };
+
   return (
     <div style={{ minWidth: 0 }}>
       <h2 className="page-title" style={{ marginBottom: 14 }}>PLC Siemens S7-1200 — Red, Lectura en Vivo y Escritura</h2>
@@ -531,10 +542,30 @@ function PlcTab() {
           </label>
           <div style={{ display: 'flex', gap: 6, marginTop: 16 }}>
             <button className="btn primary" onClick={saveConfig}>Guardar Red PLC</button>
-            <button className="btn" onClick={() => invoke<any>('plc_status_info').then(setSt).catch(() => {})}>Probar Conexión</button>
+            <button className="btn" onClick={testConnection}>Probar Conexión</button>
           </div>
         </div>
-        {st && <pre style={{ marginTop: 8, fontSize: 12, background: 'var(--surface-2)', padding: 8, borderRadius: 6, overflow: 'auto' }}>{JSON.stringify(st, null, 2)}</pre>}
+        {st && (
+          <div className="card" style={{ marginTop: 10, background: st.connected ? '#e6f4ea' : '#fef2f2', borderColor: st.connected ? '#a8d0b4' : '#fecaca' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span className={`dot ${st.connected ? 'ok' : 'bad'}`} />
+              <b>{st.connected ? 'PLC conectado' : st.enabled === false ? 'PLC deshabilitado' : 'PLC no conectado'}</b>
+              <span className="mono" style={{ fontSize: 12 }}>{st.ip}{st.rack != null ? ` · Rack ${st.rack} · Slot ${st.slot}` : ''}</span>
+            </div>
+            {st.connected && (
+              <div style={{ fontSize: 12, marginTop: 6 }}>
+                {st.enabled === false
+                  ? 'La IP responde. Marca “Habilitar PLC” y guarda para usarlo en las pruebas.'
+                  : 'La IP responde correctamente.'}
+              </div>
+            )}
+            {!st.connected && st.error && <div style={{ fontSize: 12, marginTop: 6, color: 'var(--bad)' }}>{st.error}</div>}
+            <details style={{ marginTop: 6 }}>
+              <summary style={{ cursor: 'pointer', fontSize: 11, color: 'var(--muted)' }}>Detalles técnicos</summary>
+              <pre style={{ fontSize: 11, margin: '6px 0 0 0', background: 'var(--surface-2)', padding: 8, borderRadius: 6, overflow: 'auto' }}>{JSON.stringify(st, null, 2)}</pre>
+            </details>
+          </div>
+        )}
         <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>
           Si está deshabilitado, la app no intentará conectarse al PLC ni bloqueará la interfaz. Habilítelo después de verificar la IP con “Probar Conexión”.
         </div>

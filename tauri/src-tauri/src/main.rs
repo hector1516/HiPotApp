@@ -218,6 +218,22 @@ fn plc_status_info() -> serde_json::Value {
 }
 
 #[tauri::command]
+fn plc_probe() -> serde_json::Value {
+    let cfg = plc_cfg();
+    let enabled = config_flag("plc_enabled");
+    match plc::connect(&cfg, 1500) {
+        Ok(_) => serde_json::json!({
+            "connected": true, "enabled": enabled, "ip": cfg.ip,
+            "rack": cfg.rack, "slot": cfg.slot
+        }),
+        Err(e) => serde_json::json!({
+            "connected": false, "enabled": enabled, "ip": cfg.ip,
+            "rack": cfg.rack, "slot": cfg.slot, "error": e
+        }),
+    }
+}
+
+#[tauri::command]
 fn plc_emergency_stop() -> serde_json::Value {
     let config = get_config();
     let cfg = plc::config_from(&config);
@@ -1536,6 +1552,7 @@ fn main() {
             show_touch_keyboard,
             plc_status,
             plc_status_info,
+            plc_probe,
             plc_emergency_stop,
             resolve_model_by_serial,
             plc_config_get,
