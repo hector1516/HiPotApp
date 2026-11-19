@@ -719,6 +719,43 @@ table.grid td { color: var(--text); }
   padding: 24px;
   overflow: hidden;
 }
+.estop-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-height: 46px;
+  padding: 6px 14px;
+  background: linear-gradient(90deg, #991b1b, #b91c1c);
+  color: #fff;
+  border-bottom: 2px solid #7f1d1d;
+  font-size: 13px;
+  z-index: 40;
+}
+.estop-banner b { letter-spacing: .05em; }
+.estop-banner .spacer { flex: 1; }
+.estop-banner .btn.sm {
+  min-height: 34px;
+  background: rgba(255, 255, 255, .14);
+  border-color: rgba(255, 255, 255, .38);
+  color: #fff;
+}
+.estop-banner-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fff;
+  flex-shrink: 0;
+  animation: estopBannerBlink 1s ease-in-out infinite;
+}
+@keyframes estopBannerBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .25; }
+}
+.estop-banner-sub {
+  color: rgba(255, 255, 255, .82);
+  font-size: 12px;
+}
 .estop-pulse {
   position: absolute;
   inset: -20%;

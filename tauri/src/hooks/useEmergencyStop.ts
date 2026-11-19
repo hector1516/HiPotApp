@@ -6,6 +6,10 @@ import { invoke } from '@tauri-apps/api/core';
 export function useEmergencyStop(enabled = true) {
   const [active, setActive] = useState(false);
   const [connected, setConnected] = useState<boolean | null>(null);
+  const [plcEnabled, setPlcEnabled] = useState<boolean | null>(null);
+  const [raw, setRaw] = useState<boolean | null>(null);
+  const [inverted, setInverted] = useState<boolean | null>(null);
+  const [address, setAddress] = useState('I0.0');
   const wasActive = useRef(false);
 
   useEffect(() => {
@@ -18,6 +22,10 @@ export function useEmergencyStop(enabled = true) {
         if (!mounted) return;
         setActive(!!r?.active);
         setConnected(!!r?.connected);
+        setPlcEnabled(typeof r?.enabled === 'boolean' ? r.enabled : null);
+        setRaw(typeof r?.raw === 'boolean' ? r.raw : null);
+        setInverted(typeof r?.inverted === 'boolean' ? r.inverted : null);
+        if (typeof r?.address === 'string' && r.address) setAddress(r.address);
         if (r?.active && !wasActive.current) {
           wasActive.current = true;
           invoke('plc_abort').catch(() => {});
@@ -25,7 +33,10 @@ export function useEmergencyStop(enabled = true) {
         }
         if (!r?.active) wasActive.current = false;
       } catch {
-        if (mounted) setConnected(false);
+        if (mounted) {
+          setConnected(false);
+          setPlcEnabled(null);
+        }
       }
     };
 
@@ -37,5 +48,5 @@ export function useEmergencyStop(enabled = true) {
     };
   }, [enabled]);
 
-  return { active, connected };
+  return { active, connected, enabled: plcEnabled, raw, inverted, address };
 }

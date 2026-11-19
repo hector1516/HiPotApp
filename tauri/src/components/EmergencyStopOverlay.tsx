@@ -1,8 +1,14 @@
 import { motion } from 'framer-motion';
 
 // Alarma de paro de emergencia: cubre toda la app, roja, animada y con
-// flecha inferior apuntando al botón físico.
-export function EmergencyStopOverlay() {
+// flecha inferior apuntando al botón físico. Al tocar se minimiza a banner.
+export function EmergencyStopOverlay({ onCollapse, connected, raw, inverted, address }: {
+  onCollapse: () => void;
+  connected?: boolean | null;
+  raw?: boolean | null;
+  inverted?: boolean | null;
+  address?: string;
+}) {
   return (
     <motion.div
       className="estop-overlay"
@@ -13,6 +19,8 @@ export function EmergencyStopOverlay() {
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.2 }}
+      onClick={onCollapse}
+      style={{ cursor: 'pointer' }}
     >
       <div className="estop-pulse" />
 
@@ -44,7 +52,15 @@ export function EmergencyStopOverlay() {
 
       <div className="estop-title">PARO DE EMERGENCIA</div>
       <div className="estop-sub">El botón físico está presionado</div>
-      <div className="estop-hint">Suelte / libere el botón para continuar</div>
+      <div className="estop-sub" style={{ fontSize: 14, marginTop: 6 }}>
+        PLC: {connected === true ? 'en línea' : connected === false ? 'sin conexión' : 'verificando…'}
+      </div>
+      <div className="estop-sub" style={{ fontSize: 12, marginTop: 4 }}>
+        Entrada {address || 'I0.0'}: {raw == null ? '—' : raw ? '1' : '0'} · {inverted ? 'NC' : 'NO'}
+      </div>
+      <div className="estop-hint">
+        Toca en cualquier parte para minimizar y seguir usando la app. La alarma seguirá activa.
+      </div>
 
       <div className="estop-arrow">
         <span>BOTÓN FÍSICO ABAJO</span>

@@ -71,9 +71,23 @@ export default function App() {
   const [gateTarget, setGateTarget] = useState<'config' | 'manual' | null>(null);
   const [godActive, setGodActive] = useState(false);
   const [adminBatch, setAdminBatch] = useState<string>('');
+  const [estopCollapsed, setEstopCollapsed] = useState(false);
   const [clock, setClock] = useState('');
   const estop = useEmergencyStop(health);
   const timers = useRef<number[]>([]);
+
+  React.useEffect(() => {
+    if (!estop.active) setEstopCollapsed(false);
+  }, [estop.active]);
+
+  const plcStatusLabel =
+    estop.enabled === false
+      ? 'deshabilitado'
+      : estop.connected === true
+        ? 'en línea'
+        : estop.connected === false
+          ? 'sin conexión'
+          : 'verificando';
 
   React.useEffect(() => {
     const id = setInterval(() => setClock(new Date().toLocaleTimeString()), 1000);
@@ -259,6 +273,11 @@ export default function App() {
       setPhase('ERROR');
       return;
     }
+    if (estop.active) {
+      setError('Paro de emergencia activo. Libere el botón físico antes de iniciar una prueba.');
+      setPhase('ERROR');
+      return;
+    }
     if (!recipe?.id) {
       setError('No hay receta cargada. Escanea el modelo primero.');
       setPhase('ERROR');
@@ -405,7 +424,15 @@ export default function App() {
       <UpdateNotification />
       <FeedbackHost />
       <AnimatePresence>
-        {estop.active && <EmergencyStopOverlay />}
+        {estop.active && !estopCollapsed && (
+          <EmergencyStopOverlay
+            connected={estop.connected}
+            raw={estop.raw}
+            inverted={estop.inverted}
+            address={estop.address}
+            onCollapse={() => setEstopCollapsed(true)}
+          />
+        )}
       </AnimatePresence>
       <VirtualKeyboard visible={kbVisible} layout={kbLayout} onClose={() => setKbVisible(false)} />
 
@@ -423,12 +450,29 @@ export default function App() {
           <span className={`dot ${health ? 'ok' : 'bad'}`} />
           {health ? 'Sistema OK' : dbInitializing ? 'Conectando BD…' : 'BD sin conexión'}
         </span>
+        <span className={`pill ${estop.connected ? 'on' : 'off'}`} style={{ fontSize: 11 }} title="Estado de conexión del PLC">
+          PLC {plcStatusLabel}
+        </span>
         <button className="btn" onClick={() => setShowHistory(true)}>Historial</button>
         <button className="btn" onClick={() => setShowReprint(true)}>Reimprimir</button>
         <button className="btn" onClick={() => setShowLog(true)}>Log</button>
         <button className="btn" onClick={() => setGateTarget('manual')}>Manual</button>
         <button className="btn accent" onClick={() => setGateTarget('config')} title="Escanea gafete o Ctrl+Shift+K">Configurar</button>
       </header>
+
+      {estop.active && estopCollapsed && (
+        <div className="estop-banner">
+          <span className="estop-banner-dot" />
+          <b>PARO DE EMERGENCIA ACTIVO</b>
+          <span className="estop-banner-sub">El botón físico sigue presionado</span>
+          <span className="estop-banner-sub mono">
+            {estop.address}: {estop.raw == null ? '—' : estop.raw ? '1' : '0'} · {estop.inverted ? 'NC' : 'NO'}
+          </span>
+          <span className="spacer" />
+          <span className={`pill ${estop.connected ? 'on' : 'off'}`}>PLC {plcStatusLabel}</span>
+          <button className="btn sm" onClick={() => setEstopCollapsed(false)}>Ampliar alarma</button>
+        </div>
+      )}
 
       <AnimatePresence>
         {!health && (
@@ -507,7 +551,7 @@ export default function App() {
           <span className="pill warn" style={{ fontSize: 11 }}>Paro de emergencia no disponible</span>
         )}
         <span className="spacer" />
-        <span style={{ color: 'var(--muted-2)', fontSize: 11 }}>Offline-first · Windows 11 · v1.0.36 · Ctrl+Shift+K → GodMode</span>
+        <span style={{ color: 'var(--muted-2)', fontSize: 11 }}>Offline-first · Windows 11 · v1.0.37 · Ctrl+Shift+K → GodMode</span>
       </footer>
 
       <ReprintPopup open={showReprint} onClose={() => setShowReprint(false)} />
