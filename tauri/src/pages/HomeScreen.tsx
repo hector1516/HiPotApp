@@ -5,17 +5,7 @@ import { SplitLayout } from '../components/SplitLayout';
 import { PageHeader } from '../components/PageHeader';
 import { usePLC } from '../hooks/usePLC';
 import { useHipot } from '../hooks/useHipot';
-
-const STEPS = ['Modelo', 'Serie', 'Batch', 'Eléctrica', 'Hipot', 'Resultado'];
-const PROMPTS = [
-  '',
-  'Escanea el modelo',
-  'Escanea la serie',
-  'Escanea tu batch para iniciar',
-  'Iniciando prueba',
-  'Iniciando prueba',
-  'Iniciando prueba',
-];
+import { AUTO_STEPS, stepAt } from '../config/autoSteps';
 
 function RailStep({ n, label, state }: { n: number; label: string; state: 'done' | 'now' | 'todo' }) {
   return (
@@ -52,7 +42,7 @@ export function HomeScreen({
   const plc = usePLC();
   const hipot = useHipot();
   const handler = step === 1 ? onScanModel : step === 2 ? onScanSerial : onScanBatch;
-  const prompt = PROMPTS[step] ?? '';
+  const prompt = stepAt(step - 1).prompt;
 
   const aside = (
     <>
@@ -65,10 +55,10 @@ export function HomeScreen({
       <div className="rail-divider" />
 
       <div className="rail-steps">
-        {STEPS.map((label, i) => {
+        {AUTO_STEPS.map((s, i) => {
           const n = i + 1;
           const state = n < step ? 'done' : n === step ? 'now' : 'todo';
-          return <RailStep key={label} n={n} label={label} state={state} />;
+          return <RailStep key={s.id} n={n} label={s.label} state={state} />;
         })}
       </div>
 
@@ -112,7 +102,7 @@ export function HomeScreen({
   return (
     <SplitLayout aside={aside}>
       <PageHeader
-        eyebrow={`Paso ${Math.min(step, 6)} de 6`}
+        eyebrow={`Paso ${Math.min(step, AUTO_STEPS.length)} de ${AUTO_STEPS.length}`}
         title={prompt || 'Procesando unidad'}
         subtitle="El lector es keyboard-wedge: escanea o usa el teclado en pantalla."
       />

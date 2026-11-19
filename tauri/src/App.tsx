@@ -16,6 +16,7 @@ import VirtualKeyboard from './components/VirtualKeyboard';
 import { Phase } from './styles/theme';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { AUTO_STEPS, stepNumber } from './config/autoSteps';
 
 // Router principal: HOME -> TEST -> RESULT + ADMIN (doc 02 flujo operador).
 type View = 'home' | 'test' | 'result' | 'admin' | 'manual';
@@ -78,7 +79,10 @@ export default function App() {
     let unlistenPhase: (() => void) | undefined;
     let unlistenValues: (() => void) | undefined;
     listen<string>('test-phase', event => {
-      if (event.payload === 'HIPOT_RUNNING') setPhase('HIPOT_RUNNING');
+      if (event.payload === 'HIPOT_RUNNING') {
+        setPhase('HIPOT_RUNNING');
+        setStep(stepNumber('hipot'));
+      }
     }).then(fn => { unlistenPhase = fn; }).catch(() => {});
     listen<Record<string, number>>('test-values', event => {
       if (event.payload) setValues(event.payload);
@@ -180,13 +184,13 @@ export default function App() {
     try {
       await invoke('barcode_scan', { code, barcodeType: 'model', scanOrder: 1 });
       const r = await invoke<any>('get_recipe_by_model', { model: code });
-      setRecipe(r); setStep(2); setPhase('LOADED');
+      setRecipe(r); setStep(stepNumber('serial')); setPhase('LOADED');
     } catch { setError(`Receta no encontrada: ${code}`); setPhase('ERROR'); later(() => setPhase('IDLE'), 1500); }
   };
   const scanSerial = async (code: string) => {
     setSerial(code);
     await invoke('barcode_scan', { code, barcodeType: 'serial', scanOrder: 2 }).catch(() => {});
-    setStep(3); setPhase('READY');
+    setStep(stepNumber('batch')); setPhase('READY');
   };
   const scanBatch = async (code: string) => {
     if (!recipe?.id) {
@@ -211,7 +215,7 @@ export default function App() {
       return;
     }
 
-    setStep(4); setPhase('PLC_RUNNING'); setView('test');
+    setStep(stepNumber('plc')); setPhase('PLC_RUNNING'); setView('test');
 
     // Voltaje de prueba: primer nivel de la receta (o 120 V).
     const voltage = (() => {
@@ -245,7 +249,7 @@ export default function App() {
       setElapsed(`${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`);
       setFinal(r?.final === 'GOOD' ? 'GOOD' : 'BAD');
       setPhase(r?.final === 'GOOD' ? 'COMPLETE_GOOD' : 'COMPLETE_BAD');
-      setStep(6); setView('result');
+      setStep(stepNumber('result')); setView('result');
 
       if (r?.final === 'GOOD') {
         setPrintStatus('sending');
@@ -270,7 +274,7 @@ export default function App() {
       setError(`Error en prueba: ${String(e?.message ?? e)}`);
       setFinal('BAD');
       setPhase('COMPLETE_BAD');
-      setStep(6); setView('result');
+      setStep(stepNumber('result')); setView('result');
       setPrintStatus(null);
     }
   };
@@ -282,7 +286,7 @@ export default function App() {
       const v = parseInt(c?.result_hold_seconds ?? '10', 10);
       if (!Number.isNaN(v) && v >= 3 && v <= 60) setHoldSeconds(v);
     }).catch(() => {});
-    setView('home'); setStep(1); setRecipe(null); setSerial(''); setBatch('');
+    setView('home'); setStep(stepNumber('model')); setRecipe(null); setSerial(''); setBatch('');
     setError(''); setPhase('IDLE'); setExecId(null);
     setValues({});
   };
@@ -330,7 +334,7 @@ export default function App() {
           <img src="logo.png" alt="HiPot Tester" />
           <span style={{ color: '#fff' }}>HiPot<span style={{ color: 'var(--accent-2)' }}>App</span></span>
         </div>
-        <span className="pill dark" style={{ fontSize: 11 }}>PASO {Math.min(step, 6)}/6</span>
+        <span className="pill dark" style={{ fontSize: 11 }}>PASO {Math.min(step, AUTO_STEPS.length)}/{AUTO_STEPS.length}</span>
         {recipe && <span className="pill dark" style={{ fontSize: 11 }}>{recipe.model}</span>}
         {adminBatch && <span className="pill dark" style={{ fontSize: 11 }}>Admin: {adminBatch}</span>}
         <span className="spacer" />
