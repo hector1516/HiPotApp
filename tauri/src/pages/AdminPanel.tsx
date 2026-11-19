@@ -204,7 +204,7 @@ function UsersTab(){
 }
 
 const VOLTS = [120,208,220,240];
-const COMPS = ['FAN','DOOR','FRAME','DRAIN','DEFROST','LENGTH'];
+const COMPS = ['FAN','DOOR','FRAME','DRAIN','DEFROST','LIGHT'];
 
 function matrixFromDetail(detail:any){
   const m: Record<string, Record<string,{min:string,max:string,enabled:boolean}>> = {};
@@ -224,22 +224,33 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
   const [list,setList]=useState<any[]>([]);
   const [q,setQ]=useState('');
   const [msg,setMsg]=useState('');
-  const [editing,setEditing]=useState<null|{id:number|null,name:string,model:string,product:string,m:any,t:any,hipotVoltage:string,hipotCurrent:string,hipotTime:string}>(null);
+  const [editing,setEditing]=useState<null|{id:number|null,name:string,model:string,product:string,voltage:string,m:any,t:any,hipotVoltage:string,hipotCurrent:string,hipotTime:string}>(null);
   const load=()=>invoke<any[]>('list_recipes').then(setList).catch(()=>setList([]));
   useEffect(()=>{load();},[]);
   const rows=list.filter(r=>!q||r.model.includes(q));
   const openNew=()=>{
     const m:any={}; const t:any={};
     for(const v of VOLTS){ const vs=String(v); m[vs]={}; t[vs]={min:'',max:''}; for(const c of COMPS) m[vs][c]={min:'',max:'',enabled:false}; }
-    setEditing({id:null,name:'',model:q||'',product:'',m,t,hipotVoltage:'',hipotCurrent:'',hipotTime:''});
+    setEditing({id:null,name:'',model:q||'',product:'',voltage:'120',m,t,hipotVoltage:'',hipotCurrent:'',hipotTime:'10'});
   };
   const openEdit=async(r:any)=>{
     const d=await invoke<any>('get_recipe_by_model', { model: r.model });
     const {m,t}=matrixFromDetail(d);
-    setEditing({id:d.id,name:d.name,model:d.model,product:d.product||'',m,t,
+    const compVoltages = (d?.components ?? [])
+      .map((c:any)=>String(c.voltage).replace('VAC',''))
+      .filter((v:string)=>VOLTS.map(String).includes(v));
+    let voltage = compVoltages[0] ?? '120';
+    if (!compVoltages.length) {
+      let raw = d?.voltage_levels;
+      if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch {} }
+      const first = Array.isArray(raw) ? raw[0] : raw;
+      const n = Number(String(first ?? '').replace(/[^0-9.]/g,''));
+      if (Number.isFinite(n) && VOLTS.map(String).includes(String(n))) voltage = String(n);
+    }
+    setEditing({id:d.id,name:d.name,model:d.model,product:d.product||'',voltage,m,t,
       hipotVoltage:d.hipot_voltage!=null?String(d.hipot_voltage):'',
       hipotCurrent:d.hipot_current_max!=null?String(d.hipot_current_max):'',
-      hipotTime:d.hipot_time!=null?String(d.hipot_time):''});
+      hipotTime:d.hipot_time!=null?String(d.hipot_time):'10'});
   };
   const doDelete=async(r:any)=>{
     if(!await askConfirm(`Borrar receta ${r.model} — ${r.name}?`)) return;
@@ -253,42 +264,54 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
   const doSave=async()=>{
     if(!editing) return;
     if(!editing.model.trim()||!editing.name.trim()){ setMsg('Modelo y nombre son obligatorios'); return; }
+    const vs = editing.voltage;
+    if(!VOLTS.map(String).includes(vs)){ setMsg('Voltaje de receta inválido'); return; }
     const components:any[]=[]; const totals:any[]=[];
-    for(const v of VOLTS){
-      const vs=String(v);
-      for(const c of COMPS){
-        const cell=editing.m[vs][c];
-        if(cell.enabled){
-          if(cell.min===''||cell.max===''){ setMsg(`${c} ${vs}V: complete MIN y MAX`); return; }
-          const mn=parseFloat(cell.min), mx=parseFloat(cell.max);
-          if(isNaN(mn)||isNaN(mx)||mn>=mx){ setMsg(`${c} ${vs}V: MIN debe ser < MAX`); return; }
-          components.push({name:c,voltage:vs,enabled:true,min:mn,max:mx});
-        }
+    for(const c of COMPS){
+      const cell=editing.m[vs][c];
+      if(cell.enabled){
+        if(cell.min===''||cell.max===''){ setMsg(`${c} ${vs}V: complete MIN y MAX`); return; }
+        const mn=parseFloat(cell.min), mx=parseFloat(cell.max);
+        if(isNaN(mn)||isNaN(mx)||mn>=mx){ setMsg(`${c} ${vs}V: MIN debe ser < MAX`); return; }
+        components.push({name:c,voltage:vs,enabled:true,min:mn,max:mx});
       }
-      const tv=editing.t[vs];
-      if(tv.min!==''||tv.max!==''){
-        const mn=parseFloat(tv.min), mx=parseFloat(tv.max);
-        if(isNaN(mn)||isNaN(mx)||mn>=mx){ setMsg(`TOTAL ${vs}V: MIN < MAX`); return; }
-        totals.push({voltage:vs,min:mn,max:mx});
-      }
+    }
+    const tv=editing.t[vs];
+    if(tv.min!==''||tv.max!==''){
+      const mn=parseFloat(tv.min), mx=parseFloat(tv.max);
+      if(isNaN(mn)||isNaN(mx)||mn>=mx){ setMsg(`TOTAL ${vs}V: MIN < MAX`); return; }
+      totals.push({voltage:vs,min:mn,max:mx});
     }
     const parseNum = (raw: string) => raw.trim() === '' ? null : Number(raw);
     const hipotVoltage = parseNum(editing.hipotVoltage);
     const hipotCurrent = parseNum(editing.hipotCurrent);
-    const hipotTime = parseNum(editing.hipotTime);
+    let hipotTime = editing.hipotTime.trim() === '' ? 10 : Number(editing.hipotTime);
+    if (!Number.isFinite(hipotTime) || hipotTime <= 0) hipotTime = 10;
     if ([hipotVoltage, hipotCurrent, hipotTime].some(v => v !== null && !Number.isFinite(v))) {
       setMsg('Parámetros Hipot inválidos'); return;
     }
-    const body:any={name:editing.name.trim(),model:editing.model.trim().toUpperCase(),type:'current_consumption',product:editing.product||'',voltage_levels:JSON.stringify(VOLTS.map(v=>String(v))),components,totals,modified_by:(adminBatch||'').toUpperCase()||'ADMIN'};
+    const body:any={name:editing.name.trim(),model:editing.model.trim().toUpperCase(),type:'current_consumption',product:editing.product||'',voltage_levels:JSON.stringify([vs]),components,totals,modified_by:(adminBatch||'').toUpperCase()||'ADMIN'};
     try{
       if(editing.id) {
-        await invoke('update_recipe', { id: editing.id, name: body.name, model: body.model, type_: body.type, product: body.product, voltageLevels: body.voltage_levels, components: body.components, totals: body.totals, modifiedBy: body.modified_by, hipotVoltage, hipotCurrentMax: hipotCurrent, hipotTime });
+        const r = await invoke<string>('update_recipe', { id: editing.id, name: body.name, model: body.model, type_: body.type, product: body.product, voltageLevels: body.voltage_levels, components: body.components, totals: body.totals, modifiedBy: body.modified_by, hipotVoltage, hipotCurrentMax: hipotCurrent, hipotTime });
+        if (r !== 'updated') throw new Error(r);
       } else {
-        await invoke('create_recipe', { name: body.name, model: body.model, type_: body.type, product: body.product, voltageLevels: body.voltage_levels, components: body.components, totals: body.totals, modifiedBy: body.modified_by, hipotVoltage, hipotCurrentMax: hipotCurrent, hipotTime });
+        const id = await invoke<number>('create_recipe', { name: body.name, model: body.model, type_: body.type, product: body.product, voltageLevels: body.voltage_levels, components: body.components, totals: body.totals, modifiedBy: body.modified_by, hipotVoltage, hipotCurrentMax: hipotCurrent, hipotTime });
+        if (id < 0) throw new Error('No se pudo crear la receta. Verifique que el modelo no exista.');
       }
       setEditing(null); setMsg(editing.id?'Receta actualizada':'Receta creada'); load();
     }catch(err:any){ setMsg(String(err?.message ?? err)); }
   };
+  const restoreDefaults = async () => {
+    if (!await askConfirm('¿Restaurar las 4 recetas de fábrica (RL-120, RL-208, RL-220, RL-240)? Se actualizan si ya existen; la receta RL antigua se reemplaza si no tiene historial. Otras recetas no se borran.')) return;
+    try {
+      const r = await invoke<any>('recipes_restore_defaults');
+      if (!r?.ok) throw new Error(r?.error || 'Error al restaurar');
+      setMsg(`Recetas de fábrica: ${r.inserted ?? 0} nuevas, ${r.updated ?? 0} actualizadas`);
+      load();
+    } catch (e: any) { setMsg(String(e?.message ?? e)); }
+  };
+  const editVoltage = editing?.voltage ?? '120';
   return (
     <div style={{ minWidth:0 }}>
       <h2 style={{ margin:'0 0 10px 0', fontSize:16 }}>Recetas — altas / bajas / cambios</h2>
@@ -298,12 +321,13 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
           <input className="input" placeholder="Buscar modelo" value={q} onChange={e=>setQ(e.target.value.toUpperCase())} style={{ flex:'1 1 200px', minWidth:0 }} />
           <button className="btn primary" style={{ flexShrink:0 }} onClick={openNew}>+ Alta</button>
           <button className="btn" style={{ flexShrink:0 }} onClick={load}>Actualizar</button>
+          <button className="btn" style={{ flexShrink:0 }} onClick={restoreDefaults}>Restaurar fábrica</button>
         </div>
       </div>
       <div className="card" style={{ overflow:'auto', minWidth:0 }}>
         <table className="grid"><thead><tr><th>Modelo</th><th>Nombre</th><th>Hipot</th><th>Guardado</th><th style={{ minWidth:220 }}>Acciones</th></tr></thead>
           <tbody>{rows.map(r=>(
-            <tr key={r.id}><td><b>{r.model}</b></td><td>{r.name}</td><td className="mono" style={{ fontSize:12 }}>{r.hipot_voltage!=null?`${r.hipot_voltage} V`:'—'} · {r.hipot_current_max!=null?r.hipot_current_max:'—'} · {r.hipot_time!=null?`${r.hipot_time} s`:'—'}</td><td style={{ fontSize:11, color:'var(--muted)' }}>{r.modified_by?`${r.modified_by} · `:''}{r.updated_at?new Date(r.updated_at).toLocaleString('es-MX'):(r.created_at?new Date(r.created_at).toLocaleString('es-MX'):'—')}</td>
+            <tr key={r.id}><td><b>{r.model}</b></td><td>{r.name}</td><td className="mono" style={{ fontSize:12 }}>{(r.hipot_voltage ?? 0) > 0 && (r.hipot_current_max ?? 0) > 0 ? <>{`${r.hipot_voltage} V`} · {`${r.hipot_current_max} mA`} · {`${r.hipot_time ?? 10} s`}</> : <span className="pill warn">Hipot sin configurar</span>}</td><td style={{ fontSize:11, color:'var(--muted)' }}>{r.modified_by?`${r.modified_by} · `:''}{r.updated_at?new Date(r.updated_at).toLocaleString('es-MX'):(r.created_at?new Date(r.created_at).toLocaleString('es-MX'):'—')}</td>
               <td>
                 <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
                   <button className="btn sm primary" onClick={()=>openEdit(r)}>Editar</button>
@@ -318,11 +342,20 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
       {editing && (
         <div style={{ position:'fixed', inset:0, background:'rgba(20,27,38,.55)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:4000, padding:12 }} onClick={()=>setEditing(null)}>
           <div className="card" style={{ width:'min(1180px,96vw)', maxHeight:'92vh', overflow:'auto', minWidth:0 }} onClick={e=>e.stopPropagation()}>
-            <h3 style={{ margin:'0 0 10px 0' }}>{editing.id?'Editar receta':'Alta de receta'} — voltaje entero + check para descartar</h3>
-            <div style={{ display:'flex', gap:8, minWidth:0, flexWrap:'wrap', marginBottom:10 }}>
-              <input className="input" placeholder="Modelo (ej. RL)" value={editing.model} onChange={e=>setEditing({...editing,model:e.target.value.toUpperCase()})} style={{ flex:'1 1 140px' }} />
-              <input className="input" placeholder="Nombre (ej. CONSUMOS RL)" value={editing.name} onChange={e=>setEditing({...editing,name:e.target.value})} style={{ flex:'2 1 220px' }} />
-              <input className="input" placeholder="Producto (opcional)" value={editing.product} onChange={e=>setEditing({...editing,product:e.target.value})} style={{ flex:'1 1 180px' }} />
+            <h3 style={{ margin:'0 0 10px 0' }}>{editing.id?'Editar receta':'Alta de receta'} — una receta por fila (modelo + voltaje)</h3>
+            <div style={{ display:'flex', gap:8, minWidth:0, flexWrap:'wrap', marginBottom:6 }}>
+              <input className="input" placeholder="Modelo único (ej. RL-120)" value={editing.model} onChange={e=>setEditing({...editing,model:e.target.value.toUpperCase()})} style={{ flex:'1 1 160px' }} />
+              <input className="input" placeholder="Nombre (ej. CONSUMOS RL 120VAC)" value={editing.name} onChange={e=>setEditing({...editing,name:e.target.value})} style={{ flex:'2 1 260px' }} />
+              <input className="input" placeholder="Producto (opcional)" value={editing.product} onChange={e=>setEditing({...editing,product:e.target.value})} style={{ flex:'1 1 160px' }} />
+              <div className="field" style={{ flex:'0 1 170px' }}>
+                <label>Voltaje de la receta (VAC)</label>
+                <select className="input" value={editing.voltage} onChange={e=>setEditing({...editing,voltage:e.target.value})}>
+                  {VOLTS.map(v=><option key={v} value={String(v)}>{v} VAC</option>)}
+                </select>
+              </div>
+            </div>
+            <div style={{ fontSize:11, color:'var(--muted)', marginBottom:10 }}>
+              Cada receta es una fila del Excel: un modelo + un voltaje. Recetas de fábrica: <b>RL-120, RL-208, RL-220, RL-240</b>.
             </div>
 
             <div style={{ overflow:'auto', border:'1px solid var(--line)', borderRadius:8 }}>
@@ -332,24 +365,19 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
                   <tr><th style={{ background:'var(--surface-2)' }}></th>{COMPS.map(c=><React.Fragment key={c}><th style={{ background:'var(--surface-2)', fontSize:11 }}>MIN</th><th style={{ background:'var(--surface-2)', fontSize:11 }}>MAX</th><th style={{ background:'#fdf1d0', fontSize:11, minWidth:36 }}></th></React.Fragment>)}<th style={{ background:'#fdf1d0', fontSize:11 }}>MIN</th><th style={{ background:'#fdf1d0', fontSize:11 }}>MAX</th></tr>
                 </thead>
                 <tbody>
-                  {VOLTS.map(v=>{
-                    const vs=String(v);
-                    return (
-                    <tr key={vs}>
-                      <td style={{ fontWeight:800, background:'#f8fafc', textAlign:'center' }}>{v}</td>
-                      {COMPS.map(c=>{
-                        const cell=editing.m[vs][c];
-                        return <React.Fragment key={c}>
-                          <td style={{ padding:3 }}><input disabled={!cell.enabled} value={cell.min} onChange={e=>setEditing({ ...editing, m:{...editing.m,[vs]:{...editing.m[vs],[c]:{...cell,min:e.target.value}}} })} placeholder="—" style={{ width:56, height:30, border:`1px solid ${cell.enabled?'var(--accent)':'var(--line)'}`, borderRadius:6, textAlign:'center', fontSize:12, background: cell.enabled?'#fff':'var(--surface-2)' }} /></td>
-                          <td style={{ padding:3 }}><input disabled={!cell.enabled} value={cell.max} onChange={e=>setEditing({ ...editing, m:{...editing.m,[vs]:{...editing.m[vs],[c]:{...cell,max:e.target.value}}} })} placeholder="—" style={{ width:56, height:30, border:`1px solid ${cell.enabled?'var(--accent)':'var(--line)'}`, borderRadius:6, textAlign:'center', fontSize:12, background: cell.enabled?'#fff':'var(--surface-2)' }} /></td>
-                          <td style={{ padding:3, textAlign:'center' }}><input type="checkbox" checked={cell.enabled} onChange={e=>setEditing({...editing,m:{...editing.m,[vs]:{...editing.m[vs],[c]:{...cell,enabled:e.target.checked}}}})} style={{ width:18, height:18 }} title="Activar/desactivar este componente en este voltaje" /></td>
-                        </React.Fragment>;
-                      })}
-                      <td style={{ padding:3 }}><input value={editing.t[vs].min} onChange={e=>setEditing({...editing,t:{...editing.t,[vs]:{...editing.t[vs],min:e.target.value}}})} placeholder="—" style={{ width:56, height:30, border:'1px solid var(--line)', borderRadius:6, textAlign:'center', fontSize:12 }} /></td>
-                      <td style={{ padding:3 }}><input value={editing.t[vs].max} onChange={e=>setEditing({...editing,t:{...editing.t,[vs]:{...editing.t[vs],max:e.target.value}}})} placeholder="—" style={{ width:56, height:30, border:'1px solid var(--line)', borderRadius:6, textAlign:'center', fontSize:12 }} /></td>
-                    </tr>
-                    );
-                  })}
+                  <tr key={editVoltage}>
+                    <td style={{ fontWeight:800, background:'#f8fafc', textAlign:'center' }}>{editVoltage}</td>
+                    {COMPS.map(c=>{
+                      const cell=editing.m[editVoltage][c];
+                      return <React.Fragment key={c}>
+                        <td style={{ padding:3 }}><input disabled={!cell.enabled} value={cell.min} onChange={e=>setEditing({ ...editing, m:{...editing.m,[editVoltage]:{...editing.m[editVoltage],[c]:{...cell,min:e.target.value}}} })} placeholder="—" style={{ width:56, height:30, border:`1px solid ${cell.enabled?'var(--accent)':'var(--line)'}`, borderRadius:6, textAlign:'center', fontSize:12, background: cell.enabled?'#fff':'var(--surface-2)' }} /></td>
+                        <td style={{ padding:3 }}><input disabled={!cell.enabled} value={cell.max} onChange={e=>setEditing({ ...editing, m:{...editing.m,[editVoltage]:{...editing.m[editVoltage],[c]:{...cell,max:e.target.value}}} })} placeholder="—" style={{ width:56, height:30, border:`1px solid ${cell.enabled?'var(--accent)':'var(--line)'}`, borderRadius:6, textAlign:'center', fontSize:12, background: cell.enabled?'#fff':'var(--surface-2)' }} /></td>
+                        <td style={{ padding:3, textAlign:'center' }}><input type="checkbox" checked={cell.enabled} onChange={e=>setEditing({...editing,m:{...editing.m,[editVoltage]:{...editing.m[editVoltage],[c]:{...cell,enabled:e.target.checked}}}})} style={{ width:18, height:18 }} title="Activar/desactivar este componente" /></td>
+                      </React.Fragment>;
+                    })}
+                    <td style={{ padding:3 }}><input value={editing.t[editVoltage].min} onChange={e=>setEditing({...editing,t:{...editing.t,[editVoltage]:{...editing.t[editVoltage],min:e.target.value}}})} placeholder="—" style={{ width:56, height:30, border:'1px solid var(--line)', borderRadius:6, textAlign:'center', fontSize:12 }} /></td>
+                    <td style={{ padding:3 }}><input value={editing.t[editVoltage].max} onChange={e=>setEditing({...editing,t:{...editing.t,[editVoltage]:{...editing.t[editVoltage],max:e.target.value}}})} placeholder="—" style={{ width:56, height:30, border:'1px solid var(--line)', borderRadius:6, textAlign:'center', fontSize:12 }} /></td>
+                  </tr>
                 </tbody>
               </table>
             </div>

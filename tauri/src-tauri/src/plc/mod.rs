@@ -340,6 +340,13 @@ pub fn empty_results() -> Value {
 
 pub fn send_recipe(c: &mut PlcClient, voltage: f64, components: &Value) -> Result<(), String> {
     write_real(c, 1, OFF_VOLTAGE, voltage)?;
+    // Limpia límites/habilitación de la receta anterior. Si una fila no incluye
+    // un componente, debe quedar deshabilitado, no con valores viejos.
+    for (_, min_off, max_off, en_off) in COMP_OFFSETS {
+        write_real(c, 1, *min_off, 0.0)?;
+        write_real(c, 1, *max_off, 0.0)?;
+        write_bool(c, 1, *en_off, false, 0)?;
+    }
     if let Some(arr) = components.as_array() {
         for comp in arr {
             let name = comp

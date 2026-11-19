@@ -950,6 +950,18 @@ fn create_recipe(name: String, model: String, type_: String, product: Option<Str
 }
 
 #[tauri::command]
+fn recipes_restore_defaults() -> serde_json::Value {
+    match db::defaults::restore_default_recipes() {
+        Ok(v) => serde_json::json!({
+            "ok": true,
+            "inserted": v.get("inserted").cloned().unwrap_or(serde_json::json!(0)),
+            "updated": v.get("updated").cloned().unwrap_or(serde_json::json!(0)),
+        }),
+        Err(e) => serde_json::json!({ "ok": false, "error": e }),
+    }
+}
+
+#[tauri::command]
 fn delete_recipe(id: i64) -> String {
     match db::repo::recipe_delete(id) {
         Ok(_) => "deleted".to_string(),
@@ -1361,6 +1373,7 @@ fn main() {
             update_recipe,
             delete_recipe,
             duplicate_recipe,
+            recipes_restore_defaults,
             list_operators,
             add_operator,
             list_users,

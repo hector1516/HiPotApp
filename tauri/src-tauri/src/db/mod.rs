@@ -5,6 +5,7 @@
 //! `SQLite -> SQL Express` y para tests.
 
 pub mod config;
+pub mod defaults;
 pub mod odbc_local;
 pub mod paths;
 pub mod repo;
@@ -35,6 +36,9 @@ pub fn init() {
     }
     if let Err(e) = seed_express() {
         eprintln!("[db] seed SQL Express: {}", e);
+    }
+    if let Err(e) = defaults::seed_express() {
+        eprintln!("[db] seed recetas/tags de fábrica: {}", e);
     }
     let _ = repo::logs_prune(30, 5000);
 }

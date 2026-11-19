@@ -48,6 +48,30 @@ Después envía `SS 1` y `TEST`. Si falta voltaje, corriente o tiempo, el ciclo 
 - `Dwell`, `Ramp` y `Delay` son estados en proceso.
 - Al terminar o al vencer el timeout (dwell + 30 s), la app envía `RESET`.
 
+## Recetas de fábrica precargadas
+
+La app precarga 4 recetas, una por fila de la hoja **CONSUMOS RL**:
+
+| Receta | Voltaje | Componentes con límites |
+|---|---|---|
+| `RL-120` | 120 VAC | FAN, DOOR, FRAME, DRAIN, LIGHT |
+| `RL-208` | 208 VAC | DEFROST |
+| `RL-220` | 220 VAC | DRAIN, DEFROST, LIGHT |
+| `RL-240` | 240 VAC | FAN, DOOR, FRAME, DRAIN, DEFROST |
+
+- Cada receta tiene un solo voltaje y su propio TOTAL.
+- Las celdas vacías del Excel quedan como componentes deshabilitados.
+- El **tiempo de Hipot** se precarga en **10 segundos** en todas las recetas nuevas; se puede ajustar en la receta.
+- El voltaje y el límite de corriente de Hipot quedan **vacíos** por seguridad: deben capturarse antes de la primera prueba.
+- **Configuración → Recetas → Restaurar fábrica** vuelve a crear/actualizar estas 4 recetas sin borrar otras.
+
+## PLC precargado
+
+- IP `192.168.1.10`, rack `0`, slot `1`.
+- Paro de emergencia `I0.0`, contacto NC.
+- Tags DB1 precargados: `Recipe_Voltage`, `Component_*`, `Test_*`, `Result_*`.
+- El mapa de Q/I/IA es el documentado en `docs/03-hardware.md` y está fijo en la app.
+
 ## Log de comandos Hipot
 
 Cada TX/RX del Hipot se guarda en `app_logs` con:

@@ -245,6 +245,11 @@ export default function App() {
       setPhase('ERROR');
       return;
     }
+    if (!((recipe?.hipot_voltage ?? 0) > 0 && (recipe?.hipot_current_max ?? 0) > 0)) {
+      setError('La receta no tiene voltaje y corriente de Hipot configurados. Configúrelos en Configuración → Recetas.');
+      setPhase('ERROR');
+      return;
+    }
     setBatch(code);
     setError('');
     await invoke('barcode_scan', { code, barcodeType: 'batch', scanOrder: 3 }).catch(() => {});
