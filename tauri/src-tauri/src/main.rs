@@ -3,6 +3,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod db;
+mod plc;
 
 use db::paths::db_path;
 use std::process::{Child, Command};
@@ -131,79 +132,17 @@ fn plc_status(ip: String, rack: u16, slot: u16) -> bool {
 
 #[tauri::command]
 fn plc_read_tag(ip: String, rack: u16, slot: u16, db: i32, offset: i32, data_type: String, bit: i32) -> Result<serde_json::Value, String> {
-    use std::net::IpAddr;
-    use std::time::Duration;
-    let addr: IpAddr = ip.parse().map_err(|_| "invalid ip".to_string())?;
-    let mut opts = s7::tcp::Options::new(addr, rack, slot, s7::transport::Connection::OP);
-    opts.read_timeout = Duration::from_secs(2);
-    opts.write_timeout = Duration::from_secs(2);
-    let transport = s7::tcp::Transport::connect(opts).map_err(|e| e.to_string())?;
-    let mut client = s7::client::Client::new(transport).map_err(|e| e.to_string())?;
-
-    let dt = data_type.to_uppercase();
-    match dt.as_str() {
-        "BOOL" => {
-            let mut buf = vec![0u8; 1];
-            client.ab_read(offset, 1, &mut buf).map_err(|e| e.to_string())?;
-            let val = (buf[0] >> bit) & 1 == 1;
-            Ok(serde_json::json!(val))
-        }
-        "WORD" | "INT" => {
-            let mut buf = vec![0u8; 2];
-            client.ab_read(offset, 2, &mut buf).map_err(|e| e.to_string())?;
-            let val = u16::from_be_bytes([buf[0], buf[1]]);
-            Ok(serde_json::json!(val))
-        }
-        "REAL" => {
-            let mut buf = vec![0u8; 4];
-            client.ag_read(db, offset, 4, &mut buf).map_err(|e| e.to_string())?;
-            // Parse float from bytes (big-endian)
-            let val = f32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
-            Ok(serde_json::json!(val))
-        }
-        _ => Err("unsupported type".to_string()),
-    }
+    let cfg = plc::PlcConfig { ip, rack, slot, simulate: false };
+    let mut client = plc::connect(&cfg, 2000)?;
+    plc::read_tag(&mut client, db, offset, &data_type, bit)
 }
 
 #[tauri::command]
 fn plc_write_tag(ip: String, rack: u16, slot: u16, db: i32, offset: i32, data_type: String, value: serde_json::Value, bit: i32) -> Result<String, String> {
-    use std::net::IpAddr;
-    use std::time::Duration;
-    let addr: IpAddr = ip.parse().map_err(|_| "invalid ip".to_string())?;
-    let mut opts = s7::tcp::Options::new(addr, rack, slot, s7::transport::Connection::OP);
-    opts.read_timeout = Duration::from_secs(2);
-    opts.write_timeout = Duration::from_secs(2);
-    let transport = s7::tcp::Transport::connect(opts).map_err(|e| e.to_string())?;
-    let mut client = s7::client::Client::new(transport).map_err(|e| e.to_string())?;
-
-    let dt = data_type.to_uppercase();
-    match dt.as_str() {
-        "BOOL" => {
-            let val = value.as_bool().unwrap_or(false);
-            let mut buf = vec![0u8; 1];
-            client.ab_read(offset, 1, &mut buf).map_err(|e| e.to_string())?;
-            if val {
-                buf[0] |= 1 << bit;
-            } else {
-                buf[0] &= !(1 << bit);
-            }
-            client.ab_write(offset, 1, &mut buf).map_err(|e| e.to_string())?;
-            Ok("written".to_string())
-        }
-        "WORD" | "INT" => {
-            let val = value.as_i64().unwrap_or(0) as u16;
-            let mut buf = val.to_be_bytes().to_vec();
-            client.ab_write(offset, 2, &mut buf).map_err(|e| e.to_string())?;
-            Ok("written".to_string())
-        }
-        "REAL" => {
-            let val = value.as_f64().unwrap_or(0.0) as f32;
-            let mut bytes = val.to_be_bytes().to_vec();
-            client.ag_write(db, offset, 4, &mut bytes).map_err(|e| e.to_string())?;
-            Ok("written".to_string())
-        }
-        _ => Err("unsupported type".to_string()),
-    }
+    let cfg = plc::PlcConfig { ip, rack, slot, simulate: false };
+    let mut client = plc::connect(&cfg, 2000)?;
+    plc::write_tag(&mut client, db, offset, &data_type, &value, bit)?;
+    Ok("written".to_string())
 }
 
 #[tauri::command]
@@ -225,74 +164,408 @@ fn open_external(url: String) {
     }
 }
 
+// --- PLC admin / I/O / manual (Rust) ---
+
+fn plc_cfg() -> plc::PlcConfig {
+    plc::config_from(&get_config())
+}
+
 #[tauri::command]
-fn read_plc_tag(ip: String, rack: u16, slot: u16, db: i64, offset: i64, data_type: String, bit: i64) -> Result<serde_json::Value, String> {
-    use std::net::IpAddr;
-    use std::time::Duration;
-    let addr: IpAddr = ip.parse().map_err(|_| "invalid ip".to_string())?;
-    let mut opts = s7::tcp::Options::new(addr, rack, slot, s7::transport::Connection::OP);
-    opts.read_timeout = Duration::from_secs(2);
-    opts.write_timeout = Duration::from_secs(2);
-    let transport = s7::tcp::Transport::connect(opts).map_err(|e| e.to_string())?;
-    let mut client = s7::client::Client::new(transport).map_err(|e| e.to_string())?;
-    let dt = data_type.to_uppercase();
-    match dt.as_str() {
-        "BOOL" => {
-            let mut buf = vec![0u8; 1];
-            client.ag_read(db as i32, offset as i32, 1, &mut buf).map_err(|e| e.to_string())?;
-            let val = (buf[0] >> bit) & 1 == 1;
-            Ok(serde_json::json!(val))
-        }
-        "WORD" | "INT" => {
-            let mut buf = vec![0u8; 2];
-            client.ag_read(db as i32, offset as i32, 2, &mut buf).map_err(|e| e.to_string())?;
-            let val = u16::from_be_bytes([buf[0], buf[1]]);
-            Ok(serde_json::json!(val))
-        }
-        "REAL" => {
-            let mut buf = vec![0u8; 4];
-            client.ag_read(db as i32, offset as i32, 4, &mut buf).map_err(|e| e.to_string())?;
-            let val = f32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
-            Ok(serde_json::json!(val))
-        }
-        _ => Err("unsupported type".to_string()),
+fn plc_config_get() -> serde_json::Value {
+    plc::config_to_json(&plc_cfg())
+}
+
+#[tauri::command]
+fn plc_config_set(ip: String, rack: u16, slot: u16, simulate: bool) -> String {
+    set_config(serde_json::json!({
+        "plc_ip": ip,
+        "plc_rack": rack.to_string(),
+        "plc_slot": slot.to_string(),
+        "plc_simulate": if simulate { "true" } else { "false" },
+    }))
+}
+
+#[tauri::command]
+fn plc_status_info() -> serde_json::Value {
+    let cfg = plc_cfg();
+    if cfg.simulate {
+        return serde_json::json!({
+            "connected": true, "ip": cfg.ip, "rack": cfg.rack,
+            "slot": cfg.slot, "simulate": true
+        });
+    }
+    match plc::connect(&cfg, 1500) {
+        Ok(_) => serde_json::json!({
+            "connected": true, "ip": cfg.ip, "rack": cfg.rack,
+            "slot": cfg.slot, "simulate": false
+        }),
+        Err(e) => serde_json::json!({
+            "connected": false, "ip": cfg.ip, "rack": cfg.rack,
+            "slot": cfg.slot, "simulate": false, "error": e
+        }),
     }
 }
 
 #[tauri::command]
-fn write_plc_tag(ip: String, rack: u16, slot: u16, db: i64, offset: i64, data_type: String, value: serde_json::Value, bit: i64) -> Result<String, String> {
-    use std::net::IpAddr;
-    use std::time::Duration;
-    let addr: IpAddr = ip.parse().map_err(|_| "invalid ip".to_string())?;
-    let mut opts = s7::tcp::Options::new(addr, rack, slot, s7::transport::Connection::OP);
-    opts.read_timeout = Duration::from_secs(2);
-    opts.write_timeout = Duration::from_secs(2);
-    let transport = s7::tcp::Transport::connect(opts).map_err(|e| e.to_string())?;
-    let mut client = s7::client::Client::new(transport).map_err(|e| e.to_string())?;
-    let dt = data_type.to_uppercase();
-    match dt.as_str() {
-        "BOOL" => {
-            let val = value.as_bool().unwrap_or(false);
-            let mut buf = vec![0u8; 1];
-            client.ag_read(db as i32, offset as i32, 1, &mut buf).map_err(|e| e.to_string())?;
-            if val { buf[0] |= 1 << bit; } else { buf[0] &= !(1 << bit); }
-            client.ag_write(db as i32, offset as i32, 1, &mut buf).map_err(|e| e.to_string())?;
-            Ok("written".to_string())
+fn plc_tags_list() -> serde_json::Value {
+    let conn = match db::open() {
+        Ok(c) => c,
+        Err(_) => return serde_json::json!([]),
+    };
+    let cfg = plc_cfg();
+    let mut client = if cfg.simulate {
+        None
+    } else {
+        plc::connect(&cfg, 1500).ok()
+    };
+    let mut arr = Vec::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT id, name, db_number, offset, data_type, bit, description, unit \
+         FROM plc_tags ORDER BY id",
+    ) {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, Option<String>>(7)?,
+            ))
+        }) {
+            for (id, name, db_number, offset, data_type, bit, description, unit) in rows.flatten() {
+                let value = if cfg.simulate {
+                    let v = plc::sim::tag(id);
+                    match data_type.to_uppercase().as_str() {
+                        "BOOL" => serde_json::json!(v != 0.0),
+                        "WORD" | "INT" => serde_json::json!(v as i64),
+                        _ => serde_json::json!(v),
+                    }
+                } else if let Some(c) = client.as_mut() {
+                    plc::read_tag(c, db_number as i32, offset as i32, &data_type, bit as i32)
+                        .unwrap_or(serde_json::json!(null))
+                } else {
+                    serde_json::json!(null)
+                };
+                arr.push(serde_json::json!({
+                    "id": id,
+                    "name": name,
+                    "db": db_number,
+                    "offset": offset,
+                    "type": data_type,
+                    "bit": bit,
+                    "description": description,
+                    "unit": unit,
+                    "value": value,
+                }));
+            }
         }
-        "WORD" | "INT" => {
-            let val = value.as_i64().unwrap_or(0) as u16;
-            let mut buf = val.to_be_bytes().to_vec();
-            client.ag_write(db as i32, offset as i32, 2, &mut buf).map_err(|e| e.to_string())?;
-            Ok("written".to_string())
-        }
-        "REAL" => {
-            let val = value.as_f64().unwrap_or(0.0) as f32;
-            let mut bytes = val.to_be_bytes().to_vec();
-            client.ag_write(db as i32, offset as i32, 4, &mut bytes).map_err(|e| e.to_string())?;
-            Ok("written".to_string())
-        }
-        _ => Err("unsupported type".to_string()),
     }
+    serde_json::Value::Array(arr)
+}
+
+#[tauri::command]
+fn plc_tags_add(
+    name: String,
+    db_number: i64,
+    offset: i64,
+    data_type: String,
+    bit: i64,
+) -> i64 {
+    let conn = match db::open() {
+        Ok(c) => c,
+        Err(_) => return -1,
+    };
+    conn.execute(
+        "INSERT INTO plc_tags (name, db_number, offset, data_type, bit) \
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![
+            name.trim().to_uppercase(),
+            db_number,
+            offset,
+            data_type.trim().to_uppercase(),
+            bit
+        ],
+    )
+    .ok();
+    conn.last_insert_rowid()
+}
+
+#[tauri::command]
+fn plc_tags_delete(id: i64) -> String {
+    let conn = match db::open() {
+        Ok(c) => c,
+        Err(_) => return "error".to_string(),
+    };
+    match conn.execute("DELETE FROM plc_tags WHERE id = ?1", rusqlite::params![id]) {
+        Ok(_) => "deleted".to_string(),
+        Err(e) => format!("error: {}", e),
+    }
+}
+
+#[tauri::command]
+fn plc_tag_write_by_id(tag_id: i64, value: serde_json::Value) -> String {
+    let conn = match db::open() {
+        Ok(c) => c,
+        Err(_) => return "error: no db".to_string(),
+    };
+    let tag = conn.query_row(
+        "SELECT db_number, offset, data_type, bit FROM plc_tags WHERE id = ?1",
+        rusqlite::params![tag_id],
+        |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        },
+    );
+    let (db_number, offset, data_type, bit) = match tag {
+        Ok(v) => v,
+        Err(e) => return format!("error: {}", e),
+    };
+    let cfg = plc_cfg();
+    if cfg.simulate {
+        let v = match data_type.to_uppercase().as_str() {
+            "BOOL" => {
+                if plc::value_as_bool(&value) {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            "WORD" | "INT" => plc::value_as_i64(&value) as f64,
+            _ => plc::value_as_f64(&value),
+        };
+        plc::sim::set_tag(tag_id, v);
+        return "OK".to_string();
+    }
+    match plc::connect(&cfg, 1500) {
+        Ok(mut c) => match plc::write_tag(
+            &mut c,
+            db_number as i32,
+            offset as i32,
+            &data_type,
+            &value,
+            bit as i32,
+        ) {
+            Ok(_) => "OK".to_string(),
+            Err(e) => format!("error: {}", e),
+        },
+        Err(e) => format!("error: {}", e),
+    }
+}
+
+#[tauri::command]
+fn plc_tag_read_by_id(tag_id: i64) -> serde_json::Value {
+    let conn = match db::open() {
+        Ok(c) => c,
+        Err(_) => return serde_json::json!(null),
+    };
+    let tag = conn.query_row(
+        "SELECT db_number, offset, data_type, bit FROM plc_tags WHERE id = ?1",
+        rusqlite::params![tag_id],
+        |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        },
+    );
+    let (db_number, offset, data_type, bit) = match tag {
+        Ok(v) => v,
+        Err(_) => return serde_json::json!(null),
+    };
+    let cfg = plc_cfg();
+    if cfg.simulate {
+        return serde_json::json!(plc::sim::tag(tag_id));
+    }
+    match plc::connect(&cfg, 1500) {
+        Ok(mut c) => {
+            plc::read_tag(&mut c, db_number as i32, offset as i32, &data_type, bit as i32)
+                .unwrap_or(serde_json::json!(null))
+        }
+        Err(_) => serde_json::json!(null),
+    }
+}
+
+#[tauri::command]
+fn plc_io_status() -> serde_json::Value {
+    let cfg = plc_cfg();
+    if cfg.simulate {
+        let mut v = plc::sim_io();
+        if let Some(obj) = v.as_object_mut() {
+            obj.insert("connected".to_string(), serde_json::json!(true));
+            obj.insert("simulate".to_string(), serde_json::json!(true));
+        }
+        return v;
+    }
+    match plc::connect(&cfg, 1500) {
+        Ok(mut c) => {
+            let mut v = plc::read_io(&mut c);
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert("connected".to_string(), serde_json::json!(true));
+                obj.insert("simulate".to_string(), serde_json::json!(false));
+            }
+            v
+        }
+        Err(e) => {
+            let mut v = plc::empty_io();
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert("connected".to_string(), serde_json::json!(false));
+                obj.insert("simulate".to_string(), serde_json::json!(false));
+                obj.insert("error".to_string(), serde_json::json!(e));
+            }
+            v
+        }
+    }
+}
+
+#[tauri::command]
+fn plc_io_write(q: String, value: bool) -> String {
+    let cfg = plc_cfg();
+    if cfg.simulate {
+        plc::sim::set_q(&q, value);
+        return "OK".to_string();
+    }
+    match plc::connect(&cfg, 1500) {
+        Ok(mut c) => match plc::write_q(&mut c, &q, value) {
+            Ok(_) => "OK".to_string(),
+            Err(e) => format!("error: {}", e),
+        },
+        Err(e) => format!("error: {}", e),
+    }
+}
+
+#[tauri::command]
+fn plc_send_recipe(voltage: f64, components: serde_json::Value) -> String {
+    let cfg = plc_cfg();
+    if cfg.simulate {
+        plc::sim::set_recipe(voltage, &components);
+        return "OK".to_string();
+    }
+    match plc::connect(&cfg, 1500) {
+        Ok(mut c) => match plc::send_recipe(&mut c, voltage, &components) {
+            Ok(_) => "OK".to_string(),
+            Err(e) => format!("error: {}", e),
+        },
+        Err(e) => format!("error: {}", e),
+    }
+}
+
+#[tauri::command]
+fn plc_start() -> String {
+    let cfg = plc_cfg();
+    if cfg.simulate {
+        plc::sim::set("result:running", 1.0);
+        plc::sim::set("result:complete", 0.0);
+        return "OK".to_string();
+    }
+    match plc::connect(&cfg, 1500) {
+        Ok(mut c) => match plc::start(&mut c) {
+            Ok(_) => "OK".to_string(),
+            Err(e) => format!("error: {}", e),
+        },
+        Err(e) => format!("error: {}", e),
+    }
+}
+
+#[tauri::command]
+fn plc_stop() -> String {
+    let cfg = plc_cfg();
+    if cfg.simulate {
+        plc::sim::set("result:running", 0.0);
+        return "OK".to_string();
+    }
+    match plc::connect(&cfg, 1500) {
+        Ok(mut c) => match plc::stop(&mut c) {
+            Ok(_) => "OK".to_string(),
+            Err(e) => format!("error: {}", e),
+        },
+        Err(e) => format!("error: {}", e),
+    }
+}
+
+#[tauri::command]
+fn plc_read_results() -> serde_json::Value {
+    let cfg = plc_cfg();
+    if cfg.simulate {
+        return plc::sim_results();
+    }
+    match plc::connect(&cfg, 1500) {
+        Ok(mut c) => plc::read_results(&mut c),
+        Err(_) => plc::empty_results(),
+    }
+}
+
+#[tauri::command]
+fn plc_set_mode(mode: i64) -> serde_json::Value {
+    let cfg = plc_cfg();
+    if cfg.simulate {
+        plc::sim::set_mode(mode as i32);
+        return serde_json::json!({ "mode": plc::sim::mode(), "ok": true });
+    }
+    match plc::connect(&cfg, 1500) {
+        Ok(mut c) => {
+            let ok = plc::set_mode(&mut c, mode as i32).is_ok();
+            let current = plc::get_mode(&mut c).unwrap_or(1);
+            serde_json::json!({ "mode": current, "ok": ok })
+        }
+        Err(_) => serde_json::json!({ "mode": 1, "ok": false }),
+    }
+}
+
+#[tauri::command]
+fn plc_get_mode() -> serde_json::Value {
+    let cfg = plc_cfg();
+    if cfg.simulate {
+        return serde_json::json!({ "mode": plc::sim::mode() });
+    }
+    match plc::connect(&cfg, 1500) {
+        Ok(mut c) => serde_json::json!({ "mode": plc::get_mode(&mut c).unwrap_or(1) }),
+        Err(_) => serde_json::json!({ "mode": 1 }),
+    }
+}
+
+#[tauri::command]
+fn plc_test_component(component: String, voltage: f64) -> serde_json::Value {
+    let name = component.trim().to_uppercase();
+    let cfg = plc_cfg();
+    if cfg.simulate {
+        let value = plc::sim::test_component(&name);
+        return serde_json::json!({
+            "component": name,
+            "value": value,
+            "all": plc::sim_results(),
+        });
+    }
+    match plc::connect(&cfg, 2000) {
+        Ok(mut c) => match plc::test_component(&mut c, &name, voltage) {
+            Ok(v) => v,
+            Err(e) => serde_json::json!({ "component": name, "value": 0.0, "error": e }),
+        },
+        Err(e) => serde_json::json!({ "component": name, "value": 0.0, "error": e }),
+    }
+}
+
+#[tauri::command]
+fn plc_abort() -> String {
+    let cfg = plc_cfg();
+    if cfg.simulate {
+        plc::sim::set("result:running", 0.0);
+        plc::sim::set_mode(1);
+        return "OK".to_string();
+    }
+    if let Ok(mut c) = plc::connect(&cfg, 1500) {
+        let _ = plc::stop(&mut c);
+        let _ = plc::set_mode(&mut c, 1);
+    }
+    "OK".to_string()
 }
 
 // --- Recipes (SQLite) ---
@@ -1145,6 +1418,24 @@ fn main() {
             show_touch_keyboard,
             restart_backend,
             plc_status,
+            plc_status_info,
+            plc_config_get,
+            plc_config_set,
+            plc_tags_list,
+            plc_tags_add,
+            plc_tags_delete,
+            plc_tag_write_by_id,
+            plc_tag_read_by_id,
+            plc_io_status,
+            plc_io_write,
+            plc_send_recipe,
+            plc_start,
+            plc_stop,
+            plc_read_results,
+            plc_set_mode,
+            plc_get_mode,
+            plc_test_component,
+            plc_abort,
             plc_read_tag,
             plc_write_tag,
             list_recipes,

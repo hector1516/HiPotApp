@@ -230,31 +230,43 @@ Cambios frontend:
 
 ---
 
-### Fase 2 — PLC completo en Rust (2–3 sesiones)
+### Fase 2 — PLC completo en Rust (COMPLETADA)
 
-Portar `App/python/plc_manager.py` a `plc/`:
+Portado `App/python/plc_manager.py` a `tauri/src-tauri/src/plc/`:
 
-- Offsets: `OFF_MODE=110`, `OFF_VOLTAGE`, `OFF_START`, `OFF_STOP`, `OFF_COMPLETE`, `OFF_PASS`, `OFF_RUNNING`, `RES_OFFSETS`, `COMP_OFFSETS`.
-- Mapas I/O: `_Q_MAP`, `_I_MAP`, `_IA_MAP`.
-- Funciones: `read_digital_output`, `read_digital_input`, `read_analog_input`, `write_digital_output`, `send_recipe`, `start_test`, `stop_test`, `read_results`.
+- [x] Offsets DB1: `OFF_VOLTAGE`, `COMP_OFFSETS`, `OFF_START/STOP/COMPLETE/PASS/RUNNING`, `OFF_MODE`, `RES_OFFSETS`.
+- [x] Mapas I/O: `Q_MAP`, `I_MAP`, `IA_MAP`.
+- [x] Primitivas: `read/write_real`, `read/write_word`, `read/write_bool`.
+- [x] Tags: `read_tag` / `write_tag` (BOOL/WORD/INT/REAL sobre DB).
+- [x] I/O directo: Q por `ab_read/ab_write`, I/IA por `eb_read`.
+- [x] Receta, start/stop, resultados, modo auto/manual.
+- [x] Modo simulación (`plc/sim.rs`) para operar sin PLC físico.
 
 Comandos nuevos:
 
-| Comando | Reemplaza |
-|---|---|
-| `plc_config_get` / `plc_config_set` | `GET/POST /admin/plc-config` |
-| `plc_tags_list` / `plc_tags_add` / `plc_tags_delete` | `/admin/plc-tags` |
-| `plc_tag_read_by_id` / `plc_tag_write_by_id` | `/admin/plc-read`, `/admin/plc-write` |
-| `plc_io_status` | `GET /admin/plc-io-status` |
-| `plc_io_write` | `POST /admin/plc-io-write` |
-| `plc_send_recipe` / `plc_start` / `plc_stop` / `plc_read_results` | lógica interna de `/executions` |
+| Comando | Reemplaza | Estado |
+|---|---|---|
+| `plc_config_get` / `plc_config_set` | `GET/POST /admin/plc-config` | ✅ |
+| `plc_tags_list` / `plc_tags_add` / `plc_tags_delete` | `/admin/plc-tags` | ✅ |
+| `plc_tag_read_by_id` / `plc_tag_write_by_id` | `/admin/plc-read`, `/admin/plc-write` | ✅ |
+| `plc_io_status` | `GET /admin/plc-io-status` | ✅ |
+| `plc_io_write` | `POST /admin/plc-io-write` | ✅ |
+| `plc_status_info` | `GET /status/plc` | ✅ |
+| `plc_send_recipe` / `plc_start` / `plc_stop` / `plc_read_results` | lógica interna | ✅ |
+| `plc_set_mode` / `plc_get_mode` | `/manual/mode` | ✅ |
+| `plc_test_component` | `/manual/plc-test` | ✅ |
+| `plc_abort` | `/manual/abort` (parte PLC) | ✅ |
 
 Cambios frontend:
 
-- `AdminPanel.tsx` → `PlcTab`, `PlcIoTab`, `ManualTab`.
-- `TestScreen.tsx` si usa PLC.
+- [x] `AdminPanel.tsx` → `PlcTab`, `PlcIoTab`, `ManualTab` (parte PLC).
+- [x] `ManualScreen.tsx` → modo manual PLC, recetas y test por componente.
+- [x] `usePLC.ts` → `plc_status_info` con simulación.
+- [x] `SystemTab` → `plc_status_info`.
 
-**Criterio de aceptación:** lectura/escritura de Q/I/IA y DB1 contra PLC real; simulación si no hay PLC.
+**Criterio de aceptación:** lectura/escritura de Q/I/IA y DB1 contra PLC real; simulación si no hay PLC. **Cumplido en código y tests; falta prueba con hardware real.**
+
+> Pendiente de Fase 3: los botones Hipot de `ManualTab`, `ManualScreen` y `HipotTab` siguen usando el sidecar (`/manual/hipot`, `/status/hipot`, `/admin/hipot-cmd`).
 
 ---
 

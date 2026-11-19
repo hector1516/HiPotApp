@@ -295,13 +295,13 @@ function PlcTab() {
   const [msg, setMsg] = useState('');
 
   const loadConfig = () => {
-    api.get('/admin/plc-config')
+    invoke<any>('plc_config_get')
       .then((res: any) => { if (res) setCfg(res); })
       .catch(() => {});
   };
 
   const loadTags = () => {
-    api.get('/admin/plc-tags')
+    invoke<any>('plc_tags_list')
       .then(setTags)
       .catch(() => setTags([]));
   };
@@ -315,16 +315,12 @@ function PlcTab() {
 
   const saveConfig = async () => {
     try {
-      await api.post('/admin/plc-config', cfg);
+      const r = await invoke<string>('plc_config_set', { ip: cfg.ip, rack: cfg.rack, slot: cfg.slot, simulate: cfg.simulate });
+      if (r !== 'saved') throw new Error(r);
       setMsg('Configuración de PLC guardada correctamente');
-      api.get('/status/plc').then(setSt);
+      invoke<any>('plc_status_info').then(setSt).catch(() => {});
     } catch (e: any) {
-      const errMsg = String(e?.message ?? e);
-      if (errMsg.includes('Failed to fetch') || errMsg.includes('NetworkError')) {
-        setMsg('Error: Backend no disponible. Verifica que la app esté corriendo (indicador "Backend OK" en el pie de página).');
-      } else {
-        setMsg(`Error al guardar red: ${errMsg}`);
-      }
+      setMsg(`Error al guardar: ${String(e?.message ?? e)}`);
     }
   };
 
@@ -335,7 +331,8 @@ function PlcTab() {
       return;
     }
     try {
-      await api.post('/admin/plc-write', { tag_id: tag.id, value: valStr });
+      const r = await invoke<string>('plc_tag_write_by_id', { tagId: tag.id, value: valStr });
+      if (r !== 'OK') throw new Error(r);
       setMsg(`Escrito exitosamente en ${tag.name}: ${valStr}`);
       setWriteVals({ ...writeVals, [tag.id]: '' });
       loadTags();
@@ -347,7 +344,8 @@ function PlcTab() {
   const doDeleteTag = async (tag: any) => {
     if (!confirm(`¿Eliminar variable ${tag.name}?`)) return;
     try {
-      await api.del(`/admin/plc-tags/${tag.id}`);
+      const r = await invoke<string>('plc_tags_delete', { id: tag.id });
+      if (r !== 'deleted') throw new Error(r);
       setMsg(`Variable ${tag.name} eliminada`);
       loadTags();
     } catch (e: any) {
@@ -385,7 +383,7 @@ function PlcTab() {
           </label>
           <div style={{ display: 'flex', gap: 6, marginTop: 16 }}>
             <button className="btn primary" onClick={saveConfig}>Guardar Red PLC</button>
-            <button className="btn" onClick={() => api.get('/status/plc').then(setSt)}>Probar Conexión</button>
+            <button className="btn" onClick={() => invoke<any>('plc_status_info').then(setSt).catch(() => {})}>Probar Conexión</button>
           </div>
         </div>
         {st && <pre style={{ marginTop: 8, fontSize: 12, background: '#f1f5f9', padding: 8, borderRadius: 6, overflow: 'auto' }}>{JSON.stringify(st, null, 2)}</pre>}
@@ -459,11 +457,11 @@ function TagForm({ onDone }: { onDone: () => void }) {
   const [f, setF] = useState({ name: '', db: '1', offset: '0', type: 'REAL', bit: '0' });
   const submit = async () => {
     if (!f.name.trim()) return;
-    await api.post('/admin/plc-tags', {
+    await invoke('plc_tags_add', {
       name: f.name.toUpperCase().trim(),
-      db: parseInt(f.db) || 1,
+      dbNumber: parseInt(f.db) || 1,
       offset: parseInt(f.offset) || 0,
-      type: f.type,
+      dataType: f.type,
       bit: parseInt(f.bit) || 0,
     });
     setF({ name: '', db: '1', offset: '0', type: 'REAL', bit: '0' });
@@ -665,7 +663,7 @@ function SystemTab() {
     api.get('/audit/table-names').then(r => setTableNames(r?.tables ?? [])).catch(() => {});
    
     getVersion().then(setAppVersion).catch(() => setAppVersion('1.0.0'));
-    api.get('/status/plc').then(setPlcStatus).catch(() => {});
+    invoke<any>('plc_status_info').then(setPlcStatus).catch(() => {});
     api.get('/status/hipot').then(setHipotStatus).catch(() => {});
   }, []);
   const doExport = async () => { const r = await api.get('/admin/export'); const blob = new Blob([r.data], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `config_export_${new Date().toISOString().slice(0,10)}.json`; a.click(); };
@@ -900,13 +898,14 @@ function ManualTab() {
   const [voltage, setVoltage] = useState(120);
   const [writing, setWriting] = useState<number | null>(null);
 
-  const load = () => api.get('/admin/plc-tags').then(setTags).catch(() => setTags([]));
+  const load = () => invoke<any>('plc_tags_list').then(setTags).catch(() => setTags([]));
   useEffect(() => { load(); }, []);
 
   const writeTag = async (tag: any, value: any) => {
     setWriting(tag.id);
     try {
-      await api.post('/admin/plc-write', { tag_id: tag.id, value });
+      const r = await invoke<string>('plc_tag_write_by_id', { tagId: tag.id, value });
+      if (r !== 'OK') throw new Error(r);
       setMsg(`Escrito ${tag.name} = ${value}`);
       load();
     } catch (e: any) { setMsg(String(e?.message ?? e)); }
@@ -984,7 +983,7 @@ function PlcIoTab() {
   const [err, setErr] = useState('');
 
   const load = () => {
-    api.get('/admin/plc-io-status').then(setStatus).catch(e => setErr(String(e?.message ?? e)));
+    invoke<any>('plc_io_status').then(setStatus).catch(e => setErr(String(e?.message ?? e)));
   };
 
   useEffect(() => {
@@ -995,7 +994,8 @@ function PlcIoTab() {
 
   const toggle = async (q: string, val: boolean) => {
     try {
-      await api.post('/admin/plc-io-write', { q, value: val });
+      const r = await invoke<string>('plc_io_write', { q, value: val });
+      if (r !== 'OK') throw new Error(r);
       load();
     } catch (e: any) { setErr(String(e?.message ?? e)); }
   };
@@ -1016,8 +1016,8 @@ function PlcIoTab() {
 
   return (
     <div style={{ minWidth: 0 }}>
-      <h2 style={{ margin: '0 0 10px 0', fontSize: 16 }}>Monitor PLC (IO) - Solo lectura</h2>
-      {err && <div className="toast-err">{err}</div>}
+      <h2 style={{ margin: '0 0 10px 0', fontSize: 16 }}>Monitor PLC (IO) - Lectura y escritura de Q</h2>
+      {(err || status?.error) && <div className="toast-err">{err || status?.error}</div>}
       <div style={{ fontSize: 12, color: '#64748b', marginBottom: 10 }}>
         Actualizacion automatica cada 2 segundos. Los indicadores muestran el estado en tiempo real.
       </div>

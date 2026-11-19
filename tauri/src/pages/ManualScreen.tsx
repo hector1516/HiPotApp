@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { Gauge } from '../components/Gauge';
 import { api } from '../api';
 
@@ -13,19 +14,23 @@ export function ManualScreen({ onBack }: { onBack: () => void }) {
   const [err, setErr] = useState('');
 
   useEffect(() => {
-    api.post('/manual/mode', { mode: 2 }).catch(() => {});
-    api.get('/recipes').then(list => {
-      setRecipes(list);
-      if (list[0]) setRid(list[0].id);
+    invoke('plc_set_mode', { mode: 2 }).catch(() => {});
+    invoke<any[]>('list_recipes').then(list => {
+      setRecipes(Array.isArray(list) ? list : []);
+      if (list?.[0]) setRid(list[0].id);
     }).catch(() => {});
-    return () => { api.post('/manual/mode', { mode: 1 }).catch(() => {}); api.post('/manual/abort').catch(() => {}); };
+    return () => {
+      invoke('plc_set_mode', { mode: 1 }).catch(() => {});
+      invoke('plc_abort').catch(() => {});
+      api.post('/manual/hipot', { action: 'STOP' }).catch(() => {});
+    };
   }, []);
 
   const recipe = recipes.find(r => r.id === rid) ?? null;
   const [detail, setDetail] = useState<any>(null);
   useEffect(() => {
     if (!recipe) return;
-    api.recipeByModel(recipe.model).then(setDetail).catch(() => setDetail(null));
+    invoke<any>('get_recipe_by_model', { model: recipe.model }).then(setDetail).catch(() => setDetail(null));
   }, [recipe?.model]);
 
   const items: { name: string; min: number; max: number; enabled: boolean }[] =
@@ -42,13 +47,13 @@ export function ManualScreen({ onBack }: { onBack: () => void }) {
     if (active) return;
     setActive(name); setErr('');
     try {
-      const r = await api.post('/manual/plc-test', { component: name, voltage });
-      setValues(v => ({ ...v, [name]: r.value }));
+      const r = await invoke<any>('plc_test_component', { component: name, voltage });
+      setValues(v => ({ ...v, [name]: Number(r?.value ?? 0) }));
       for (let i = 0; i < 5; i++) {
         await new Promise(res => setTimeout(res, 350));
         try {
-          const s = await api.post('/manual/plc-test', { component: name, voltage });
-          setValues(v => ({ ...v, [name]: s.value }));
+          const s = await invoke<any>('plc_test_component', { component: name, voltage });
+          setValues(v => ({ ...v, [name]: Number(s?.value ?? 0) }));
         } catch {}
       }
     } catch (e: any) { setErr(String(e?.message ?? e)); }

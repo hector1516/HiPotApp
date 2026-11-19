@@ -7,12 +7,9 @@ export function usePLC(enabled = true) {
   const [detail, setDetail] = useState('');
   const refresh = useCallback(async () => {
     try {
-      const cfg = await invoke<any>('get_config');
-      const ip = cfg?.plc_ip || '192.168.1.10';
-      const rack = parseInt(cfg?.plc_rack || '0', 10);
-      const slot = parseInt(cfg?.plc_slot || '1', 10);
-      const r = await invoke<boolean>('plc_status', { ip, rack, slot });
-      setConnected(!!r); setDetail(ip);
+      const r = await invoke<any>('plc_status_info');
+      setConnected(!!r?.connected);
+      setDetail(`${r?.ip ?? ''}${r?.simulate ? ' (sim)' : ''}`);
     } catch { setConnected(false); }
   }, []);
   useEffect(() => {
