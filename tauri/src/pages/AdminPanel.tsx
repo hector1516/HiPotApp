@@ -592,7 +592,7 @@ function LogsTab() {
   const [cat, setCat] = useState('');
   const [level, setLevel] = useState('');
   const [q, setQ] = useState('');
-  const load = () => invoke<any>('list_logs', { category: cat, level, q, limit: 200 }).then(setLogs).catch(() => api.get(`/admin/logs?category=${cat}&level=${level}&q=${encodeURIComponent(q)}`).then(setLogs).catch(() => setLogs([])));
+  const load = () => invoke<any>('list_logs', { category: cat, level, q, limit: 200 }).then(setLogs).catch(() => setLogs([]));
   useEffect(() => { load(); }, []);
   return (
     <div style={{ minWidth: 0 }}>
