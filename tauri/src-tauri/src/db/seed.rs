@@ -83,3 +83,40 @@ pub fn seed_defaults(conn: &Connection) {
         [],
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn seeds_defaults_idempotently() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::schema::ensure_schema(&conn);
+        seed_defaults(&conn);
+
+        assert_eq!(
+            crate::db::config::get(&conn, "plc_ip").as_deref(),
+            Some("192.168.1.10")
+        );
+        let admins: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM users WHERE username='ADMIN'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(admins, 1);
+
+        let templates: i64 = conn
+            .query_row("SELECT COUNT(*) FROM label_templates", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(templates, 1);
+
+        // Llamar de nuevo no duplica nada.
+        seed_defaults(&conn);
+        let templates2: i64 = conn
+            .query_row("SELECT COUNT(*) FROM label_templates", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(templates2, 1);
+    }
+}
