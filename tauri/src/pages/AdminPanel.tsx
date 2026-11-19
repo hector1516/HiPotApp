@@ -543,7 +543,7 @@ function DbTab() {
               setLog(r); load();
             } catch (e: any) { setLog(String(e?.message || e)); }
           }}>Sync ahora (Rust)</button>
-          <button className="btn" onClick={() => api.get('/health').then(r => setLog(JSON.stringify(r, null, 2)))}>Estado</button>
+          <button className="btn" onClick={() => invoke<any>('app_health').then(r => setLog(JSON.stringify(r, null, 2))).catch(e => setLog(String(e?.message || e)))}>Estado</button>
         </div>
         {log && <pre style={{ marginTop: 8, fontSize: 12, background: '#f1f5f9', padding: 8, borderRadius: 6, overflow: 'auto' }}>{log}</pre>}
         <details style={{ marginTop: 8 }}><summary style={{ cursor: 'pointer', fontSize: 13 }}>Config actual</summary><pre style={{ fontSize: 12, background: '#f1f5f9', padding: 8, borderRadius: 6, overflow: 'auto' }}>{JSON.stringify(cfg, null, 2)}</pre></details>
@@ -724,9 +724,18 @@ function SystemTab() {
           <div>SQL: <span className="font-mono">{cfg?.sql_server || '-'}</span> / {cfg?.sql_database || '-'}</div>
           <button className="btn ghost" style={{ fontSize: 11, marginTop: 4 }} onClick={async () => {
             try {
-              const h = await api.get('/health');
-              const p = await api.get('/status/plc');
-              const hp = await api.get('/status/hipot');
+              const h = await invoke<any>('app_health');
+              let p: any = { connected: false };
+              try {
+                const c = await invoke<any>('get_config');
+                p = { connected: await invoke<boolean>('plc_status', {
+                  ip: c?.plc_ip || '192.168.1.10',
+                  rack: parseInt(c?.plc_rack || '0', 10),
+                  slot: parseInt(c?.plc_slot || '1', 10),
+                }) };
+              } catch {}
+              let hp: any = { connected: false, error: 'Hipot aun en sidecar' };
+              try { hp = await api.get('/status/hipot'); } catch {}
               alert(`Health: ${JSON.stringify(h)}\nPLC: ${JSON.stringify(p)}\nHipot: ${JSON.stringify(hp)}`);
             } catch (e: any) { alert('Error: ' + (e?.message || e)); }
           }}>Ver estado completo</button>

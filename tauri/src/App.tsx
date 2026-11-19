@@ -71,11 +71,13 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
-  // Health check del backend
+  // Health check del núcleo Rust (sin backend HTTP)
   React.useEffect(() => {
     const check = async () => {
-      try { await api.get('/health'); setHealth(true); }
-      catch { setHealth(false); }
+      try {
+        const r = await invoke<any>('app_health');
+        setHealth(!!r && (r.status === 'healthy' || r.database === true));
+      } catch { setHealth(false); }
     };
     check();
     const id = setInterval(check, 3000);
@@ -304,7 +306,7 @@ export default function App() {
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: health ? '#166534' : '#991b1b' }} />
-          {health ? 'Backend OK' : 'Sin conexion'}
+          {health ? 'Sistema OK' : 'Sin conexion'}
         </span>
         <span style={{ marginLeft: 'auto' }}>Offline-first · Windows 11 · v1.0.0 · Ctrl+Shift+K → GodMode</span>
       </footer>

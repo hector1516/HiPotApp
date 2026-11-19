@@ -37,6 +37,34 @@ fn get_config() -> serde_json::Value {
 }
 
 #[tauri::command]
+fn app_health() -> serde_json::Value {
+    // Salud del núcleo Rust (sin HTTP). No sondea hardware para no bloquear la UI.
+    let db_ok = match rusqlite::Connection::open(db_path()) {
+        Ok(c) => c.execute("SELECT 1", []).is_ok(),
+        Err(_) => false,
+    };
+    let cfg = get_config();
+    let plc_ip = cfg
+        .get("plc_ip")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    serde_json::json!({
+        "status": if db_ok { "healthy" } else { "degraded" },
+        "runtime": "rust",
+        "database": db_ok,
+        "database_path": db_path().display().to_string(),
+        "plc_configured": !plc_ip.is_empty(),
+        "legacy_sidecar": false,
+        "version": env!("CARGO_PKG_VERSION"),
+        "timestamp": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    })
+}
+
+#[tauri::command]
 fn set_config(values: serde_json::Value) -> String {
     let conn = match rusqlite::Connection::open(db_path()) {
         Ok(c) => c,
@@ -1168,6 +1196,7 @@ fn main() {
             read_backend_log,
             get_config,
             set_config,
+            app_health,
             show_touch_keyboard,
             restart_backend,
             plc_status,
