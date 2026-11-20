@@ -197,52 +197,63 @@ fn plc_config_set(ip: String, rack: u16, slot: u16) -> String {
 
 #[tauri::command]
 fn plc_status_info() -> serde_json::Value {
-    let cfg = plc_cfg();
+    let config = get_config();
+    let cfg = plc::config_from(&config);
+    let address = estop_address(&config);
     if !config_flag("plc_enabled") {
         return serde_json::json!({
             "connected": false, "enabled": false, "configured": false,
             "ip": cfg.ip, "rack": cfg.rack, "slot": cfg.slot,
+            "estop_address": address,
             "error": "PLC no habilitado. Actívelo en Configuración → PLC."
         });
     }
     match plc::connect(&cfg, 1500) {
-        Ok(mut client) => match plc::read_i_checked(&mut client, "I0.0") {
-            Ok(_) => serde_json::json!({
+        Ok(mut client) => match read_estop_source(&mut client, &config) {
+            Ok(raw) => serde_json::json!({
                 "connected": true, "enabled": true, "configured": true, "read_ok": true,
-                "ip": cfg.ip, "rack": cfg.rack, "slot": cfg.slot
+                "ip": cfg.ip, "rack": cfg.rack, "slot": cfg.slot,
+                "estop_address": address, "estop_raw": raw
             }),
             Err(e) => serde_json::json!({
                 "connected": false, "enabled": true, "configured": true, "read_ok": false,
                 "ip": cfg.ip, "rack": cfg.rack, "slot": cfg.slot,
-                "error": format!("Conectó al PLC pero no pudo leer I0.0: {}", e)
+                "estop_address": address,
+                "error": format!("Conectó al PLC pero no pudo leer {}: {}", address, e)
             }),
         },
         Err(e) => serde_json::json!({
             "connected": false, "enabled": true, "configured": true, "read_ok": false,
-            "ip": cfg.ip, "rack": cfg.rack, "slot": cfg.slot, "error": e
+            "ip": cfg.ip, "rack": cfg.rack, "slot": cfg.slot,
+            "estop_address": address, "error": e
         }),
     }
 }
 
 #[tauri::command]
 fn plc_probe() -> serde_json::Value {
-    let cfg = plc_cfg();
+    let config = get_config();
+    let cfg = plc::config_from(&config);
     let enabled = config_flag("plc_enabled");
+    let address = estop_address(&config);
     match plc::connect(&cfg, 1500) {
-        Ok(mut client) => match plc::read_i_checked(&mut client, "I0.0") {
+        Ok(mut client) => match read_estop_source(&mut client, &config) {
             Ok(raw) => serde_json::json!({
                 "connected": true, "enabled": enabled, "read_ok": true,
-                "ip": cfg.ip, "rack": cfg.rack, "slot": cfg.slot, "raw_i0_0": raw
+                "ip": cfg.ip, "rack": cfg.rack, "slot": cfg.slot,
+                "estop_address": address, "estop_raw": raw
             }),
             Err(e) => serde_json::json!({
                 "connected": false, "enabled": enabled, "read_ok": false,
                 "ip": cfg.ip, "rack": cfg.rack, "slot": cfg.slot,
-                "error": format!("Conectó al PLC pero no pudo leer I0.0: {}", e)
+                "estop_address": address,
+                "error": format!("Conectó al PLC pero no pudo leer {}: {}", address, e)
             }),
         },
         Err(e) => serde_json::json!({
             "connected": false, "enabled": enabled, "read_ok": false,
-            "ip": cfg.ip, "rack": cfg.rack, "slot": cfg.slot, "error": e
+            "ip": cfg.ip, "rack": cfg.rack, "slot": cfg.slot,
+            "estop_address": address, "error": e
         }),
     }
 }
@@ -251,11 +262,8 @@ fn plc_probe() -> serde_json::Value {
 fn plc_emergency_stop() -> serde_json::Value {
     let config = get_config();
     let cfg = plc::config_from(&config);
-    let address = config
-        .get("estop_input")
-        .and_then(|v| v.as_str())
-        .unwrap_or("I0.0")
-        .to_string();
+    let address = estop_address(&config);
+    let source = estop_source(&config);
     // Por defecto se asume NC (normalmente cerrado): true = sano, false = presionado.
     let nc = config
         .get("estop_nc")
@@ -267,6 +275,7 @@ fn plc_emergency_stop() -> serde_json::Value {
             "active": false,
             "raw": null,
             "address": address,
+            "source": source,
             "connected": false,
             "enabled": false,
             "inverted": nc,
@@ -274,13 +283,14 @@ fn plc_emergency_stop() -> serde_json::Value {
         });
     }
     match plc::connect(&cfg, 800) {
-        Ok(mut client) => match plc::read_i_checked(&mut client, &address) {
+        Ok(mut client) => match read_estop_source(&mut client, &config) {
             Ok(raw) => {
                 let active = if nc { !raw } else { raw };
                 serde_json::json!({
                     "active": active,
                     "raw": raw,
                     "address": address,
+                    "source": source,
                     "connected": true,
                     "inverted": nc,
                 })
@@ -289,6 +299,7 @@ fn plc_emergency_stop() -> serde_json::Value {
                 "active": false,
                 "raw": null,
                 "address": address,
+                "source": source,
                 "connected": false,
                 "inverted": nc,
                 "error": format!("No se pudo leer {}: {}", address, e),
@@ -298,9 +309,76 @@ fn plc_emergency_stop() -> serde_json::Value {
             "active": false,
             "raw": null,
             "address": address,
+            "source": source,
             "connected": false,
             "error": e,
         }),
+    }
+}
+
+fn estop_source(config: &serde_json::Value) -> String {
+    config
+        .get("estop_source")
+        .and_then(|v| v.as_str())
+        .unwrap_or("I")
+        .to_uppercase()
+}
+
+fn estop_address(config: &serde_json::Value) -> String {
+    if estop_source(config) == "DB" {
+        let db = config
+            .get("estop_db")
+            .and_then(|v| v.as_str())
+            .unwrap_or("1");
+        let offset = config
+            .get("estop_offset")
+            .and_then(|v| v.as_str())
+            .unwrap_or("105");
+        let bit = config
+            .get("estop_bit")
+            .and_then(|v| v.as_str())
+            .unwrap_or("0");
+        format!("DB{}.DBX{}.{}", db, offset, bit)
+    } else {
+        config
+            .get("estop_input")
+            .and_then(|v| v.as_str())
+            .unwrap_or("I0.0")
+            .to_string()
+    }
+}
+
+fn read_estop_source(
+    client: &mut plc::PlcClient,
+    config: &serde_json::Value,
+) -> Result<bool, String> {
+    if estop_source(config) == "DB" {
+        let db = config
+            .get("estop_db")
+            .and_then(|v| v.as_str())
+            .unwrap_or("1")
+            .parse::<i32>()
+            .map_err(|_| "estop_db inválido".to_string())?;
+        let offset = config
+            .get("estop_offset")
+            .and_then(|v| v.as_str())
+            .unwrap_or("105")
+            .parse::<i32>()
+            .map_err(|_| "estop_offset inválido".to_string())?;
+        let bit = config
+            .get("estop_bit")
+            .and_then(|v| v.as_str())
+            .unwrap_or("0")
+            .parse::<i32>()
+            .map_err(|_| "estop_bit inválido".to_string())?;
+        let value = plc::read_tag(client, db, offset, "BOOL", bit)?;
+        Ok(value.as_bool().unwrap_or(false))
+    } else {
+        let address = config
+            .get("estop_input")
+            .and_then(|v| v.as_str())
+            .unwrap_or("I0.0");
+        plc::read_i_checked(client, address)
     }
 }
 
@@ -403,27 +481,35 @@ fn plc_tag_read_by_id(tag_id: i64) -> serde_json::Value {
 
 #[tauri::command]
 fn plc_io_status() -> serde_json::Value {
-    let cfg = plc_cfg();
+    let config = get_config();
+    let cfg = plc::config_from(&config);
+    let address = estop_address(&config);
     if !config_flag("plc_enabled") {
         let mut v = plc::empty_io();
         if let Some(obj) = v.as_object_mut() {
             obj.insert("connected".to_string(), serde_json::json!(false));
             obj.insert("enabled".to_string(), serde_json::json!(false));
+            obj.insert("estop_address".to_string(), serde_json::json!(address));
             obj.insert("error".to_string(), serde_json::json!("PLC no habilitado. Actívelo en Configuración → PLC."));
         }
         return v;
     }
     match plc::connect(&cfg, 1500) {
         Ok(mut c) => {
-            let read_test = plc::read_i_checked(&mut c, "I0.0");
+            let read_test = read_estop_source(&mut c, &config);
             let mut v = plc::read_io(&mut c);
             if let Some(obj) = v.as_object_mut() {
                 obj.insert("connected".to_string(), serde_json::json!(true));
                 obj.insert("read_ok".to_string(), serde_json::json!(read_test.is_ok()));
-                if let Err(e) = read_test {
+                obj.insert("estop_address".to_string(), serde_json::json!(address));
+                obj.insert(
+                    "estop_raw".to_string(),
+                    serde_json::json!(read_test.as_ref().ok()),
+                );
+                if let Err(e) = &read_test {
                     obj.insert(
                         "error".to_string(),
-                        serde_json::json!(format!("Conectó pero no pudo leer I0.0: {}", e)),
+                        serde_json::json!(format!("Conectó pero no pudo leer {}: {}", address, e)),
                     );
                 }
             }

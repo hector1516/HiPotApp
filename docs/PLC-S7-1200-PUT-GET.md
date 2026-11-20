@@ -28,6 +28,54 @@ En TIA Portal:
 
 Sin esa opción, el cliente S7 puede conectar pero las lecturas/escrituras fallan.
 
+## S7-1200: leer el paro desde un DB
+
+En muchos S7-1200/1500, PUT/GET permite leer **DBs**, pero no las áreas `I/Q`. Si al leer `I0.0` aparece:
+
+```text
+CPU : Item not available
+```
+
+la solución es copiar la entrada a un bit de DB y leer ese DB.
+
+### En TIA Portal
+
+1. Abre el DB que ya usa la app (por ejemplo `DB1`).
+2. Verifica que el DB sea **no optimizado** (Properties → Attributes → desactivar “Optimized block access”).
+3. Agrega un Bool en:
+
+```text
+DB1.DBX105.0
+```
+
+4. En el programa del PLC (OB1), copia la entrada:
+
+```pascal
+"DB1".Estop_Raw := "I0.0";
+```
+
+Con el paro NC:
+
+```text
+Liberado   → I0.0 = 1 → DB1.DBX105.0 = 1
+Presionado → I0.0 = 0 → DB1.DBX105.0 = 0
+```
+
+5. Descarga el programa y la configuración de hardware.
+
+### En la app
+
+**Configuración → Sistema → Paro de emergencia**:
+
+- Fuente: **DB del PLC**
+- DB: `1`
+- Byte offset: `105`
+- Bit: `0`
+- Tipo de contacto: **NC**
+- Guardar
+
+La app leerá `DB1.DBX105.0` y ya no dependerá de leer `I0.0` por S7.
+
 ## Otras verificaciones
 
 | Punto | Valor correcto |

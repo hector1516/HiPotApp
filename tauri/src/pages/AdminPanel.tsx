@@ -972,6 +972,10 @@ function SystemTab() {
   const [contrast, setContrast] = useState(() => localStorage.getItem('contrast_mode') === '1');
   const [estopInput, setEstopInput] = useState('I0.0');
   const [estopNc, setEstopNc] = useState('1');
+  const [estopSource, setEstopSource] = useState('I');
+  const [estopDb, setEstopDb] = useState('1');
+  const [estopOffset, setEstopOffset] = useState('105');
+  const [estopBit, setEstopBit] = useState('0');
   const remoteConnStr = () => {
     const driver = 'ODBC Driver 17 for SQL Server';
     const server = cfg?.sql_server || '192.168.1.200';
@@ -990,6 +994,10 @@ function SystemTab() {
       setCfg(c || {});
       setEstopInput(String(c?.estop_input ?? 'I0.0'));
       setEstopNc(String(c?.estop_nc ?? '1'));
+      setEstopSource(String(c?.estop_source ?? 'I').toUpperCase());
+      setEstopDb(String(c?.estop_db ?? '1'));
+      setEstopOffset(String(c?.estop_offset ?? '105'));
+      setEstopBit(String(c?.estop_bit ?? '0'));
     }).catch(() => {});
     invoke<any>('local_db_config_get').then(r => setLocalDbCfg(r || { use_sqlite: '0', server: '.\\SQLEXPRESS', name: 'HiPotDB', user: '', password: '' })).catch(() => {});
     invoke<any>('audit_table_names').then(r => setTableNames(r?.tables ?? [])).catch(() => {});
@@ -1235,26 +1243,59 @@ function SystemTab() {
       <div className="card" style={{ marginBottom: 10 }}>
         <h3>Paro de emergencia</h3>
         <div className="row" style={{ alignItems: 'flex-end', gap: 10 }}>
-          <div className="field" style={{ flex: '0 1 160px' }}>
-            <label>Entrada PLC</label>
-            <input className="input" value={estopInput} onChange={e => setEstopInput(e.target.value.toUpperCase())} placeholder="I0.0" />
+          <div className="field" style={{ flex: '0 1 150px' }}>
+            <label>Fuente</label>
+            <select className="input" value={estopSource} onChange={e => setEstopSource(e.target.value)}>
+              <option value="I">Entrada I</option>
+              <option value="DB">DB del PLC</option>
+            </select>
           </div>
+          {estopSource === 'I' ? (
+            <div className="field" style={{ flex: '0 1 160px' }}>
+              <label>Entrada PLC</label>
+              <input className="input" value={estopInput} onChange={e => setEstopInput(e.target.value.toUpperCase())} placeholder="I0.0" />
+            </div>
+          ) : (
+            <>
+              <div className="field" style={{ flex: '0 1 80px' }}>
+                <label>DB</label>
+                <input className="input" type="number" value={estopDb} onChange={e => setEstopDb(e.target.value)} placeholder="1" />
+              </div>
+              <div className="field" style={{ flex: '0 1 110px' }}>
+                <label>Byte offset</label>
+                <input className="input" type="number" value={estopOffset} onChange={e => setEstopOffset(e.target.value)} placeholder="105" />
+              </div>
+              <div className="field" style={{ flex: '0 1 70px' }}>
+                <label>Bit</label>
+                <input className="input" type="number" value={estopBit} onChange={e => setEstopBit(e.target.value)} placeholder="0" />
+              </div>
+            </>
+          )}
           <div className="field" style={{ flex: '0 1 240px' }}>
             <label>Tipo de contacto</label>
             <select className="input" value={estopNc} onChange={e => setEstopNc(e.target.value)}>
-              <option value="1">NC — normalmente cerrado</option>
-              <option value="0">NO — normalmente abierto</option>
+              <option value="1">NC - normalmente cerrado</option>
+              <option value="0">NO - normalmente abierto</option>
             </select>
           </div>
           <button className="btn primary" onClick={async () => {
             try {
-              await invoke('set_config', { values: { estop_input: estopInput, estop_nc: estopNc } });
+              await invoke('set_config', { values: {
+                estop_input: estopInput,
+                estop_nc: estopNc,
+                estop_source: estopSource,
+                estop_db: estopDb,
+                estop_offset: estopOffset,
+                estop_bit: estopBit,
+              }});
               notify('Paro de emergencia guardado', 'ok');
             } catch (e: any) { notify('Error: ' + (e?.message || e), 'error'); }
           }}>Guardar</button>
         </div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
-          Por defecto se asume NC: la entrada debe estar en 1 para indicar “sin paro”.
+          En S7-1200, PUT/GET normalmente solo permite leer <b>DBs</b>, no entradas I.
+          Crea un Bool en <b>DB1.DBX105.0</b> y copia <b>I0.0</b> en el PLC; luego selecciona <b>DB</b>.
+          Con NC: liberado = 1, presionado = 0.
         </div>
       </div>
       <div className="card" style={{ marginBottom: 10 }}>
@@ -1422,6 +1463,19 @@ function PlcIoTab() {
       <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
         Actualizacion automatica cada 2 segundos. Los indicadores muestran el estado en tiempo real.
       </div>
+
+      {status?.estop_address && (
+        <div className="card" style={{ marginBottom: 10, background: status?.estop_raw ? '#e6f4ea' : '#fef2f2', borderColor: status?.estop_raw ? '#a8d0b4' : '#fecaca' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <b>Paro de emergencia</b>
+            <span className="mono" style={{ fontSize: 12 }}>{status.estop_address}</span>
+            <span className={`pill ${status.estop_raw ? 'on' : 'off'}`}>
+              {status.estop_raw == null ? 'sin lectura' : status.estop_raw ? '1' : '0'}
+            </span>
+            {status.read_ok === false && <span style={{ fontSize: 12, color: 'var(--bad)' }}>No se pudo leer</span>}
+          </div>
+        </div>
+      )}
 
       <div className="card" style={{ marginBottom: 10 }}>
         <h3>Salidas digitales (Q)</h3>
