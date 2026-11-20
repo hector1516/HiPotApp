@@ -972,9 +972,9 @@ function SystemTab() {
   const [contrast, setContrast] = useState(() => localStorage.getItem('contrast_mode') === '1');
   const [estopInput, setEstopInput] = useState('I0.0');
   const [estopNc, setEstopNc] = useState('1');
-  const [estopSource, setEstopSource] = useState('I');
-  const [estopDb, setEstopDb] = useState('1');
-  const [estopOffset, setEstopOffset] = useState('105');
+  const [estopSource, setEstopSource] = useState('DB');
+  const [estopDb, setEstopDb] = useState('100');
+  const [estopOffset, setEstopOffset] = useState('0');
   const [estopBit, setEstopBit] = useState('0');
   const remoteConnStr = () => {
     const driver = 'ODBC Driver 17 for SQL Server';
@@ -994,9 +994,9 @@ function SystemTab() {
       setCfg(c || {});
       setEstopInput(String(c?.estop_input ?? 'I0.0'));
       setEstopNc(String(c?.estop_nc ?? '1'));
-      setEstopSource(String(c?.estop_source ?? 'I').toUpperCase());
-      setEstopDb(String(c?.estop_db ?? '1'));
-      setEstopOffset(String(c?.estop_offset ?? '105'));
+      setEstopSource(String(c?.estop_source ?? 'DB').toUpperCase());
+      setEstopDb(String(c?.estop_db ?? '100'));
+      setEstopOffset(String(c?.estop_offset ?? '0'));
       setEstopBit(String(c?.estop_bit ?? '0'));
     }).catch(() => {});
     invoke<any>('local_db_config_get').then(r => setLocalDbCfg(r || { use_sqlite: '0', server: '.\\SQLEXPRESS', name: 'HiPotDB', user: '', password: '' })).catch(() => {});
@@ -1259,11 +1259,11 @@ function SystemTab() {
             <>
               <div className="field" style={{ flex: '0 1 80px' }}>
                 <label>DB</label>
-                <input className="input" type="number" value={estopDb} onChange={e => setEstopDb(e.target.value)} placeholder="1" />
+                <input className="input" type="number" value={estopDb} onChange={e => setEstopDb(e.target.value)} placeholder="100" />
               </div>
               <div className="field" style={{ flex: '0 1 110px' }}>
                 <label>Byte offset</label>
-                <input className="input" type="number" value={estopOffset} onChange={e => setEstopOffset(e.target.value)} placeholder="105" />
+                <input className="input" type="number" value={estopOffset} onChange={e => setEstopOffset(e.target.value)} placeholder="0" />
               </div>
               <div className="field" style={{ flex: '0 1 70px' }}>
                 <label>Bit</label>
@@ -1293,8 +1293,9 @@ function SystemTab() {
           }}>Guardar</button>
         </div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
-          En S7-1200, PUT/GET normalmente solo permite leer <b>DBs</b>, no entradas I.
-          Crea un Bool en <b>DB1.DBX105.0</b> y copia <b>I0.0</b> en el PLC; luego selecciona <b>DB</b>.
+          En este PLC, <b>DB1 no es la receta</b>: es un DB optimizado de 24 bytes.
+          Crea un DB global <b>no optimizado</b> (por ejemplo <b>DB100</b>) con un Bool en <b>DB100.DBX0.0</b>
+          y copia <b>I0.0</b> en el PLC. Luego selecciona <b>DB</b>, DB 100, offset 0, bit 0.
           Con NC: liberado = 1, presionado = 0.
         </div>
       </div>

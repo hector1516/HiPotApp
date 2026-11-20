@@ -40,25 +40,29 @@ la solución es copiar la entrada a un bit de DB y leer ese DB.
 
 ### En TIA Portal
 
-1. Abre el DB que ya usa la app (por ejemplo `DB1`).
+1. Crea un DB global nuevo, por ejemplo `DB100` (`DB_HipotApp`).
 2. Verifica que el DB sea **no optimizado** (Properties → Attributes → desactivar “Optimized block access”).
 3. Agrega un Bool en:
 
 ```text
-DB1.DBX105.0
+DB100.DBX0.0
 ```
+
+> Importante: en el respaldo del PLC, `DB1` es `RDM INT` (optimizado, 24 bytes), no la receta.
+> No uses `DB1.DBX105.0`. La receta real está en `DB2` y las mediciones en `DB3`, pero ambos
+> son optimizados y no se pueden leer por PUT/GET sin cambiarlos.
 
 4. En el programa del PLC (OB1), copia la entrada:
 
 ```pascal
-"DB1".Estop_Raw := "I0.0";
+"DB100".Estop_Raw := "I0.0";
 ```
 
 Con el paro NC:
 
 ```text
-Liberado   → I0.0 = 1 → DB1.DBX105.0 = 1
-Presionado → I0.0 = 0 → DB1.DBX105.0 = 0
+Liberado   → I0.0 = 1 → DB100.DBX0.0 = 1
+Presionado → I0.0 = 0 → DB100.DBX0.0 = 0
 ```
 
 5. Descarga el programa y la configuración de hardware.
@@ -68,13 +72,28 @@ Presionado → I0.0 = 0 → DB1.DBX105.0 = 0
 **Configuración → Sistema → Paro de emergencia**:
 
 - Fuente: **DB del PLC**
-- DB: `1`
-- Byte offset: `105`
+- DB: `100`
+- Byte offset: `0`
 - Bit: `0`
 - Tipo de contacto: **NC**
 - Guardar
 
-La app leerá `DB1.DBX105.0` y ya no dependerá de leer `I0.0` por S7.
+La app leerá `DB100.DBX0.0` y ya no dependerá de leer `I0.0` por S7.
+
+## Hallazgos del respaldo del PLC
+
+El respaldo `HUSSMANN - HiPot_V20` muestra:
+
+- `E-STOP` = `%I0.0` (no existe un DB de paro).
+- `DB1` = `RDM INT`, optimizado, 24 bytes. **No es la receta.**
+- `DB2` = `RECIPE` (receta real).
+- `DB3` = `MEASURE_DB` (DB de instancia de `MEASURE`).
+- `DB2` y `DB3` están configurados como **optimizados / solo simbólicos**.
+- Por eso la app no puede usar `DB1` ni leer/escribir `DB2`/`DB3` por offset absoluto.
+
+Antes de ejecutar pruebas automáticas hay que crear una **DB de interfaz no optimizada**
+(por ejemplo `DB100`) y copiar allí receta, órdenes, resultados y paro desde el programa PLC.
+El mapeo actual de la app (`DB1` offset 0/4/8/...) corresponde a otro programa y no aplica a este respaldo.
 
 ## Otras verificaciones
 

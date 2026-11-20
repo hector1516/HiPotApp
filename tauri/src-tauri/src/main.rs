@@ -320,7 +320,7 @@ fn estop_source(config: &serde_json::Value) -> String {
     config
         .get("estop_source")
         .and_then(|v| v.as_str())
-        .unwrap_or("I")
+        .unwrap_or("DB")
         .to_uppercase()
 }
 
@@ -329,11 +329,11 @@ fn estop_address(config: &serde_json::Value) -> String {
         let db = config
             .get("estop_db")
             .and_then(|v| v.as_str())
-            .unwrap_or("1");
+            .unwrap_or("100");
         let offset = config
             .get("estop_offset")
             .and_then(|v| v.as_str())
-            .unwrap_or("105");
+            .unwrap_or("0");
         let bit = config
             .get("estop_bit")
             .and_then(|v| v.as_str())
@@ -356,13 +356,13 @@ fn read_estop_source(
         let db = config
             .get("estop_db")
             .and_then(|v| v.as_str())
-            .unwrap_or("1")
+            .unwrap_or("100")
             .parse::<i32>()
             .map_err(|_| "estop_db inválido".to_string())?;
         let offset = config
             .get("estop_offset")
             .and_then(|v| v.as_str())
-            .unwrap_or("105")
+            .unwrap_or("0")
             .parse::<i32>()
             .map_err(|_| "estop_offset inválido".to_string())?;
         let bit = config
