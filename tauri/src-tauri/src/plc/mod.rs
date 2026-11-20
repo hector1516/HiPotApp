@@ -1,7 +1,8 @@
-//! PLC Siemens S7-1200 (DB1 + Q / I / IA) sobre el crate `s7`.
+//! PLC Siemens S7-1200 sobre el crate `s7`.
 //!
-//! Replica la lógica de `App/python/plc_manager.py`:
-//! - Offsets de receta y resultados en DB1.
+//! Interfaz real del programa HUSSMANN:
+//! - DB1000 (COMM01_EXT_UNIT): receta (bitmask), tiempos, tolerancia, start/stop.
+//! - DB1001 (COMM01_UNIT_EXT): resultados, Measuring, Finished, Error.
 //! - Lectura/escritura de tags (BOOL / WORD / INT / REAL).
 //! - Mapa de salidas Q, entradas I y analógicas IA.
 
@@ -17,31 +18,43 @@ use std::time::Duration;
 
 pub type PlcClient = Client<Transport>;
 
-// --- Offsets DB1 (doc 06) ---
-pub const OFF_VOLTAGE: i32 = 0;
-pub const COMP_OFFSETS: &[(&str, i32, i32, i32)] = &[
-    ("FAN", 4, 8, 12),
-    ("DOOR", 16, 20, 24),
-    ("FRAME", 28, 32, 36),
-    ("DRAIN", 40, 44, 48),
-    ("DEFROST", 52, 56, 60),
-    ("LIGHT", 64, 68, 72),
+// --- Interfaz real del PLC (COMM01_EXT_UNIT / COMM01_UNIT_EXT) ---
+// El programa del PLC ya expone dos DB no optimizadas para la app:
+//   DB1000 = COMM01_EXT_UNIT : receta, tiempos, tolerancia, start/stop
+//   DB1001 = COMM01_UNIT_EXT : resultados y estado
+// No usar DB1/DB2/DB3: DB1 es RDM INT y DB2/DB3 son optimizadas.
+pub const RECIPE_DB: i32 = 1000;
+pub const RESULT_DB: i32 = 1001;
+
+pub const OFF_RECIPE_MASK: i32 = 4; // REAL: bitmask de 18 bits + bit 18 = 110VAC
+pub const OFF_START_STOP: i32 = 2; // byte de bits
+pub const START_BIT: i32 = 5; // DB1000.DBX2.5
+pub const STOP_BIT: i32 = 6; // DB1000.DBX2.6
+pub const OFF_TOLERANCE: i32 = 98; // REAL, porcentaje
+
+/// (componente, bit base de A, offset de tiempo Real)
+pub const COMPONENTS: &[(&str, i32, i32)] = &[
+    ("FAN", 0, 8),
+    ("DOOR", 3, 12),
+    ("FRAME", 6, 16),
+    ("DRAIN", 9, 86),
+    ("DEFROST", 12, 90),
+    ("LIGHT", 15, 94),
 ];
-pub const OFF_START: i32 = 100;
-pub const OFF_STOP: i32 = 101;
-pub const OFF_COMPLETE: i32 = 102;
-pub const OFF_PASS: i32 = 103;
-pub const OFF_RUNNING: i32 = 104;
-pub const OFF_MODE: i32 = 110;
+pub const VOLTAGE_110_BIT: i32 = 18;
+
 pub const RES_OFFSETS: &[(&str, i32)] = &[
-    ("FAN", 200),
-    ("DOOR", 204),
-    ("FRAME", 208),
-    ("DRAIN", 212),
-    ("DEFROST", 216),
-    ("LIGHT", 220),
-    ("TOTAL", 224),
+    ("FAN", 4),
+    ("DOOR", 8),
+    ("FRAME", 12),
+    ("DRAIN", 16),
+    ("DEFROST", 86),
+    ("LIGHT", 90),
 ];
+pub const OFF_RESULT_STATUS: i32 = 2;
+pub const RES_MEASURING_BIT: i32 = 1;
+pub const RES_FINISHED_BIT: i32 = 2;
+pub const RES_ERROR_BIT: i32 = 3;
 
 // --- Mapa I/O ---
 pub const Q_MAP: &[(&str, i32, i32)] = &[
@@ -339,20 +352,25 @@ pub fn empty_results() -> Value {
     out.insert("complete".to_string(), json!(false));
     out.insert("pass".to_string(), json!(false));
     out.insert("running".to_string(), json!(false));
+    out.insert("error".to_string(), json!(false));
     Value::Object(out.into_iter().collect())
 }
 
 // --- Receta / ejecución ---
 
-pub fn send_recipe(c: &mut PlcClient, voltage: f64, components: &Value) -> Result<(), String> {
-    write_real(c, 1, OFF_VOLTAGE, voltage)?;
-    // Limpia límites/habilitación de la receta anterior. Si una fila no incluye
-    // un componente, debe quedar deshabilitado, no con valores viejos.
-    for (_, min_off, max_off, en_off) in COMP_OFFSETS {
-        write_real(c, 1, *min_off, 0.0)?;
-        write_real(c, 1, *max_off, 0.0)?;
-        write_bool(c, 1, *en_off, false, 0)?;
-    }
+/// Envía la receta real al PLC.
+///
+/// La app maneja un rango de corriente por componente. El PLC tiene 3 canales
+/// de medición (A/B/C); se elige el menor que cubra el máximo de la receta:
+///   A: <= 1 A, B: <= 10 A, C: resto (hasta 20 A).
+/// El bit 18 selecciona 110 VAC; en caso contrario el PLC usa 220 VAC.
+pub fn send_recipe(
+    c: &mut PlcClient,
+    voltage: f64,
+    components: &Value,
+    test_time: f64,
+) -> Result<(), String> {
+    let mut mask: i32 = 0;
     if let Some(arr) = components.as_array() {
         for comp in arr {
             let name = comp
@@ -360,72 +378,101 @@ pub fn send_recipe(c: &mut PlcClient, voltage: f64, components: &Value) -> Resul
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_uppercase();
-            if let Some((_, min_off, max_off, en_off)) =
-                COMP_OFFSETS.iter().find(|(n, _, _, _)| *n == name)
-            {
-                let min = comp.get("min").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let enabled = comp
+                .get("enabled")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            if !enabled || name.is_empty() {
+                continue;
+            }
+            if let Some((_, base, _)) = COMPONENTS.iter().find(|(n, _, _)| *n == name) {
                 let max = comp.get("max").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let enabled = comp
-                    .get("enabled")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(true);
-                write_real(c, 1, *min_off, min)?;
-                write_real(c, 1, *max_off, max)?;
-                write_bool(c, 1, *en_off, enabled, 0)?;
+                let variant = if max <= 1.0 {
+                    0
+                } else if max <= 10.0 {
+                    1
+                } else {
+                    2
+                };
+                mask |= 1i32 << (*base + variant);
             }
         }
     }
+    if voltage < 150.0 {
+        mask |= 1i32 << VOLTAGE_110_BIT;
+    }
+    write_real(c, RECIPE_DB, OFF_RECIPE_MASK, mask as f64)?;
+
+    // Tiempo de prueba: el de la receta (10 s por defecto).
+    let t = if test_time > 0.0 { test_time } else { 10.0 };
+    for (_, _, time_off) in COMPONENTS {
+        write_real(c, RECIPE_DB, *time_off, t)?;
+    }
+    // Tolerancia de voltaje: 5 %.
+    write_real(c, RECIPE_DB, OFF_TOLERANCE, 5.0)?;
     Ok(())
 }
 
 pub fn start(c: &mut PlcClient) -> Result<(), String> {
-    write_bool(c, 1, OFF_START, true, 0)
+    write_bool(c, RECIPE_DB, OFF_START_STOP, true, START_BIT)?;
+    std::thread::sleep(Duration::from_millis(180));
+    write_bool(c, RECIPE_DB, OFF_START_STOP, false, START_BIT)
 }
 
 pub fn stop(c: &mut PlcClient) -> Result<(), String> {
-    write_bool(c, 1, OFF_STOP, true, 0)
+    write_bool(c, RECIPE_DB, OFF_START_STOP, true, STOP_BIT)?;
+    std::thread::sleep(Duration::from_millis(180));
+    write_bool(c, RECIPE_DB, OFF_START_STOP, false, STOP_BIT)
 }
 
 pub fn read_results(c: &mut PlcClient) -> Value {
     let mut out = BTreeMap::new();
     for (name, off) in RES_OFFSETS {
-        out.insert((*name).to_string(), json!(read_real(c, 1, *off).unwrap_or(0.0)));
+        out.insert((*name).to_string(), json!(read_real(c, RESULT_DB, *off).unwrap_or(0.0)));
     }
     out.insert(
         "complete".to_string(),
-        json!(read_bool(c, 1, OFF_COMPLETE, 0).unwrap_or(false)),
+        json!(read_bool(c, RESULT_DB, OFF_RESULT_STATUS, RES_FINISHED_BIT).unwrap_or(false)),
     );
     out.insert(
         "pass".to_string(),
-        json!(read_bool(c, 1, OFF_PASS, 0).unwrap_or(false)),
+        json!(false),
     );
     out.insert(
         "running".to_string(),
-        json!(read_bool(c, 1, OFF_RUNNING, 0).unwrap_or(false)),
+        json!(read_bool(c, RESULT_DB, OFF_RESULT_STATUS, RES_MEASURING_BIT).unwrap_or(false)),
+    );
+    out.insert(
+        "error".to_string(),
+        json!(read_bool(c, RESULT_DB, OFF_RESULT_STATUS, RES_ERROR_BIT).unwrap_or(false)),
     );
     Value::Object(out.into_iter().collect())
 }
 
-pub fn set_mode(c: &mut PlcClient, mode: i32) -> Result<(), String> {
+pub fn set_mode(_c: &mut PlcClient, mode: i32) -> Result<(), String> {
     if mode != 1 && mode != 2 {
         return Err("mode debe ser 1 (auto) o 2 (manual)".to_string());
     }
-    write_word(c, 1, OFF_MODE, mode as u16)
+    // El programa PLC no tiene registro de modo; la secuencia se controla
+    // con START_MEASURE/STOP y la receta.
+    Ok(())
 }
 
-pub fn get_mode(c: &mut PlcClient) -> Result<i32, String> {
-    Ok(read_word(c, 1, OFF_MODE)? as i32)
+pub fn get_mode(_c: &mut PlcClient) -> Result<i32, String> {
+    Ok(1)
 }
 
 pub fn test_component(c: &mut PlcClient, component: &str, voltage: f64) -> Result<Value, String> {
     let name = component.trim().to_uppercase();
-    set_mode(c, 2)?;
-    for (comp, _, _, en_off) in COMP_OFFSETS {
-        write_bool(c, 1, *en_off, *comp == name, 0)?;
-    }
-    write_real(c, 1, OFF_VOLTAGE, voltage)?;
-    write_bool(c, 1, OFF_START, true, 0)?;
-    std::thread::sleep(Duration::from_millis(600));
+    let components = json!([{
+        "name": name,
+        "enabled": true,
+        "min": 0.0,
+        "max": 20.0
+    }]);
+    send_recipe(c, voltage, &components, 1.0)?;
+    start(c)?;
+    std::thread::sleep(Duration::from_millis(1500));
     let all = read_results(c);
     let value = all.get(&name).and_then(|v| v.as_f64()).unwrap_or(0.0);
     Ok(json!({ "component": name, "value": value, "all": all }))

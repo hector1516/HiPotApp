@@ -80,33 +80,34 @@ class PLCManager:
             return False
 ```
 
-### Mapeo de Tags (DB1)
+### Mapeo real de la app (DB1000 / DB1001)
+
+La app usa las DB no optimizadas que ya existen en el programa PLC. El detalle
+completo está en `docs/PLC-S7-1200-PUT-GET.md`.
 
 ```
-// Direcciones de memoria DB1
-Offset  Tamaño   Tag                      Tipo
-------  ------   ---                      ----
-0       4        Recipe_Voltage           REAL
-4       4        Component_FAN_MIN        REAL
-8       4        Component_FAN_MAX        REAL
-12      1        Component_FAN_ENABLE     BOOL
-16      4        Component_DOOR_MIN       REAL
-20      4        Component_DOOR_MAX       REAL
-24      1        Component_DOOR_ENABLE    BOOL
-...     ...      (repetir para FRAME, DRAIN, DEFROST, LIGHT)
-100     1        Test_Start               BOOL
-101     1        Test_Stop                BOOL
-102     1        Test_Complete            BOOL
-103     1        Test_Pass                BOOL
-104     1        Test_Running             BOOL
-// Resultados (lectura)
-200     4        Result_FAN               REAL
-204     4        Result_DOOR              REAL
-208     4        Result_FRAME             REAL
-212     4        Result_DRAIN             REAL
-216     4        Result_DEFROST           REAL
-220     4        Result_LIGHT             REAL
-224     4        Result_TOTAL             REAL
+DB1000 = COMM01_EXT_UNIT  (receta y órdenes)
+2.5     BOOL    start test
+2.6     BOOL    stop test
+4.0     REAL    bitmask de receta (A/B/C + 110VAC)
+8.0     REAL    FAN Time (s)
+12.0    REAL    DOOR Time (s)
+16.0    REAL    FRAME Time (s)
+86.0    REAL    DRAIN Time (s)
+90.0    REAL    DEFROST Time (s)
+94.0    REAL    LIGHT Time (s)
+98.0    REAL    tolerancia de voltaje (%)
+
+DB1001 = COMM01_UNIT_EXT  (resultados)
+2.1     BOOL    Measuring
+2.2     BOOL    Finished
+2.3     BOOL    Error (mapear en PLC)
+4.0     REAL    Result FAN
+8.0     REAL    Result DOOR
+12.0    REAL    Result FRAME
+16.0    REAL    Result DRAIN
+86.0    REAL    Result DEFROST
+90.0    REAL    Result LIGHT
 ```
 
 ## 3. Hipot 3865 (USB/RS-232)

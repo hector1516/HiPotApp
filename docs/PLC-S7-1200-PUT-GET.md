@@ -80,6 +80,67 @@ Presionado → I0.0 = 0 → DB100.DBX0.0 = 0
 
 La app leerá `DB100.DBX0.0` y ya no dependerá de leer `I0.0` por S7.
 
+## Interfaz real de la app: DB1000 y DB1001
+
+El programa del PLC ya tiene dos DB **no optimizadas** para comunicación con la app:
+
+### DB1000 — `COMM01_EXT_UNIT` (receta y órdenes)
+
+| Dirección | Tipo | Uso |
+|---|---|---|
+| `DB1000.DBX2.5` | Bool | `start test` |
+| `DB1000.DBX2.6` | Bool | `stop test` |
+| `DB1000.DBD4` | Real | Bitmask de receta (18 bits + 110VAC) |
+| `DB1000.DBD8` | Real | FAN Time (s) |
+| `DB1000.DBD12` | Real | DOOR Time (s) |
+| `DB1000.DBD16` | Real | FRAME Time (s) |
+| `DB1000.DBD86` | Real | DRAIN Time (s) |
+| `DB1000.DBD90` | Real | DEFROST Time (s) |
+| `DB1000.DBD94` | Real | LIGHT Time (s) |
+| `DB1000.DBD98` | Real | Tolerancia de voltaje (%) |
+
+Bitmask de receta (`DB1000.DBD4`):
+
+| Bit | Componente/canal |
+|---|---|
+| 0/1/2 | FAN A/B/C |
+| 3/4/5 | DOOR A/B/C |
+| 6/7/8 | FRAME A/B/C |
+| 9/10/11 | DRAIN A/B/C |
+| 12/13/14 | DEFROST A/B/C |
+| 15/16/17 | LIGHT A/B/C |
+| 18 | 110VAC (0 = 220VAC) |
+
+La app elige un solo canal por componente según el máximo de corriente de la receta:
+
+- `max <= 1 A` → A
+- `max <= 10 A` → B
+- `max > 10 A` → C
+
+### DB1001 — `COMM01_UNIT_EXT` (resultados)
+
+| Dirección | Tipo | Uso |
+|---|---|---|
+| `DB1001.DBX2.1` | Bool | `Measuring` |
+| `DB1001.DBX2.2` | Bool | `Finished` |
+| `DB1001.DBX2.3` | Bool | `Error` (requiere mapeo en PLC) |
+| `DB1001.DBD4` | Real | Resultado FAN |
+| `DB1001.DBD8` | Real | Resultado DOOR |
+| `DB1001.DBD12` | Real | Resultado FRAME |
+| `DB1001.DBD16` | Real | Resultado DRAIN |
+| `DB1001.DBD86` | Real | Resultado DEFROST |
+| `DB1001.DBD90` | Real | Resultado LIGHT |
+| `DB1001.DBD94` | Real | Voltaje medido (requiere mapeo en PLC) |
+
+Para que la app reciba el error de voltaje, agrega en `COMM` (FC1), red 6:
+
+```pascal
+"COMM01_UNIT_EXT".UNIT_0023_EXT := "MEASURE_DB".Error;
+"COMM01_UNIT_EXT".UNIT_0940_EXT := "MEASURE_DB".Result.VOLTAGE;
+```
+
+Si no agregas esas líneas, la app solo evalúa la corriente contra los límites de la receta.
+
 ## Hallazgos del respaldo del PLC
 
 El respaldo `HUSSMANN - HiPot_V20` muestra:
@@ -91,9 +152,9 @@ El respaldo `HUSSMANN - HiPot_V20` muestra:
 - `DB2` y `DB3` están configurados como **optimizados / solo simbólicos**.
 - Por eso la app no puede usar `DB1` ni leer/escribir `DB2`/`DB3` por offset absoluto.
 
-Antes de ejecutar pruebas automáticas hay que crear una **DB de interfaz no optimizada**
-(por ejemplo `DB100`) y copiar allí receta, órdenes, resultados y paro desde el programa PLC.
-El mapeo actual de la app (`DB1` offset 0/4/8/...) corresponde a otro programa y no aplica a este respaldo.
+La app usa **DB1000/DB1001** para receta, órdenes y resultados, y **DB100** solo para el paro.
+No usa DB1/DB2/DB3.
+El mapeo anterior de la app (`DB1` offset 0/4/8/...) correspondía a otro programa y ya fue reemplazado.
 
 ## Otras verificaciones
 

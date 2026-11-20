@@ -545,7 +545,7 @@ fn plc_io_write(q: String, value: bool) -> String {
 fn plc_send_recipe(voltage: f64, components: serde_json::Value) -> String {
     let cfg = plc_cfg();
     match plc::connect(&cfg, 1500) {
-        Ok(mut c) => match plc::send_recipe(&mut c, voltage, &components) {
+        Ok(mut c) => match plc::send_recipe(&mut c, voltage, &components, 10.0) {
             Ok(_) => "OK".to_string(),
             Err(e) => format!("error: {}", e),
         },
@@ -890,7 +890,7 @@ fn run_test_cycle(
     let cfg = plc_cfg();
     match plc::connect(&cfg, 2000) {
         Ok(mut client) => {
-            if let Err(e) = plc::send_recipe(&mut client, voltage, &components) {
+            if let Err(e) = plc::send_recipe(&mut client, voltage, &components, hipot_time) {
                 errors.push(format!("PLC receta: {}", e));
             }
             let _ = plc::set_mode(&mut client, 1);
@@ -936,11 +936,6 @@ fn run_test_cycle(
                 std::thread::sleep(std::time::Duration::from_millis(500));
             }
 
-            plc_pass = plc_values
-                .get("pass")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-
             let mut readings = Vec::new();
             if let Some(arr) = components.as_array() {
                 for comp in arr {
@@ -950,6 +945,9 @@ fn run_test_cycle(
                         .unwrap_or("")
                         .to_uppercase();
                     if name.is_empty() {
+                        continue;
+                    }
+                    if !comp.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true) {
                         continue;
                     }
                     let min = comp.get("min").and_then(|v| v.as_f64()).unwrap_or(0.0);
@@ -970,6 +968,26 @@ fn run_test_cycle(
                     }));
                 }
             }
+
+            // El PLC real no tiene un bit Test_Pass: se evalúa con los
+            // resultados de corriente contra los límites de la receta.
+            let finished = plc_values
+                .get("complete")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let plc_error = plc_values
+                .get("error")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let all_ok = !readings.is_empty()
+                && readings
+                    .iter()
+                    .all(|r| r.get("pass").and_then(|v| v.as_bool()).unwrap_or(false));
+            plc_pass = finished && !plc_error && all_ok;
+            if let Some(obj) = plc_values.as_object_mut() {
+                obj.insert("pass".to_string(), serde_json::json!(plc_pass));
+            }
+
             let mut component_values = serde_json::Map::new();
             for reading in &readings {
                 if let Some(name) = reading.get("component").and_then(|v| v.as_str()) {

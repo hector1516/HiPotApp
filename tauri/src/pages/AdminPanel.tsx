@@ -412,6 +412,10 @@ function RecipesTab({adminBatch}:{adminBatch?:string}){
             </div>
 
             <div style={{ fontSize:11, color:'var(--muted)', marginTop:6 }}>Marque  para incluir ese componente en ese voltaje. Desmarcado = esa parte no se prueba.</div>
+            <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>
+              PLC: el máximo de corriente elige el canal <b>A</b> (≤1 A), <b>B</b> (≤10 A) o <b>C</b> (&gt;10 A).
+              Voltajes 110/120 V usan la salida de 110 VAC; 208/220/240 V usan 220 VAC.
+            </div>
             <div style={{ fontSize:11, color:'var(--muted)' }}>Se guarda con fecha/hora y usuario: <b>{(adminBatch||'ADMIN').toUpperCase()}</b></div>
             <div style={{ display:'flex', gap:8, marginTop:12, flexWrap:'wrap', justifyContent:'flex-end' }}>
               <button className="btn" onClick={()=>setEditing(null)}>Cancelar</button>
