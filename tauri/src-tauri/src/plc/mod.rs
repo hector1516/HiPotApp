@@ -54,7 +54,7 @@ pub const RES_OFFSETS: &[(&str, i32)] = &[
 pub const OFF_RESULT_STATUS: i32 = 2;
 pub const RES_MEASURING_BIT: i32 = 1;
 pub const RES_FINISHED_BIT: i32 = 2;
-pub const RES_ERROR_BIT: i32 = 3;
+pub const RES_ERROR_BIT: i32 = 4;
 
 // --- Mapa I/O ---
 pub const Q_MAP: &[(&str, i32, i32)] = &[

@@ -40,45 +40,40 @@ la solución es copiar la entrada a un bit de DB y leer ese DB.
 
 ### En TIA Portal
 
-1. Crea un DB global nuevo, por ejemplo `DB100` (`DB_HipotApp`).
-2. Verifica que el DB sea **no optimizado** (Properties → Attributes → desactivar “Optimized block access”).
-3. Agrega un Bool en:
+No hace falta crear un DB nuevo. Usa `DB1001`, que ya es no optimizada:
 
-```text
-DB100.DBX0.0
-```
-
-> Importante: en el respaldo del PLC, `DB1` es `RDM INT` (optimizado, 24 bytes), no la receta.
-> No uses `DB1.DBX105.0`. La receta real está en `DB2` y las mediciones en `DB3`, pero ambos
-> son optimizados y no se pueden leer por PUT/GET sin cambiarlos.
-
-4. En el programa del PLC (OB1), copia la entrada:
+1. En `COMM` (FC1), red 6 `UNIT_EXT`, agrega la copia directa del paro:
 
 ```pascal
-"DB100".Estop_Raw := "I0.0";
+"COMM01_UNIT_EXT".UNIT_0025_EXT := "E-STOP";
 ```
+
+2. Confirma que `DB1001` sea **no optimizada**.
+3. Descarga el programa.
 
 Con el paro NC:
 
 ```text
-Liberado   → I0.0 = 1 → DB100.DBX0.0 = 1
-Presionado → I0.0 = 0 → DB100.DBX0.0 = 0
+Liberado   → I0.0 = 1 → DB1001.DBX2.5 = 1
+Presionado → I0.0 = 0 → DB1001.DBX2.5 = 0
 ```
 
-5. Descarga el programa y la configuración de hardware.
+> Si en el PLC se usa `NOT "E-STOP"`, el bit queda invertido:
+> liberado = 0, presionado = 1. En ese caso la app debe usar **NO**, no NC.
+> Lo recomendado es dejar la copia directa y usar NC en la app.
 
 ### En la app
 
 **Configuración → Sistema → Paro de emergencia**:
 
 - Fuente: **DB del PLC**
-- DB: `100`
-- Byte offset: `0`
-- Bit: `0`
+- DB: `1001`
+- Byte offset: `2`
+- Bit: `5`
 - Tipo de contacto: **NC**
 - Guardar
 
-La app leerá `DB100.DBX0.0` y ya no dependerá de leer `I0.0` por S7.
+La app leerá `DB1001.DBX2.5` y ya no dependerá de leer `I0.0` por S7.
 
 ## Interfaz real de la app: DB1000 y DB1001
 
@@ -123,7 +118,8 @@ La app elige un solo canal por componente según el máximo de corriente de la r
 |---|---|---|
 | `DB1001.DBX2.1` | Bool | `Measuring` |
 | `DB1001.DBX2.2` | Bool | `Finished` |
-| `DB1001.DBX2.3` | Bool | `Error` (requiere mapeo en PLC) |
+| `DB1001.DBX2.4` | Bool | `Error` (mapeado desde `MEASURE_DB.Error`) |
+| `DB1001.DBX2.5` | Bool | E-stop (mapeado desde `"E-STOP"`) |
 | `DB1001.DBD4` | Real | Resultado FAN |
 | `DB1001.DBD8` | Real | Resultado DOOR |
 | `DB1001.DBD12` | Real | Resultado FRAME |
@@ -135,7 +131,7 @@ La app elige un solo canal por componente según el máximo de corriente de la r
 Para que la app reciba el error de voltaje, agrega en `COMM` (FC1), red 6:
 
 ```pascal
-"COMM01_UNIT_EXT".UNIT_0023_EXT := "MEASURE_DB".Error;
+"COMM01_UNIT_EXT".UNIT_0024_EXT := "MEASURE_DB".Error;
 "COMM01_UNIT_EXT".UNIT_0940_EXT := "MEASURE_DB".Result.VOLTAGE;
 ```
 
@@ -152,8 +148,7 @@ El respaldo `HUSSMANN - HiPot_V20` muestra:
 - `DB2` y `DB3` están configurados como **optimizados / solo simbólicos**.
 - Por eso la app no puede usar `DB1` ni leer/escribir `DB2`/`DB3` por offset absoluto.
 
-La app usa **DB1000/DB1001** para receta, órdenes y resultados, y **DB100** solo para el paro.
-No usa DB1/DB2/DB3.
+La app usa **DB1000/DB1001** para receta, órdenes, resultados y paro. No usa DB1/DB2/DB3.
 El mapeo anterior de la app (`DB1` offset 0/4/8/...) correspondía a otro programa y ya fue reemplazado.
 
 ## Otras verificaciones

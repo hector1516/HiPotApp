@@ -329,15 +329,15 @@ fn estop_address(config: &serde_json::Value) -> String {
         let db = config
             .get("estop_db")
             .and_then(|v| v.as_str())
-            .unwrap_or("100");
+            .unwrap_or("1001");
         let offset = config
             .get("estop_offset")
             .and_then(|v| v.as_str())
-            .unwrap_or("0");
+            .unwrap_or("2");
         let bit = config
             .get("estop_bit")
             .and_then(|v| v.as_str())
-            .unwrap_or("0");
+            .unwrap_or("5");
         format!("DB{}.DBX{}.{}", db, offset, bit)
     } else {
         config
@@ -356,19 +356,19 @@ fn read_estop_source(
         let db = config
             .get("estop_db")
             .and_then(|v| v.as_str())
-            .unwrap_or("100")
+            .unwrap_or("1001")
             .parse::<i32>()
             .map_err(|_| "estop_db inválido".to_string())?;
         let offset = config
             .get("estop_offset")
             .and_then(|v| v.as_str())
-            .unwrap_or("0")
+            .unwrap_or("2")
             .parse::<i32>()
             .map_err(|_| "estop_offset inválido".to_string())?;
         let bit = config
             .get("estop_bit")
             .and_then(|v| v.as_str())
-            .unwrap_or("0")
+            .unwrap_or("5")
             .parse::<i32>()
             .map_err(|_| "estop_bit inválido".to_string())?;
         let value = plc::read_tag(client, db, offset, "BOOL", bit)?;

@@ -977,9 +977,9 @@ function SystemTab() {
   const [estopInput, setEstopInput] = useState('I0.0');
   const [estopNc, setEstopNc] = useState('1');
   const [estopSource, setEstopSource] = useState('DB');
-  const [estopDb, setEstopDb] = useState('100');
-  const [estopOffset, setEstopOffset] = useState('0');
-  const [estopBit, setEstopBit] = useState('0');
+  const [estopDb, setEstopDb] = useState('1001');
+  const [estopOffset, setEstopOffset] = useState('2');
+  const [estopBit, setEstopBit] = useState('5');
   const remoteConnStr = () => {
     const driver = 'ODBC Driver 17 for SQL Server';
     const server = cfg?.sql_server || '192.168.1.200';
@@ -999,9 +999,9 @@ function SystemTab() {
       setEstopInput(String(c?.estop_input ?? 'I0.0'));
       setEstopNc(String(c?.estop_nc ?? '1'));
       setEstopSource(String(c?.estop_source ?? 'DB').toUpperCase());
-      setEstopDb(String(c?.estop_db ?? '100'));
-      setEstopOffset(String(c?.estop_offset ?? '0'));
-      setEstopBit(String(c?.estop_bit ?? '0'));
+      setEstopDb(String(c?.estop_db ?? '1001'));
+      setEstopOffset(String(c?.estop_offset ?? '2'));
+      setEstopBit(String(c?.estop_bit ?? '5'));
     }).catch(() => {});
     invoke<any>('local_db_config_get').then(r => setLocalDbCfg(r || { use_sqlite: '0', server: '.\\SQLEXPRESS', name: 'HiPotDB', user: '', password: '' })).catch(() => {});
     invoke<any>('audit_table_names').then(r => setTableNames(r?.tables ?? [])).catch(() => {});
@@ -1263,15 +1263,15 @@ function SystemTab() {
             <>
               <div className="field" style={{ flex: '0 1 80px' }}>
                 <label>DB</label>
-                <input className="input" type="number" value={estopDb} onChange={e => setEstopDb(e.target.value)} placeholder="100" />
+                <input className="input" type="number" value={estopDb} onChange={e => setEstopDb(e.target.value)} placeholder="1001" />
               </div>
               <div className="field" style={{ flex: '0 1 110px' }}>
                 <label>Byte offset</label>
-                <input className="input" type="number" value={estopOffset} onChange={e => setEstopOffset(e.target.value)} placeholder="0" />
+                <input className="input" type="number" value={estopOffset} onChange={e => setEstopOffset(e.target.value)} placeholder="2" />
               </div>
               <div className="field" style={{ flex: '0 1 70px' }}>
                 <label>Bit</label>
-                <input className="input" type="number" value={estopBit} onChange={e => setEstopBit(e.target.value)} placeholder="0" />
+                <input className="input" type="number" value={estopBit} onChange={e => setEstopBit(e.target.value)} placeholder="5" />
               </div>
             </>
           )}
@@ -1297,10 +1297,10 @@ function SystemTab() {
           }}>Guardar</button>
         </div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
-          En este PLC, <b>DB1 no es la receta</b>: es un DB optimizado de 24 bytes.
-          Crea un DB global <b>no optimizado</b> (por ejemplo <b>DB100</b>) con un Bool en <b>DB100.DBX0.0</b>
-          y copia <b>I0.0</b> en el PLC. Luego selecciona <b>DB</b>, DB 100, offset 0, bit 0.
-          Con NC: liberado = 1, presionado = 0.
+          Usa <b>DB1001.DBX2.5</b>, que ya existe y el PLC la escribe con <b>"E-STOP"</b>.
+          La copia debe ser directa: liberado = 1, presionado = 0; en la app selecciona <b>NC</b>.
+          Si el PLC usa <b>NOT "E-STOP"</b>, selecciona <b>NO</b>.
+          El error de voltaje está en <b>DB1001.DBX2.4</b>.
         </div>
       </div>
       <div className="card" style={{ marginBottom: 10 }}>
