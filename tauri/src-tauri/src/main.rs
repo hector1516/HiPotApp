@@ -2,6 +2,7 @@
 // Un solo ejecutable, sin sidecar Python ni puertos HTTP.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod calibration;
 mod config_io;
 mod db;
 mod hipot;
@@ -166,6 +167,91 @@ fn open_external(url: String) {
             .args(["/C", "start", "", &url])
             .spawn();
     }
+}
+
+// --- Calibración analógica ---
+
+#[tauri::command]
+fn calibration_get() -> serde_json::Value {
+    let config = get_config();
+    let cal = calibration::AnalogCalibration::from_config(&config);
+    let mut out = cal.to_json();
+    if let Some(obj) = out.as_object_mut() {
+        let version = config
+            .get("analog_calibration_version")
+            .and_then(|v| v.as_str())
+            .unwrap_or("0");
+        obj.insert("version".to_string(), serde_json::json!(version));
+        obj.insert(
+            "updated_at".to_string(),
+            serde_json::json!(config
+                .get("analog_calibration_updated_at")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")),
+        );
+        obj.insert(
+            "updated_by".to_string(),
+            serde_json::json!(config
+                .get("analog_calibration_updated_by")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")),
+        );
+        obj.insert(
+            "all_valid".to_string(),
+            serde_json::json!(cal.channels.iter().all(|ch| ch.is_valid())),
+        );
+    }
+    out
+}
+
+#[tauri::command]
+fn calibration_save(payload: serde_json::Value, user: String) -> String {
+    let cal = match calibration::AnalogCalibration::validate_payload(&payload) {
+        Ok(cal) => cal,
+        Err(e) => return format!("error: {}", e),
+    };
+    let config = get_config();
+    let version = calibration::next_version(
+        config
+            .get("analog_calibration_version")
+            .and_then(|v| v.as_str())
+            .unwrap_or("0"),
+    );
+    let now = chrono::Local::now()
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string();
+    let user = if user.trim().is_empty() {
+        "ADMIN".to_string()
+    } else {
+        user.trim().to_string()
+    };
+    let stored = cal.storage_json();
+    let result = set_config(serde_json::json!({
+        "analog_calibration": stored,
+        "analog_calibration_version": version.to_string(),
+        "analog_calibration_updated_at": now,
+        "analog_calibration_updated_by": user,
+    }));
+    if result == "saved" {
+        let calibrated = cal.channels.iter().filter(|ch| ch.is_valid()).count();
+        let detail = format!(
+            "Calibración analógica v{} guardada por {} ({} canales calibrados)",
+            version, user, calibrated
+        );
+        let _ = db::repo::log_add(
+            "INFO",
+            "PLC",
+            "calibration_save",
+            Some(&detail),
+            None,
+            Some(&stored),
+            None,
+            None,
+            true,
+            None,
+        );
+    }
+    result
 }
 
 // --- PLC admin / I/O / manual (Rust, producción) ---
@@ -500,7 +586,29 @@ fn plc_io_status() -> serde_json::Value {
             let read_test = read_estop_source(&mut c, &config);
             match plc::read_bridge(&mut c) {
                 Ok(mut v) => {
+                    let cal = calibration::AnalogCalibration::from_config(&config);
+                    let raw_analog = v
+                        .get("raw_analog")
+                        .and_then(|a| a.as_array())
+                        .cloned()
+                        .unwrap_or_default();
+                    let mut analog = serde_json::Map::new();
+                    let mut calibrated = serde_json::Map::new();
+                    for (i, name) in calibration::CHANNEL_NAMES.iter().enumerate() {
+                        let valid = cal.get(name).map(|ch| ch.is_valid()).unwrap_or(false);
+                        calibrated.insert((*name).to_string(), serde_json::json!(valid));
+                        if let Some(raw) = raw_analog.get(i).and_then(|x| x.as_u64()) {
+                            if let Some(value) = cal.to_eng(name, raw as u16) {
+                                analog.insert((*name).to_string(), serde_json::json!(value));
+                            }
+                        }
+                    }
                     if let Some(obj) = v.as_object_mut() {
+                        obj.insert("analog".to_string(), serde_json::Value::Object(analog));
+                        obj.insert(
+                            "analog_calibrated".to_string(),
+                            serde_json::Value::Object(calibrated),
+                        );
                         obj.insert("enabled".to_string(), serde_json::json!(true));
                         obj.insert("read_ok".to_string(), serde_json::json!(read_test.is_ok()));
                         obj.insert("estop_address".to_string(), serde_json::json!(address));
@@ -947,6 +1055,7 @@ fn run_test_cycle(
                     voltage,
                     test_time: hipot_time,
                     estop_nc,
+                    calibration: calibration::AnalogCalibration::from_config(&config),
                 };
                 match pc_engine::run_electrical(&app, &mut client, &components, &opts) {
                     Ok(result) => {
@@ -1676,6 +1785,8 @@ fn main() {
             plc_stop,
             plc_read_results,
             plc_raw_monitor,
+            calibration_get,
+            calibration_save,
             plc_set_mode,
             plc_get_mode,
             plc_test_component,

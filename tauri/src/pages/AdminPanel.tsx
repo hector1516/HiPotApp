@@ -8,12 +8,12 @@ import { LabelEditor, LObj, objsToTemplate, templateToObjs } from '../components
 import { askConfirm, notify } from '../components/Feedback';
 import { SafetyNote } from '../components/SafetyNote';
 
-const TABS = ['Usuarios', 'Recetas', 'PLC', 'Hipot', 'BD', 'Etiquetas', 'Logs', 'IO', 'Manual', 'Sistema'] as const;
+const TABS = ['Usuarios', 'Recetas', 'PLC', 'Calibración', 'Hipot', 'BD', 'Etiquetas', 'Logs', 'IO', 'Manual', 'Sistema'] as const;
 type Tab = (typeof TABS)[number];
 
 const NAV_GROUPS: { label: string; tabs: Tab[] }[] = [
   { label: 'Operación', tabs: ['Recetas', 'Etiquetas'] },
-  { label: 'Hardware', tabs: ['PLC', 'IO', 'Hipot', 'Manual'] },
+  { label: 'Hardware', tabs: ['PLC', 'Calibración', 'IO', 'Hipot', 'Manual'] },
   { label: 'Datos', tabs: ['BD'] },
   { label: 'Sistema', tabs: ['Usuarios', 'Logs', 'Sistema'] },
 ];
@@ -93,6 +93,7 @@ export function AdminPanel({ onBack, adminBatch }: { onBack: () => void; adminBa
           {tab === 'Usuarios' && <UsersTab />}
           {tab === 'Recetas' && <RecipesTab adminBatch={adminBatch} />}
           {tab === 'PLC' && <PlcTab />}
+          {tab === 'Calibración' && <CalibrationTab adminBatch={adminBatch} />}
           {tab === 'Hipot' && <HipotTab />}
           {tab === 'BD' && <DbTab />}
           {tab === 'Etiquetas' && <LabelsTab />}
@@ -668,6 +669,267 @@ function TagForm({ onDone }: { onDone: () => void }) {
           <option value="BOOL">BOOL</option>
         </select>
         <button className="btn primary" onClick={submit}>Agregar Variable</button>
+      </div>
+    </div>
+  );
+}
+
+type CalChannel = {
+  enabled: boolean;
+  raw_low: number;
+  eng_low: number;
+  raw_high: number;
+  eng_high: number;
+  low_set: boolean;
+  high_set: boolean;
+  unit: string;
+};
+
+type CalData = {
+  channels: Record<string, CalChannel>;
+  version?: string | number;
+  updated_at?: string;
+  updated_by?: string;
+  all_valid?: boolean;
+};
+
+const CAL_CHANNELS = [
+  { key: 'IA1', label: 'Amplificador 1', hint: '0–1 A', unit: 'A', full: 1 },
+  { key: 'IA2', label: 'Amplificador 2', hint: '0–10 A', unit: 'A', full: 10 },
+  { key: 'IA3', label: 'Amplificador 3', hint: '0–20 A', unit: 'A', full: 20 },
+  { key: 'IA4', label: 'Voltaje de línea', hint: '0–220 V', unit: 'V', full: 220 },
+] as const;
+
+const ADC_FULL_SCALE = 27648;
+
+function defaultCalChannel(key: string): CalChannel {
+  const meta = CAL_CHANNELS.find(c => c.key === key);
+  return {
+    enabled: false,
+    raw_low: 0,
+    eng_low: 0,
+    raw_high: ADC_FULL_SCALE,
+    eng_high: meta?.full ?? 0,
+    low_set: false,
+    high_set: false,
+    unit: meta?.unit ?? '',
+  };
+}
+
+function normalizeCal(data: CalData | null): CalData {
+  const channels: Record<string, CalChannel> = {};
+  for (const meta of CAL_CHANNELS) {
+    const src = data?.channels?.[meta.key];
+    channels[meta.key] = src
+      ? {
+          enabled: !!src.enabled,
+          raw_low: Number(src.raw_low) || 0,
+          eng_low: Number(src.eng_low) || 0,
+          raw_high: Number(src.raw_high) || ADC_FULL_SCALE,
+          eng_high: Number(src.eng_high) || 0,
+          low_set: !!src.low_set,
+          high_set: !!src.high_set,
+          unit: src.unit || meta.unit,
+        }
+      : defaultCalChannel(meta.key);
+  }
+  return {
+    channels,
+    version: data?.version ?? '0',
+    updated_at: data?.updated_at ?? '',
+    updated_by: data?.updated_by ?? '',
+    all_valid: !!data?.all_valid,
+  };
+}
+
+function CalibrationTab({ adminBatch }: { adminBatch?: string }) {
+  const [cal, setCal] = useState<CalData>(() => normalizeCal(null));
+  const [io, setIo] = useState<any>(null);
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = async () => {
+    try {
+      const r = await invoke<CalData>('calibration_get');
+      setCal(normalizeCal(r));
+    } catch (e: any) {
+      setMsg(`Error al cargar calibración: ${String(e?.message ?? e)}`);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    let stopped = false;
+    let busyPoll = false;
+    const tick = async () => {
+      if (busyPoll) return;
+      busyPoll = true;
+      try {
+        const r = await invoke<any>('plc_io_status');
+        if (!stopped) setIo(r);
+      } catch {
+        // Se conserva la última lectura; el usuario ve el estado anterior.
+      }
+      busyPoll = false;
+    };
+    tick();
+    const id = window.setInterval(tick, 1200);
+    return () => {
+      stopped = true;
+      window.clearInterval(id);
+    };
+  }, []);
+
+  const rawAt = (key: string): number | null => {
+    const idx = CAL_CHANNELS.findIndex(c => c.key === key);
+    const arr = io?.raw_analog;
+    return idx >= 0 && Array.isArray(arr) && typeof arr[idx] === 'number' ? arr[idx] : null;
+  };
+
+  const engAt = (key: string): number | null => {
+    const value = io?.analog?.[key];
+    return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  };
+
+  const setCh = (key: string, patch: Partial<CalChannel>) => {
+    setCal(prev => ({
+      ...prev,
+      channels: { ...prev.channels, [key]: { ...prev.channels[key], ...patch } },
+    }));
+  };
+
+  const numField = (key: string, field: keyof CalChannel, value: string) => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return;
+    const patch: Partial<CalChannel> = { [field]: n } as Partial<CalChannel>;
+    if (field === 'raw_low') patch.low_set = true;
+    if (field === 'raw_high') patch.high_set = true;
+    setCh(key, patch);
+  };
+
+  const capture = (key: string, which: 'low' | 'high') => {
+    const raw = rawAt(key);
+    if (raw === null) {
+      setMsg('PLC sin lectura. Verifique conexión y habilite el PLC.');
+      return;
+    }
+    setCh(key, which === 'low'
+      ? { raw_low: raw, enabled: true, low_set: true }
+      : { raw_high: raw, enabled: true, high_set: true });
+    setMsg(`Crudo capturado en ${key}: ${raw}`);
+  };
+
+  const save = async () => {
+    setBusy(true);
+    setMsg('');
+    try {
+      const r = await invoke<string>('calibration_save', {
+        payload: { channels: cal.channels },
+        user: adminBatch || 'ADMIN',
+      });
+      if (r !== 'saved') throw new Error(r);
+      await load();
+      setMsg('Calibración guardada y versionada.');
+    } catch (e: any) {
+      setMsg(`No se guardó: ${String(e?.message ?? e)}`);
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div style={{ minWidth: 0 }}>
+      <h2 className="page-title" style={{ marginBottom: 14 }}>Calibración de canales analógicos</h2>
+      {msg && <div className="toast-err" style={{ marginBottom: 10 }}>{msg}</div>}
+
+      <div className="card" style={{ marginBottom: 12 }}>
+        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span className={`dot ${io?.connected ? 'ok' : 'bad'}`} />
+          <b>{io?.connected ? 'PLC conectado' : 'PLC sin lectura'}</b>
+          <span className="mono" style={{ fontSize: 12 }}>DB100 · IW100/102/104/106</span>
+          <span className="spacer" />
+          <span className="pill">Versión {String(cal.version ?? '0')}</span>
+          {cal.updated_at && <span style={{ fontSize: 12, color: 'var(--muted)' }}>Actualizada {cal.updated_at} por {cal.updated_by || 'ADMIN'}</span>}
+        </div>
+        <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>
+          Aplique una señal conocida, espere a que el crudo se estabilice y use <b>Tomar crudo actual</b>.
+          Repita con un segundo punto para cada canal. Un canal sin calibrar se muestra como <b>sin calibrar</b> y
+          el motor de secuencia no iniciará hasta que IA1–IA4 estén calibrados.
+          Si el módulo entrega 4–20 mA, el punto bajo debe ser el crudo de 4 mA, no 0.
+        </div>
+        {!cal.all_valid && (
+          <div style={{ marginTop: 8, color: 'var(--bad)', fontWeight: 700, fontSize: 12 }}>
+            Hay canales sin calibrar. La secuencia eléctrica permanecerá bloqueada.
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 12 }}>
+        {CAL_CHANNELS.map(meta => {
+          const ch = cal.channels[meta.key];
+          const raw = rawAt(meta.key);
+          const eng = engAt(meta.key);
+          const valid = ch.enabled && ch.low_set && ch.high_set && ch.raw_high > ch.raw_low && ch.eng_high !== ch.eng_low;
+          return (
+            <div className="card" key={meta.key} style={{ minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <b style={{ fontSize: 15 }}>{meta.key}</b>
+                <span style={{ color: 'var(--muted)', fontSize: 12 }}>{meta.label} · {meta.hint}</span>
+                <span className="spacer" />
+                <span className={`pill ${valid ? 'on' : 'off'}`}>{valid ? 'Calibrado' : 'Sin calibrar'}</span>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                <div className="live-metric"><span>Crudo en vivo</span><b className="mono">{raw === null ? '—' : raw}</b></div>
+                <div className="live-metric"><span>Valor calibrado</span><b className="mono">{eng === null ? 'sin calibrar' : `${eng.toFixed(3)} ${meta.unit}`}</b></div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 4 }}>Punto bajo</div>
+                  <label style={{ fontSize: 11, color: 'var(--muted)' }}>Crudo</label>
+                  <input className="input" type="number" inputMode="numeric" value={ch.raw_low}
+                    onChange={e => numField(meta.key, 'raw_low', e.target.value)} style={{ width: '100%' }} />
+                  <label style={{ fontSize: 11, color: 'var(--muted)' }}>Valor esperado ({meta.unit})</label>
+                  <input className="input" type="number" inputMode="decimal" value={ch.eng_low}
+                    onChange={e => numField(meta.key, 'eng_low', e.target.value)} style={{ width: '100%' }} />
+                  <button className="btn" style={{ marginTop: 6, width: '100%' }} onClick={() => capture(meta.key, 'low')} disabled={raw === null}>
+                    Tomar crudo actual
+                  </button>
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 4 }}>Punto alto</div>
+                  <label style={{ fontSize: 11, color: 'var(--muted)' }}>Crudo</label>
+                  <input className="input" type="number" inputMode="numeric" value={ch.raw_high}
+                    onChange={e => numField(meta.key, 'raw_high', e.target.value)} style={{ width: '100%' }} />
+                  <label style={{ fontSize: 11, color: 'var(--muted)' }}>Valor esperado ({meta.unit})</label>
+                  <input className="input" type="number" inputMode="decimal" value={ch.eng_high}
+                    onChange={e => numField(meta.key, 'eng_high', e.target.value)} style={{ width: '100%' }} />
+                  <button className="btn" style={{ marginTop: 6, width: '100%' }} onClick={() => capture(meta.key, 'high')} disabled={raw === null}>
+                    Tomar crudo actual
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
+                <button className="btn" onClick={() => setCh(meta.key, { enabled: !ch.enabled })}>
+                  {ch.enabled ? 'Desactivar canal' : 'Activar canal'}
+                </button>
+                <span style={{ fontSize: 11, color: valid ? 'var(--ok)' : 'var(--bad)' }}>
+                  {valid
+                    ? `Ganancia ${((ch.eng_high - ch.eng_low) / (ch.raw_high - ch.raw_low)).toPrecision(3)} ${meta.unit}/crudo`
+                    : 'Complete dos puntos válidos'}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+        <button className="btn primary" onClick={save} disabled={busy}>
+          {busy ? 'Guardando…' : 'Guardar calibración'}
+        </button>
+        <button className="btn" onClick={load} disabled={busy}>Recargar</button>
       </div>
     </div>
   );

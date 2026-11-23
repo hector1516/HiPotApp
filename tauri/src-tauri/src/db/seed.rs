@@ -18,6 +18,11 @@ pub const DEFAULT_CONFIGS: &[(&str, &str)] = &[
     ("estop_db", "100"),
     ("estop_offset", "0"),
     ("estop_bit", "0"),
+    // Calibración analógica (dos puntos por canal; vacío = sin calibrar)
+    ("analog_calibration", "{\"channels\":{}}"),
+    ("analog_calibration_version", "0"),
+    ("analog_calibration_updated_at", ""),
+    ("analog_calibration_updated_by", ""),
     // Hipot
     ("hipot_port", "COM3"),
     ("hipot_baud", "38400"),
@@ -105,6 +110,11 @@ mod tests {
             crate::db::config::get(&conn, "plc_ip").as_deref(),
             Some("192.168.1.10")
         );
+        assert_eq!(
+            crate::db::config::get(&conn, "analog_calibration_version").as_deref(),
+            Some("0")
+        );
+        assert!(crate::db::config::get(&conn, "analog_calibration").is_some());
         let admins: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM users WHERE username='ADMIN'",

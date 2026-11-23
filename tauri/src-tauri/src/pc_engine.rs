@@ -4,12 +4,12 @@
 //! se ejecutan aquí. Las analógicas se convierten provisionalmente con
 //! fondo de escala; la pantalla de calibración las ajustará después.
 
+use crate::calibration::{AnalogCalibration, CHANNEL_NAMES};
 use crate::plc::{self, PlcClient};
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
-const ADC_FULL_SCALE: f64 = 27648.0;
 const VOLTAGE_TOLERANCE: f64 = 0.05;
 
 #[derive(Clone, Debug)]
@@ -17,6 +17,7 @@ pub struct SequenceOptions {
     pub voltage: f64,
     pub test_time: f64,
     pub estop_nc: bool,
+    pub calibration: AnalogCalibration,
 }
 
 #[derive(Clone, Debug)]
@@ -59,8 +60,39 @@ fn range_for(max_current: f64) -> (&'static str, &'static str, f64) {
     }
 }
 
-fn raw_to_units(raw: u16, full_scale: f64) -> f64 {
-    (raw as f64 / ADC_FULL_SCALE) * full_scale
+fn required_channels(components: &Value) -> Vec<&'static str> {
+    let mut needed = [false; 4];
+    needed[3] = true; // IA4: voltaje de línea.
+    if let Some(arr) = components.as_array() {
+        for comp in arr {
+            if !comp.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true) {
+                continue;
+            }
+            let max = comp.get("max").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            match range_for(max).0 {
+                "A" => needed[0] = true,
+                "B" => needed[1] = true,
+                _ => needed[2] = true,
+            }
+        }
+    }
+    CHANNEL_NAMES
+        .iter()
+        .enumerate()
+        .filter_map(|(i, name)| if needed[i] { Some(*name) } else { None })
+        .collect()
+}
+
+fn missing_calibrations(cal: &AnalogCalibration, components: &Value) -> Vec<String> {
+    required_channels(components)
+        .into_iter()
+        .filter(|name| {
+            !cal.get(name)
+                .map(|ch| ch.is_valid())
+                .unwrap_or(false)
+        })
+        .map(str::to_string)
+        .collect()
 }
 
 fn output_off_all(client: &mut PlcClient) {
@@ -124,6 +156,14 @@ pub fn run_electrical(
         return Err("Paro de emergencia activo antes de iniciar la secuencia".to_string());
     }
 
+    let missing = missing_calibrations(&opts.calibration, components);
+    if !missing.is_empty() {
+        return Err(format!(
+            "Canales sin calibrar: {}. Configure Configuración → Calibración antes de iniciar.",
+            missing.join(", ")
+        ));
+    }
+
     // Selección de voltaje. El PLC antiguo usaba KM2=120 y KM1=220.
     let use_120 = opts.voltage < 150.0;
     plc::write_bridge_output(client, "Q0.0", use_120)?;
@@ -133,7 +173,10 @@ pub fn run_electrical(
     // Estabilización de voltaje: 2.4 s, como el PLC anterior.
     sleep_with_estop(client, Duration::from_millis(2400), opts.estop_nc)?;
     let v_raw = read_analog(client, "IA4")?;
-    let measured_voltage = raw_to_units(v_raw, 220.0);
+    let measured_voltage = opts
+        .calibration
+        .to_eng("IA4", v_raw)
+        .ok_or_else(|| "Canal IA4 sin calibración válida".to_string())?;
     let voltage_ok = measured_voltage >= expected_voltage * (1.0 - VOLTAGE_TOLERANCE)
         && measured_voltage <= expected_voltage * (1.0 + VOLTAGE_TOLERANCE);
 
@@ -152,7 +195,7 @@ pub fn run_electrical(
         };
         let min = comp.get("min").and_then(|v| v.as_f64()).unwrap_or(0.0);
         let max = comp.get("max").and_then(|v| v.as_f64()).unwrap_or(0.0);
-        let (range, range_output, full_scale) = range_for(max);
+        let (range, range_output, _full_scale) = range_for(max);
         let channel = match range {
             "A" => "IA1",
             "B" => "IA2",
@@ -171,7 +214,10 @@ pub fn run_electrical(
         sleep_with_estop(client, Duration::from_secs_f64(test_time), opts.estop_nc)?;
 
         let raw = read_analog(client, channel)?;
-        let value = raw_to_units(raw, full_scale);
+        let value = opts
+            .calibration
+            .to_eng(channel, raw)
+            .ok_or_else(|| format!("Canal {} sin calibración válida", channel))?;
         let pass = value >= min && value <= max;
         let mut snapshot = serde_json::Map::new();
         snapshot.insert(name.clone(), json!(value));
@@ -205,6 +251,7 @@ pub fn run_electrical(
             "min": r.min,
             "max": r.max,
             "range": r.range,
+            "calibrated": true,
             "pass": r.pass,
         }));
     }
@@ -227,4 +274,51 @@ pub fn run_electrical(
         }),
         errors,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::calibration::AnalogCalibration;
+
+    fn components() -> Value {
+        json!([
+            { "name": "FAN", "enabled": true, "max": 10.0 },
+            { "name": "DOOR", "enabled": false, "max": 20.0 },
+            { "name": "FRAME", "enabled": true, "max": 0.8 }
+        ])
+    }
+
+    fn calibrated(channels: Value) -> AnalogCalibration {
+        AnalogCalibration::validate_payload(&json!({ "channels": channels })).unwrap()
+    }
+
+    #[test]
+    fn selects_ranges_by_max_current() {
+        assert_eq!(range_for(1.0), ("A", "Q0.3", 1.0));
+        assert_eq!(range_for(0.8), ("A", "Q0.3", 1.0));
+        assert_eq!(range_for(10.0), ("B", "Q0.4", 10.0));
+        assert_eq!(range_for(20.0), ("C", "Q0.2", 20.0));
+        assert_eq!(range_for(25.0), ("C", "Q0.2", 20.0));
+    }
+
+    #[test]
+    fn requires_voltage_and_only_enabled_component_channels() {
+        assert_eq!(required_channels(&components()), vec!["IA1", "IA2", "IA4"]);
+    }
+
+    #[test]
+    fn reports_missing_calibrations_in_channel_order() {
+        let missing = missing_calibrations(&AnalogCalibration::defaults(), &components());
+        assert_eq!(missing, vec!["IA1", "IA2", "IA4"]);
+    }
+
+    #[test]
+    fn does_not_report_calibrated_channels_as_missing() {
+        let cal = calibrated(json!({
+            "IA1": { "enabled": true, "raw_low": 0.0, "eng_low": 0.0, "raw_high": 27648.0, "eng_high": 1.0, "low_set": true, "high_set": true },
+            "IA4": { "enabled": true, "raw_low": 0.0, "eng_low": 0.0, "raw_high": 27648.0, "eng_high": 220.0, "low_set": true, "high_set": true }
+        }));
+        assert_eq!(missing_calibrations(&cal, &components()), vec!["IA2"]);
+    }
 }

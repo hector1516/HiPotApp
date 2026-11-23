@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { Gauge } from '../components/Gauge';
 import { GaugeZoomModal, playGaugeTone, type ZoomGauge } from '../components/GaugeZoomModal';
 import { useHipot } from '../hooks/useHipot';
@@ -12,6 +13,8 @@ type IoData = {
   outputs?: Record<string, boolean>;
   inputs?: Record<string, boolean>;
   analog?: Record<string, number>;
+  analog_calibrated?: Record<string, boolean>;
+  raw_analog?: number[];
 };
 
 type ResultData = {
@@ -22,15 +25,6 @@ type ResultData = {
 };
 
 const COMPONENTS = ['FAN', 'DOOR', 'FRAME', 'DRAIN', 'DEFROST', 'LIGHT'];
-
-const COMPONENT_ADDRESS: Record<string, string> = {
-  FAN: 'DB1001.DBD4',
-  DOOR: 'DB1001.DBD8',
-  FRAME: 'DB1001.DBD12',
-  DRAIN: 'DB1001.DBD16',
-  DEFROST: 'DB1001.DBD86',
-  LIGHT: 'DB1001.DBD90',
-};
 
 function fmtValue(value: any, decimals = 2): string {
   if (value === null || value === undefined) return '—';
@@ -100,9 +94,27 @@ export function LiveScreen({
   const [hipotLive, setHipotLive] = useState<any>({});
   const [printer, setPrinter] = useState<any>({});
   const [last, setLast] = useState('');
+  const [pcValues, setPcValues] = useState<Record<string, number>>({});
 
   useEffect(() => {
     invoke<any>('get_config').then(c => setPrinter(c || {})).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    let stopped = false;
+    let unlisten: (() => void) | undefined;
+    listen<Record<string, number>>('test-values', event => {
+      if (!stopped) setPcValues(prev => ({ ...prev, ...event.payload }));
+    })
+      .then(fn => {
+        if (stopped) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {});
+    return () => {
+      stopped = true;
+      unlisten?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -161,6 +173,7 @@ export function LiveScreen({
   const inputs = io?.inputs ?? {};
   const outputs = io?.outputs ?? {};
   const analog = io?.analog ?? {};
+  const analogCalibrated = io?.analog_calibrated ?? {};
   const activeOutputs = Object.entries(outputs).filter(([, v]) => v).map(([k]) => k);
   const activeInputs = Object.entries(inputs).filter(([, v]) => v).map(([k]) => k);
   const plcOk = io?.connected === true && io?.read_ok !== false;
@@ -168,20 +181,27 @@ export function LiveScreen({
   const plcDataReady = !!io && Object.keys(io.outputs ?? {}).length > 0;
   const resultDataReady = Object.keys(results).length > 0 && !results.error;
   const hipotDataReady = !!hipotLive?.raw;
+  const componentDataReady = resultDataReady || Object.keys(pcValues).length > 0;
+
+  const analogReady = (key: string) =>
+    plcOk && plcDataReady && analogCalibrated[key] === true && typeof analog[key] === 'number';
+  const componentValue = (name: string) => pcValues[name] ?? results[name];
+  const componentReady = (name: string) => componentDataReady && typeof componentValue(name) === 'number';
+  const calibratedCount = ANALOG_GAUGES.filter(g => analogCalibrated[g.key] === true).length;
 
   const zoomValue = !zoom
     ? 0
     : zoom.kind === 'analog'
       ? Number(analog[zoom.key] ?? 0)
       : zoom.kind === 'component'
-        ? Number(results[zoom.key] ?? 0)
+        ? Number(componentValue(zoom.key) ?? 0)
         : Number(hipotLive[zoom.key] ?? 0);
   const zoomUnknown = !zoom
     ? true
     : zoom.kind === 'analog'
-      ? (!plcOk || !plcDataReady)
+      ? !analogReady(zoom.key)
       : zoom.kind === 'component'
-        ? (!plcOk || !resultDataReady)
+        ? !componentReady(zoom.key)
         : (!hipotOk || !hipotDataReady);
 
   let zoomDetails: { label: string; value: string }[] = [];
@@ -189,28 +209,32 @@ export function LiveScreen({
 
   if (zoom) {
     if (zoom.kind === 'analog') {
+      const rawIndex = ANALOG_GAUGES.findIndex(g => g.key === zoom.key);
+      const raw = rawIndex >= 0 ? io?.raw_analog?.[rawIndex] : undefined;
       zoomDetails = [
         { label: 'Canal', value: zoom.key },
-        { label: 'Origen', value: 'PLC · entrada analógica' },
+        { label: 'Origen', value: 'PLC · IW100/102/104/106' },
+        { label: 'Crudo', value: raw === undefined ? '—' : String(raw) },
         { label: 'Rango', value: `${zoom.min} – ${zoom.max} ${zoom.unit}` },
-        { label: 'Estado', value: zoomUnknown ? 'Sin lectura' : 'Lectura activa' },
+        { label: 'Calibración', value: analogCalibrated[zoom.key] ? 'Calibrada' : 'Sin calibrar' },
+        { label: 'Estado', value: zoomUnknown ? 'Sin lectura válida' : 'Lectura activa' },
       ];
       zoomRelated = ANALOG_GAUGES.map(g => ({
         label: g.label,
-        value: fmtValue(analog[g.key]),
+        value: analogReady(g.key) ? fmtValue(analog[g.key]) : '—',
         unit: g.unit,
         active: g.key === zoom.key,
       }));
     } else if (zoom.kind === 'component') {
       zoomDetails = [
-        { label: 'Dirección', value: COMPONENT_ADDRESS[zoom.key] ?? 'DB1001' },
-        { label: 'Medición', value: results.running ? 'Midiendo' : results.complete ? 'Terminado' : 'En espera' },
-        { label: 'Error eléctrico', value: results.error ? 'SÍ' : 'NO' },
+        { label: 'Origen', value: 'Motor de secuencia PC' },
+        { label: 'Medición', value: phase === 'PLC_RUNNING' ? 'Midiendo' : 'En espera' },
+        { label: 'Error eléctrico', value: resultDataReady ? (results.error ? 'Sí' : 'NO') : '—' },
         { label: 'Valor', value: zoomUnknown ? 'Sin lectura' : `${fmtValue(zoomValue)} A` },
       ];
       zoomRelated = COMPONENTS.map(name => ({
         label: name,
-        value: fmtValue(results[name]),
+        value: componentReady(name) ? fmtValue(componentValue(name)) : '—',
         unit: 'A',
         active: name === zoom.key,
       }));
@@ -274,6 +298,7 @@ export function LiveScreen({
           <div className="live-block-head">
             <h3>PLC S7-1200 · Analógicas</h3>
             <span className={`pill ${plcOk ? 'on' : 'off'}`}>{plcOk ? 'En línea' : 'Sin lectura'}</span>
+            {plcOk && <span className={`pill ${calibratedCount === 4 ? 'on' : 'warn'}`}>{calibratedCount}/4 calibradas</span>}
           </div>
           <div className="live-gauge-grid">
             {ANALOG_GAUGES.map(g => (
@@ -285,7 +310,7 @@ export function LiveScreen({
                 max={g.max}
                 unit={g.unit}
                 size={112}
-                unknown={!plcOk || !plcDataReady}
+                unknown={!analogReady(g.key)}
                 flashOnChange
                 onClick={() => openZoom({ kind: 'analog', key: g.key, label: g.label, min: g.min, max: g.max, unit: g.unit })}
               />
@@ -331,19 +356,19 @@ export function LiveScreen({
         <section className="live-block live-block-components">
           <div className="live-block-head">
             <h3>Consumos por componente</h3>
-            <span className="pill">{results.running ? 'Midiendo' : results.complete ? 'Terminado' : 'En espera'}</span>
+            <span className="pill">{phase === 'PLC_RUNNING' ? 'Midiendo' : componentDataReady ? 'Último ciclo' : 'En espera'}</span>
           </div>
           <div className="live-gauge-grid live-gauge-grid-3">
             {COMPONENTS.map(name => (
               <Gauge
                 key={name}
                 label={name}
-                value={Number(results[name] ?? 0)}
+                value={Number(componentValue(name) ?? 0)}
                 min={0}
                 max={25}
                 unit="A"
                 size={118}
-                unknown={!plcOk || !resultDataReady}
+                unknown={!componentReady(name)}
                 flashOnChange
                 onClick={() => openZoom({ kind: 'component', key: name, label: name, min: 0, max: 25, unit: 'A' })}
               />
@@ -351,7 +376,7 @@ export function LiveScreen({
           </div>
           <div className="live-divider" />
           <div className="live-inline-status">
-            <span><b>Error eléctrico:</b> {results.error ? 'SÍ' : 'NO'}</span>
+            <span><b>Error eléctrico:</b> {resultDataReady ? (results.error ? 'SÍ' : 'NO') : '—'}</span>
             <span><b>Q activas:</b> {activeOutputs.length}</span>
           </div>
         </section>
