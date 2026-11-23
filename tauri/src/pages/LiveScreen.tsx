@@ -158,6 +158,7 @@ export function LiveScreen({
                 unit={g.unit}
                 size={112}
                 unknown={!plcOk || !plcDataReady}
+                flashOnChange
               />
             ))}
           </div>
@@ -196,6 +197,7 @@ export function LiveScreen({
                 unit="A"
                 size={118}
                 unknown={!plcOk || !resultDataReady}
+                flashOnChange
               />
             ))}
           </div>
@@ -212,9 +214,9 @@ export function LiveScreen({
             <span className={`pill ${hipotOk ? 'on' : 'off'}`}>{hipotOk ? 'Conectado' : 'Sin conexión'}</span>
           </div>
           <div className="live-gauge-grid live-gauge-grid-1">
-            <Gauge label="Voltaje" value={Number(hipotLive.voltage ?? 0)} min={0} max={5000} unit="V" size={92} unknown={!hipotOk || !hipotDataReady} />
-            <Gauge label="Corriente" value={Number(hipotLive.current ?? 0)} min={0} max={20} unit="mA" size={92} unknown={!hipotOk || !hipotDataReady} />
-            <Gauge label="Duración" value={Number(hipotLive.duration ?? 0)} min={0} max={60} unit="s" size={92} unknown={!hipotOk || !hipotDataReady} />
+            <Gauge label="Voltaje" value={Number(hipotLive.voltage ?? 0)} min={0} max={5000} unit="V" size={92} unknown={!hipotOk || !hipotDataReady} flashOnChange />
+            <Gauge label="Corriente" value={Number(hipotLive.current ?? 0)} min={0} max={20} unit="mA" size={92} unknown={!hipotOk || !hipotDataReady} flashOnChange />
+            <Gauge label="Duración" value={Number(hipotLive.duration ?? 0)} min={0} max={60} unit="s" size={92} unknown={!hipotOk || !hipotDataReady} flashOnChange />
           </div>
           <div className="live-divider" />
           <Metric label="Puerto" value={hipot.status?.port ?? '—'} />

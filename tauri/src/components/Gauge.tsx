@@ -1,11 +1,27 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { CountUp } from './CountUp';
 
 // Anillo sobrio: trazo fino, colores contenidos.
-export function Gauge({ label, value, min, max, unit = 'A', size = 140, unknown = false }: {
-  label: string; value: number; min: number; max: number; unit?: string; size?: number; unknown?: boolean;
+export function Gauge({ label, value, min, max, unit = 'A', size = 140, unknown = false, flashOnChange = false }: {
+  label: string; value: number; min: number; max: number; unit?: string; size?: number; unknown?: boolean; flashOnChange?: boolean;
 }) {
+  const [flash, setFlash] = useState(false);
+  const previous = useRef(value);
+
+  useEffect(() => {
+    if (!flashOnChange) {
+      previous.current = value;
+      return;
+    }
+    const changed = Math.abs(previous.current - value) > 1e-9;
+    previous.current = value;
+    if (!changed) return;
+    setFlash(true);
+    const id = window.setTimeout(() => setFlash(false), 520);
+    return () => window.clearTimeout(id);
+  }, [value, flashOnChange]);
+
   const ok = !unknown && value >= min && value <= max;
   const span = Math.max(max - min, 1e-6);
   const mid = (min + max) / 2;
@@ -14,12 +30,15 @@ export function Gauge({ label, value, min, max, unit = 'A', size = 140, unknown 
   const R = 52;
   const C = 2 * Math.PI * R;
   const color = unknown ? '#94a3b8' : ok ? '#166534' : '#991b1b';
+  const background = unknown ? '#f8fafc' : flash ? '#dbeafe' : '#fff';
   return (
     <div
       style={{
-        background: '#fff', borderRadius: 10, padding: 10,
-        width: size + 20, textAlign: 'center', border: `1px solid ${unknown ? '#cbd5e1' : ok ? '#a8d0b4' : '#e8a0a0'}`,
-        boxShadow: '0 1px 4px rgba(20,27,38,.06)',
+        background, borderRadius: 10, padding: 10,
+        width: size + 20, textAlign: 'center',
+        border: `1px solid ${unknown ? '#cbd5e1' : ok ? '#a8d0b4' : '#e8a0a0'}`,
+        boxShadow: flash ? '0 0 0 3px rgba(59,130,246,.18), 0 1px 4px rgba(20,27,38,.06)' : '0 1px 4px rgba(20,27,38,.06)',
+        transition: 'background-color .18s ease, box-shadow .18s ease',
       }}
     >
       <div style={{ fontWeight: 700, fontSize: 13, color: unknown ? '#64748b' : ok ? '#166534' : '#991b1b' }}>
