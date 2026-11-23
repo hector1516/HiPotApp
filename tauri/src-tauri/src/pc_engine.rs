@@ -52,6 +52,11 @@ fn component_output(name: &str) -> Option<&'static str> {
     }
 }
 
+fn voltage_in_tolerance(measured: f64, expected: f64) -> bool {
+    measured >= expected * (1.0 - VOLTAGE_TOLERANCE)
+        && measured <= expected * (1.0 + VOLTAGE_TOLERANCE)
+}
+
 fn range_for(max_current: f64) -> (&'static str, &'static str, f64) {
     if max_current <= 1.0 {
         ("A", "RANGE_1A", 1.0)
@@ -240,8 +245,7 @@ pub fn run_electrical(
         .calibration
         .to_eng("IA4", v_raw)
         .ok_or_else(|| "Canal IA4 sin calibración válida".to_string())?;
-    let voltage_ok = measured_voltage >= expected_voltage * (1.0 - VOLTAGE_TOLERANCE)
-        && measured_voltage <= expected_voltage * (1.0 + VOLTAGE_TOLERANCE);
+    let voltage_ok = voltage_in_tolerance(measured_voltage, expected_voltage);
     emit_logic(
         app,
         "MEDIR_VOLTAJE",
@@ -254,6 +258,46 @@ pub fn run_electrical(
             "pass": voltage_ok,
         }),
     );
+
+    if !voltage_ok {
+        let message = format!(
+            "Voltaje fuera de rango: {:.1} V (esperado {:.0} V)",
+            measured_voltage, expected_voltage
+        );
+        plc::write_bridge_output(client, km2, false)?;
+        plc::write_bridge_output(client, km1, false)?;
+        emit_logic(
+            app,
+            "APAGAR",
+            "Apagar salidas",
+            "ok",
+            json!({ "outputs": [] }),
+        );
+        emit_logic(
+            app,
+            "RESULTADO",
+            "Resultado de la secuencia",
+            "fail",
+            json!({
+                "pass": false,
+                "voltage": measured_voltage,
+                "expected": expected_voltage,
+                "voltage_ok": false,
+                "message": message,
+            }),
+        );
+        return Ok(SequenceResult {
+            pass: false,
+            values: json!({}),
+            readings: json!({
+                "voltage": measured_voltage,
+                "expected_voltage": expected_voltage,
+                "voltage_ok": false,
+                "components": [],
+            }),
+            errors: vec![message],
+        });
+    }
 
     for comp in components.as_array().cloned().unwrap_or_default() {
         let name = comp
@@ -397,13 +441,10 @@ pub fn run_electrical(
         }));
     }
     let all_ok = !component_results.is_empty() && component_results.iter().all(|r| r.pass);
-    let pass = voltage_ok && all_ok;
-    if !voltage_ok {
-        errors.push(format!(
-            "Voltaje fuera de rango: {:.1} V (esperado {:.0} V)",
-            measured_voltage, expected_voltage
-        ));
+    if component_results.is_empty() {
+        errors.push("No hay componentes habilitados en la receta".to_string());
     }
+    let pass = all_ok && errors.is_empty();
     emit_logic(
         app,
         "RESULTADO",
@@ -445,6 +486,16 @@ mod tests {
 
     fn calibrated(channels: Value) -> AnalogCalibration {
         AnalogCalibration::validate_payload(&json!({ "channels": channels })).unwrap()
+    }
+
+    #[test]
+    fn voltage_tolerance_is_five_percent() {
+        assert!(voltage_in_tolerance(120.0, 120.0));
+        assert!(voltage_in_tolerance(126.0, 120.0));
+        assert!(!voltage_in_tolerance(127.0, 120.0));
+        assert!(!voltage_in_tolerance(0.0, 220.0));
+        assert!(voltage_in_tolerance(210.0, 220.0));
+        assert!(!voltage_in_tolerance(208.0, 220.0));
     }
 
     #[test]
