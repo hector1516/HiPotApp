@@ -20,6 +20,8 @@ export function Backdrop({ phase }: { phase: string }) {
       animate={{ backgroundColor: PHASE_BG[phase] ?? PHASE_BG.IDLE }}
       transition={{ duration: 0.6 }}
       style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }}
-    />
+    >
+      <img src="logo.png" alt="" className="app-watermark" aria-hidden="true" />
+    </motion.div>
   );
 }

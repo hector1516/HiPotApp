@@ -3,9 +3,11 @@ import { invoke } from '@tauri-apps/api/core';
 
 export function useHipot(enabled = true) {
   const [connected, setConnected] = useState<boolean | null>(null);
+  const [status, setStatus] = useState<any>(null);
   const refresh = useCallback(async () => {
     try {
       const r = await invoke<any>('hipot_status');
+      setStatus(r);
       setConnected(!!r?.connected);
     } catch { setConnected(false); }
   }, []);
@@ -15,5 +17,5 @@ export function useHipot(enabled = true) {
     const id = setInterval(refresh, 2000);
     return () => clearInterval(id);
   }, [enabled, refresh]);
-  return { connected, refresh };
+  return { connected, status, refresh };
 }

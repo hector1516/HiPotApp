@@ -14,6 +14,7 @@ import { ConfigGatePopup } from './components/ConfigGatePopup';
 import { DbSetupDialog } from './components/DbSetupDialog';
 import { FeedbackHost } from './components/Feedback';
 import { EmergencyStopOverlay } from './components/EmergencyStopOverlay';
+import { EquipmentStatus } from './components/EquipmentStatus';
 import { useEmergencyStop } from './hooks/useEmergencyStop';
 import VirtualKeyboard from './components/VirtualKeyboard';
 import { Phase } from './styles/theme';
@@ -219,17 +220,30 @@ export default function App() {
     }, 2300);
   }, [godActive]);
 
-  // Solo Ctrl+Shift+K abre GodMode
+  // Atajos globales: Ctrl+Shift+K = GodMode; Ctrl+Shift+M = modo manual.
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         triggerGodMode();
       }
+      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'm') {
+        e.preventDefault();
+        if (view === 'manual') return;
+        if (adminBatch) {
+          setView('manual');
+          invoke('log_action', {
+            level: 'INFO', category: 'UI', action: 'manual_shortcut',
+            detail: `Admin ${adminBatch}`, success: true,
+          }).catch(() => {});
+        } else {
+          setGateTarget('manual');
+        }
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [triggerGodMode]);
+  }, [triggerGodMode, view, adminBatch]);
 
   const later = (fn: () => void, ms: number) => {
     timers.current.push(window.setTimeout(fn, ms));
@@ -453,7 +467,9 @@ export default function App() {
         </div>
         <span className="pill dark" style={{ fontSize: 11 }}>PASO {Math.min(step, AUTO_STEPS.length)}/{AUTO_STEPS.length}</span>
         {recipe && <span className="pill dark" style={{ fontSize: 11 }}>{recipe.model}</span>}
-        {adminBatch && <span className="pill dark" style={{ fontSize: 11 }}>Admin: {adminBatch}</span>}
+        {view === 'admin' && adminBatch && adminBatch.toUpperCase() !== 'GODMODE' && (
+          <span className="pill dark" style={{ fontSize: 11 }}>Admin: {adminBatch}</span>
+        )}
         <span className="spacer" />
         <span className="app-clock">{clock}</span>
         <span className="rail-status" style={{ fontSize: 12, color: health ? '#86efac' : '#fca5a5' }}>
@@ -466,7 +482,7 @@ export default function App() {
         <button className="btn" onClick={() => setShowHistory(true)}>Historial</button>
         <button className="btn" onClick={() => setShowReprint(true)}>Reimprimir</button>
         <button className="btn" onClick={() => setShowLog(true)}>Log</button>
-        <button className="btn" onClick={() => setGateTarget('manual')}>Manual</button>
+        <button className="btn" onClick={() => setGateTarget('manual')} title="Modo manual (Ctrl+Shift+M)">Manual</button>
         <button className="btn accent" onClick={() => setGateTarget('config')} title="Escanea gafete o Ctrl+Shift+K">Configurar</button>
       </header>
 
@@ -553,6 +569,7 @@ export default function App() {
         <span className={`pill ${phase.startsWith('COMPLETE_GOOD') ? 'on' : phase.startsWith('COMPLETE_BAD') ? 'off' : ''}`} style={{ fontSize: 11 }}>
           {phase.replace(/_/g, ' ')}
         </span>
+        <EquipmentStatus hardwareReady={health} hasRecipe={!!recipe} />
         <span className="rail-status" style={{ fontSize: 12, color: 'var(--on-rail-muted)' }}>
           <span className={`dot ${health ? 'ok' : 'bad'}`} />
           {health ? 'SQL Express conectado' : dbInitializing ? 'Conectando SQL Express…' : 'SQL Express sin conexión'}
@@ -561,7 +578,7 @@ export default function App() {
           <span className="pill warn" style={{ fontSize: 11 }}>Paro de emergencia no disponible</span>
         )}
         <span className="spacer" />
-        <span style={{ color: 'var(--muted-2)', fontSize: 11 }}>Offline-first · Windows 11 · v1.0.42 · Ctrl+Shift+K → GodMode</span>
+        <span style={{ color: 'var(--muted-2)', fontSize: 11 }}>Offline-first · Windows 11 · v1.0.42 · Ctrl+Shift+K GodMode · Ctrl+Shift+M Manual</span>
       </footer>
 
       <ReprintPopup open={showReprint} onClose={() => setShowReprint(false)} />

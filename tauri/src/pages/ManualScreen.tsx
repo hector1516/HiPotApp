@@ -5,6 +5,7 @@ import { Gauge } from '../components/Gauge';
 import { SplitLayout } from '../components/SplitLayout';
 import { PageHeader } from '../components/PageHeader';
 import { SafetyNote } from '../components/SafetyNote';
+import { LiveHardwarePanel } from '../components/LiveHardwarePanel';
 import { useHipot } from '../hooks/useHipot';
 
 type PendingAction = 'START' | 'STOP' | null;
@@ -182,6 +183,8 @@ export function ManualScreen({ onBack, hardwareReady = true }: { onBack: () => v
         />
 
         {err && <div className="alert">{err}</div>}
+
+        <LiveHardwarePanel hardwareReady={hardwareReady} hipotStatus={hipotStatus.status} />
 
         {!recipe ? (
           <div className="card" style={{ textAlign: 'center', padding: 40 }}>

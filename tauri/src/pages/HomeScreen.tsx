@@ -3,8 +3,6 @@ import { motion } from 'framer-motion';
 import { BarcodeInput } from '../components/BarcodeInput';
 import { SplitLayout } from '../components/SplitLayout';
 import { PageHeader } from '../components/PageHeader';
-import { usePLC } from '../hooks/usePLC';
-import { useHipot } from '../hooks/useHipot';
 import { AUTO_STEPS, stepAt } from '../config/autoSteps';
 
 function RailStep({ n, label, state }: { n: number; label: string; state: 'done' | 'now' | 'todo' }) {
@@ -12,17 +10,6 @@ function RailStep({ n, label, state }: { n: number; label: string; state: 'done'
     <div className={`rail-step ${state}`}>
       <span className="num">{state === 'done' ? '✓' : n}</span>
       <span>{label}</span>
-    </div>
-  );
-}
-
-function EquipmentRow({ label, on, detail }: { label: string; on: boolean | null; detail?: string }) {
-  return (
-    <div className="rail-status">
-      <span className={`dot ${on ? 'ok' : on === false ? 'bad' : ''}`} />
-      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
-      {detail && <span style={{ color: 'var(--on-rail-muted)', fontSize: 11 }}>{detail}</span>}
-      <span className="pill dark" style={{ fontSize: 10 }}>{on ? 'OK' : on === false ? 'OFF' : '—'}</span>
     </div>
   );
 }
@@ -44,8 +31,6 @@ export function HomeScreen({
   onScanSerial: (code: string) => void;
   onScanBatch: (code: string) => void;
 }) {
-  const plc = usePLC(hardwareReady);
-  const hipot = useHipot(hardwareReady);
   const [modelChoice, setModelChoice] = useState(selectedModel || models[0]?.model || '');
   const prompt = stepAt(step - 1).prompt;
 
@@ -100,13 +85,6 @@ export function HomeScreen({
       </div>
 
       <div className="rail-divider" />
-
-      <div className="stack" style={{ gap: 8 }}>
-        <div className="rail-eyebrow">Equipos</div>
-        <EquipmentRow label="PLC S7-1200" on={plc.connected} detail={plc.detail} />
-        <EquipmentRow label="Hipot 3865" on={hipot.connected} />
-        <EquipmentRow label="Receta" on={recipe ? true : null} />
-      </div>
 
       <div className="image-card">
         <img src="/IMG_0854.png" alt="Estación de pruebas HiPot" />

@@ -36,7 +36,9 @@ export function AdminPanel({ onBack, adminBatch }: { onBack: () => void; adminBa
             Panel de control
           </div>
           <div style={{ fontSize: 12, color: 'var(--on-rail-muted)', marginTop: 4 }}>
-            {adminBatch ? `Admin: ${adminBatch}` : 'Acceso administrador'}
+            {adminBatch && adminBatch.toUpperCase() !== 'GODMODE'
+              ? `Admin: ${adminBatch}`
+              : 'Acceso administrador'}
           </div>
         </div>
 
