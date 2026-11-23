@@ -6,6 +6,7 @@ import { ResultScreen } from './pages/ResultScreen';
 import { AdminPanel } from './pages/AdminPanel';
 import { ManualScreen } from './pages/ManualScreen';
 import { LiveScreen } from './pages/LiveScreen';
+import { LogicScreen } from './pages/LogicScreen';
 import { UpdateNotification } from './components/UpdateNotification';
 import { Backdrop } from './components/Backdrop';
 import { ReprintPopup } from './components/ReprintPopup';
@@ -24,7 +25,7 @@ import { listen } from '@tauri-apps/api/event';
 import { AUTO_STEPS, stepNumber } from './config/autoSteps';
 
 // Router principal: HOME -> TEST -> RESULT + ADMIN (doc 02 flujo operador).
-type View = 'home' | 'test' | 'result' | 'admin' | 'manual' | 'live';
+type View = 'home' | 'test' | 'result' | 'admin' | 'manual' | 'live' | 'logic';
 
 export default function App() {
   const [view, setView] = useState<View>('home');
@@ -485,6 +486,7 @@ export default function App() {
         <button className="btn" onClick={() => setShowLog(true)}>Log</button>
         <button className="btn" onClick={() => setGateTarget('manual')} title="Modo manual (Ctrl+Shift+M)">Manual</button>
         <button className="btn" onClick={() => setView('live')} title="Vista Live de instrumentos">Live</button>
+        <button className="btn" onClick={() => setView('logic')} title="Flujo de la secuencia en tiempo real">Lógica</button>
         <button className="btn accent" onClick={() => setGateTarget('config')} title="Escanea gafete o Ctrl+Shift+K">Configurar</button>
       </header>
 
@@ -564,6 +566,7 @@ export default function App() {
         {view === 'admin' && <AdminPanel onBack={reset} adminBatch={adminBatch} />}
         {view === 'manual' && <ManualScreen onBack={reset} hardwareReady={health} />}
         {view === 'live' && <LiveScreen onBack={() => setView('home')} hardwareReady={health} phase={phase} />}
+        {view === 'logic' && <LogicScreen onBack={() => setView('home')} adminBatch={adminBatch} />}
           </motion.div>
         </AnimatePresence>
       </main>

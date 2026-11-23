@@ -103,6 +103,20 @@ fn output_off_all(client: &mut PlcClient, map: &OutputMap) {
     }
 }
 
+fn emit_logic(app: &AppHandle, step: &str, label: &str, status: &str, extra: Value) {
+    let mut payload = json!({
+        "step": step,
+        "label": label,
+        "status": status,
+    });
+    if let (Some(dst), Some(src)) = (payload.as_object_mut(), extra.as_object()) {
+        for (key, value) in src {
+            dst.insert(key.clone(), value.clone());
+        }
+    }
+    let _ = app.emit("logic-state", payload);
+}
+
 fn read_bridge(client: &mut PlcClient) -> Result<Value, String> {
     plc::read_bridge(client)
 }
@@ -151,23 +165,47 @@ pub fn run_electrical(
     let mut errors: Vec<String> = Vec::new();
     let mut component_results: Vec<ComponentResult> = Vec::new();
 
-    opts.output_map
-        .validate()
-        .map_err(|e| format!("Mapa de salidas inválido: {}", e))?;
+    emit_logic(app, "PREPARACION", "Preparar salidas", "running", json!({}));
+    if let Err(e) = opts.output_map.validate() {
+        emit_logic(
+            app,
+            "PREPARACION",
+            "Preparar salidas",
+            "fail",
+            json!({ "message": format!("Mapa de salidas inválido: {}", e) }),
+        );
+        return Err(format!("Mapa de salidas inválido: {}", e));
+    }
 
     output_off_all(client, &opts.output_map);
     if estop_active(client, opts.estop_nc)? {
         output_off_all(client, &opts.output_map);
+        emit_logic(
+            app,
+            "PARO",
+            "Verificar paro",
+            "fail",
+            json!({ "message": "Paro de emergencia activo" }),
+        );
         return Err("Paro de emergencia activo antes de iniciar la secuencia".to_string());
     }
+    emit_logic(app, "PARO", "Verificar paro", "ok", json!({}));
 
     let missing = missing_calibrations(&opts.calibration, components);
     if !missing.is_empty() {
+        emit_logic(
+            app,
+            "CALIBRACION",
+            "Verificar calibración",
+            "fail",
+            json!({ "missing": missing }),
+        );
         return Err(format!(
             "Canales sin calibrar: {}. Configure Configuración → Calibración antes de iniciar.",
             missing.join(", ")
         ));
     }
+    emit_logic(app, "CALIBRACION", "Verificar calibración", "ok", json!({}));
 
     // Selección de voltaje. El PLC antiguo usaba KM2=120 y KM1=220.
     let use_120 = opts.voltage < 150.0;
@@ -176,9 +214,27 @@ pub fn run_electrical(
     plc::write_bridge_output(client, km2, use_120)?;
     plc::write_bridge_output(client, km1, !use_120)?;
     let expected_voltage = if use_120 { 120.0 } else { 220.0 };
+    emit_logic(
+        app,
+        "VOLTAJE",
+        "Seleccionar voltaje",
+        "ok",
+        json!({
+            "expected": expected_voltage,
+            "outputs": [if use_120 { km2 } else { km1 }],
+        }),
+    );
 
     // Estabilización de voltaje: 2.4 s, como el PLC anterior.
-    sleep_with_estop(client, Duration::from_millis(2400), opts.estop_nc)?;
+    let stabilize_ms = 2400u64;
+    emit_logic(
+        app,
+        "ESTABILIZAR",
+        "Estabilizar voltaje",
+        "running",
+        json!({ "duration_ms": stabilize_ms }),
+    );
+    sleep_with_estop(client, Duration::from_millis(stabilize_ms), opts.estop_nc)?;
     let v_raw = read_analog(client, "IA4")?;
     let measured_voltage = opts
         .calibration
@@ -186,6 +242,18 @@ pub fn run_electrical(
         .ok_or_else(|| "Canal IA4 sin calibración válida".to_string())?;
     let voltage_ok = measured_voltage >= expected_voltage * (1.0 - VOLTAGE_TOLERANCE)
         && measured_voltage <= expected_voltage * (1.0 + VOLTAGE_TOLERANCE);
+    emit_logic(
+        app,
+        "MEDIR_VOLTAJE",
+        "Medir voltaje",
+        if voltage_ok { "ok" } else { "fail" },
+        json!({
+            "value": measured_voltage,
+            "expected": expected_voltage,
+            "raw": v_raw,
+            "pass": voltage_ok,
+        }),
+    );
 
     for comp in components.as_array().cloned().unwrap_or_default() {
         let name = comp
@@ -211,15 +279,57 @@ pub fn run_electrical(
             _ => "IA3",
         };
 
+        emit_logic(
+            app,
+            "COMPONENTE",
+            "Seleccionar componente",
+            "running",
+            json!({
+                "component": name,
+                "max": max,
+                "range": range,
+                "channel": channel,
+            }),
+        );
+
         if estop_active(client, opts.estop_nc)? {
             output_off_all(client, &opts.output_map);
+            emit_logic(
+                app,
+                "PARO",
+                "Verificar paro",
+                "fail",
+                json!({ "message": "Paro de emergencia activo", "component": name }),
+            );
             return Err("Paro de emergencia activo durante la secuencia".to_string());
         }
 
         plc::write_bridge_output(client, output, true)?;
         plc::write_bridge_output(client, range_output, true)?;
+        emit_logic(
+            app,
+            "ENERGIZAR",
+            "Energizar componente",
+            "running",
+            json!({
+                "component": name,
+                "range": range,
+                "outputs": [output, range_output],
+            }),
+        );
 
         let test_time = if opts.test_time > 0.0 { opts.test_time } else { 10.0 };
+        emit_logic(
+            app,
+            "MIDIENDO",
+            "Midiendo corriente",
+            "running",
+            json!({
+                "component": name,
+                "channel": channel,
+                "duration_ms": (test_time * 1000.0) as u64,
+            }),
+        );
         sleep_with_estop(client, Duration::from_secs_f64(test_time), opts.estop_nc)?;
 
         let raw = read_analog(client, channel)?;
@@ -231,6 +341,21 @@ pub fn run_electrical(
         let mut snapshot = serde_json::Map::new();
         snapshot.insert(name.clone(), json!(value));
         let _ = app.emit("test-values", Value::Object(snapshot));
+        emit_logic(
+            app,
+            "EVALUAR",
+            "Evaluar corriente",
+            if pass { "ok" } else { "fail" },
+            json!({
+                "component": name,
+                "channel": channel,
+                "value": value,
+                "raw": raw,
+                "min": min,
+                "max": max,
+                "pass": pass,
+            }),
+        );
 
         plc::write_bridge_output(client, range_output, false)?;
         plc::write_bridge_output(client, output, false)?;
@@ -247,6 +372,13 @@ pub fn run_electrical(
 
     plc::write_bridge_output(client, opts.output_map.q("KM2_120")?, false)?;
     plc::write_bridge_output(client, opts.output_map.q("KM1_220")?, false)?;
+    emit_logic(
+        app,
+        "APAGAR",
+        "Apagar salidas",
+        "ok",
+        json!({ "outputs": [] }),
+    );
 
     let mut values = serde_json::Map::new();
     let mut readings = Vec::new();
@@ -272,6 +404,19 @@ pub fn run_electrical(
             measured_voltage, expected_voltage
         ));
     }
+    emit_logic(
+        app,
+        "RESULTADO",
+        "Resultado de la secuencia",
+        if pass { "ok" } else { "fail" },
+        json!({
+            "pass": pass,
+            "voltage": measured_voltage,
+            "expected": expected_voltage,
+            "voltage_ok": voltage_ok,
+            "message": errors.join(" | "),
+        }),
+    );
     Ok(SequenceResult {
         pass,
         values: Value::Object(values),

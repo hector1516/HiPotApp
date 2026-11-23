@@ -1058,6 +1058,15 @@ fn run_test_cycle(
     let mut plc_values = serde_json::json!({});
     let mut plc_component_values = serde_json::json!({});
 
+    let _ = app.emit(
+        "logic-state",
+        serde_json::json!({
+            "step": "INICIO",
+            "label": "Inicio de ciclo",
+            "status": "running",
+        }),
+    );
+
     let _ = db::repo::log_add(
         "INFO", "HIPOT", "cycle_start",
         Some(&format!("Inicio Hipot · exec #{} · receta #{}", execution_id, recipe_id)),
@@ -1069,6 +1078,17 @@ fn run_test_cycle(
     let hipot_cfg = hipot::config_from(&get_config());
     let (hipot_voltage, hipot_current, hipot_time) =
         db::repo::recipe_hipot_params(recipe_id).unwrap_or((0.0, 0.0, 0.0));
+    let _ = app.emit(
+        "logic-state",
+        serde_json::json!({
+            "step": "HIPOT",
+            "label": "Prueba Hipot",
+            "status": "running",
+            "duration_ms": (hipot_time.max(0.0) * 1000.0) as u64,
+            "voltage": hipot_voltage,
+            "current": hipot_current,
+        }),
+    );
     let _ = db::repo::log_add(
         "INFO", "HIPOT", "recipe_params",
         Some(&format!(
@@ -1136,7 +1156,28 @@ fn run_test_cycle(
         None,
     );
 
+    let _ = app.emit(
+        "logic-state",
+        serde_json::json!({
+            "step": "HIPOT_RESULT",
+            "label": "Resultado Hipot",
+            "status": if hipot_pass { "ok" } else { "fail" },
+            "pass": hipot_pass,
+            "message": if hipot_pass { "" } else { "Hipot no aprobado" },
+        }),
+    );
+
     if !hipot_pass {
+        let _ = app.emit(
+            "logic-state",
+            serde_json::json!({
+                "step": "FIN",
+                "label": "Ciclo terminado",
+                "status": "fail",
+                "pass": false,
+                "message": "Hipot no aprobado; no se energiza la prueba eléctrica",
+            }),
+        );
         let _ = db::repo::set_final_status(execution_id, "BAD");
         let duration = started.elapsed().as_secs_f64();
         return serde_json::json!({
@@ -1222,6 +1263,17 @@ fn run_test_cycle(
         Some(&format!("Resultado final {}", final_status)),
         Some(execution_id), None, None, Some(duration as i64 * 1000),
         final_status == "GOOD", None,
+    );
+
+    let _ = app.emit(
+        "logic-state",
+        serde_json::json!({
+            "step": "FIN",
+            "label": "Ciclo terminado",
+            "status": if final_status == "GOOD" { "ok" } else { "fail" },
+            "pass": final_status == "GOOD",
+            "message": errors.join(" | "),
+        }),
     );
 
     serde_json::json!({

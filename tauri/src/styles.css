@@ -1447,3 +1447,179 @@ body.kb-open .admin-content {
     transition-duration: .001ms !important;
   }
 }
+
+/* --- Pantalla Lógica --- */
+.logic-page {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px;
+}
+.logic-layout {
+  display: grid;
+  grid-template-columns: minmax(420px, 1.3fr) minmax(330px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.logic-flow-panel { min-width: 0; }
+.logic-flow {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 4px 10px;
+  max-height: calc(100vh - 250px);
+  overflow: auto;
+}
+.logic-group {
+  margin: 12px 0 4px 8px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.logic-step {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  transition: background .18s ease, border-color .18s ease;
+}
+.logic-step-body { flex: 1; min-width: 0; }
+.logic-step-top {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+.logic-node {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  margin-top: 3px;
+  flex-shrink: 0;
+  background: var(--card);
+}
+.logic-running .logic-node {
+  border-color: var(--accent);
+  animation: logic-pulse 1.1s ease-in-out infinite;
+}
+.logic-ok .logic-node { background: var(--ok); border-color: var(--ok); }
+.logic-fail .logic-node { background: var(--bad); border-color: var(--bad); }
+.logic-active {
+  background: rgba(180, 83, 9, .08);
+  border-color: rgba(180, 83, 9, .35);
+}
+.logic-connector {
+  width: 2px;
+  height: 12px;
+  margin-left: 15px;
+  background: var(--line);
+}
+.logic-connector-ok { background: var(--ok); }
+.logic-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.logic-pill.logic-running { color: var(--accent); border-color: rgba(180, 83, 9, .35); }
+.logic-pill.logic-ok { color: var(--ok); border-color: rgba(22, 163, 74, .3); }
+.logic-pill.logic-fail { color: var(--bad); border-color: rgba(220, 38, 38, .3); }
+.logic-step-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.logic-message { color: var(--bad); font-weight: 700; }
+.logic-progress {
+  height: 5px;
+  width: 100%;
+  margin-top: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, .12);
+}
+.logic-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  transition: width .1s linear;
+}
+.logic-loop {
+  margin: 4px 0 6px 30px;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--muted);
+}
+.logic-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.logic-output-title {
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.logic-history {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 260px;
+  overflow: auto;
+}
+.logic-history-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 11px;
+  border-bottom: 1px solid rgba(0, 0, 0, .06);
+}
+.logic-history-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line);
+  flex-shrink: 0;
+}
+.logic-history-dot.logic-ok { background: var(--ok); }
+.logic-history-dot.logic-fail { background: var(--bad); }
+.logic-history-dot.logic-running { background: var(--accent); }
+.logic-history-label { flex: 1; min-width: 0; }
+.logic-history-status { font-weight: 800; color: var(--muted); }
+.logic-history-status.logic-ok { color: var(--ok); }
+.logic-history-status.logic-fail { color: var(--bad); }
+.logic-history-status.logic-running { color: var(--accent); }
+.logic-empty { padding: 18px; color: var(--muted); }
+.logic-last-error {
+  margin-top: 8px;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(220, 38, 38, .08);
+  color: var(--bad);
+  font-size: 12px;
+  font-weight: 700;
+}
+@keyframes logic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(180, 83, 9, .35); }
+  50% { box-shadow: 0 0 0 6px rgba(180, 83, 9, 0); }
+}
+@media (max-width: 1100px) {
+  .logic-layout { grid-template-columns: 1fr; }
+  .logic-flow { max-height: none; }
+}
