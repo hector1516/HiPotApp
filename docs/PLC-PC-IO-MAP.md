@@ -99,3 +99,42 @@ Agregar a `DB100`:
 - `Heartbeat` (DInt o Byte) en un offset libre.
 - `PcOnline` / `WatchdogOk`.
 - Lógica en el PLC que ponga `QB0..QB3 = 0` si el heartbeat no cambia en 500 ms.
+
+
+## Calibraci?n anal?gica (v1.1.0)
+
+- Configuraci?n: `analog_calibration` (JSON), `analog_calibration_version`,
+  `analog_calibration_updated_at`, `analog_calibration_updated_by`.
+- Cada canal IA1?IA4 usa dos puntos: crudo bajo/alto y valor de ingenier?a bajo/alto.
+- Un canal solo es v?lido si se capturaron ambos puntos (`low_set` y `high_set`).
+- La app no muestra un canal sin calibrar como cero v?lido: lo marca "sin calibrar".
+- El motor de secuencia no inicia si IA4 o un canal usado por un componente
+  habilitado no est? calibrado.
+- Pantalla: **Configuraci?n ? Calibraci?n**. Guardar incrementa la versi?n y
+  registra `calibration_save` en `app_logs`.
+
+## Mapa configurable de salidas
+
+- Configuraci?n: `output_map` (JSON), `output_map_version`,
+  `output_map_updated_at`, `output_map_updated_by`.
+- Claves l?gicas precargadas: `KM2_120`, `KM1_220`, `RANGE_20A`, `RANGE_1A`,
+  `RANGE_10A`, `FAN`, `LIGHT`, `FRAME`, `DOOR`, `DRAIN`, `HEATERS`.
+- Bits v?lidos: `Q0.0`?`Q3.7`. Se rechazan duplicados, direcciones inv?lidas y
+  claves faltantes.
+- Pantalla: **Configuraci?n ? Salidas**. Solo se edita con la secuencia detenida;
+  guardar incrementa la versi?n y registra `output_map_save` en `app_logs`.
+- El motor resuelve todas las salidas con este mapa; no usa direcciones Q fijas.
+
+## Pantalla L?gica (vista)
+
+- Bot?n **L?gica** en la barra superior.
+- Consume eventos `logic-state` del motor Rust y muestra el paso activo,
+  temporizador, componente, voltaje/corriente, salidas activas e historial.
+- El modo edici?n/publicaci?n queda pendiente de definir si ser? un editor de
+  par?metros del motor validado o un int?rprete de flujo completo.
+
+## Pendiente cr?tico
+
+Sigue pendiente agregar a `DB100` el heartbeat/watchdog y exportar `FC1`/`OB1`.
+Sin watchdog, una PC colgada puede dejar salidas energizadas. No liberar a
+producci?n hasta probar en banco.
