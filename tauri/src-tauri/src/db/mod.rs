@@ -162,6 +162,32 @@ fn seed_express() -> Result<(), String> {
             )?;
         }
 
+        // Migración única: el paro real está en DB1001.DBX2.4, no 2.5.
+        let estop_bit_migrated = query_one(
+            conn,
+            "SELECT COUNT(*) AS n FROM configurations WHERE config_key = 'migration_estop_bit_2_4'",
+        )?
+        .and_then(|row| row.get("n").and_then(|v| v.as_i64()))
+        .unwrap_or(0);
+        if estop_bit_migrated == 0 {
+            execute(
+                conn,
+                &format!(
+                    "UPDATE configurations SET config_value = '4', updated_at = {now} \
+                     WHERE config_key = 'estop_bit' AND config_value = '5'",
+                    now = now
+                ),
+            )?;
+            execute(
+                conn,
+                &format!(
+                    "INSERT INTO configurations (config_key, config_value, updated_at) \
+                     VALUES ('migration_estop_bit_2_4', '1', {now})",
+                    now = now
+                ),
+            )?;
+        }
+
         for (key, value) in DEFAULT_CONFIGS {
             execute(
                 conn,

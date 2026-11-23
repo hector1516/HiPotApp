@@ -337,7 +337,7 @@ fn estop_address(config: &serde_json::Value) -> String {
         let bit = config
             .get("estop_bit")
             .and_then(|v| v.as_str())
-            .unwrap_or("5");
+            .unwrap_or("4");
         format!("DB{}.DBX{}.{}", db, offset, bit)
     } else {
         config
@@ -368,7 +368,7 @@ fn read_estop_source(
         let bit = config
             .get("estop_bit")
             .and_then(|v| v.as_str())
-            .unwrap_or("5")
+            .unwrap_or("4")
             .parse::<i32>()
             .map_err(|_| "estop_bit inválido".to_string())?;
         let value = plc::read_tag(client, db, offset, "BOOL", bit)?;

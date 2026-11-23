@@ -102,8 +102,8 @@ DB1001 = COMM01_UNIT_EXT  (resultados)
 2.1     BOOL    Measuring
 2.2     BOOL    Finished
 2.3     BOOL    com st
-2.4     BOOL    Error de voltaje (mapear en PLC)
-2.5     BOOL    E-stop (mapear en PLC)
+2.4     BOOL    E-stop (mapear en PLC)
+2.5     BOOL    Error de voltaje (mapear en PLC)
 4.0     REAL    Result FAN
 8.0     REAL    Result DOOR
 12.0    REAL    Result FRAME

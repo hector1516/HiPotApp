@@ -45,7 +45,7 @@ No hace falta crear un DB nuevo. Usa `DB1001`, que ya es no optimizada:
 1. En `COMM` (FC1), red 6 `UNIT_EXT`, agrega la copia directa del paro:
 
 ```pascal
-"COMM01_UNIT_EXT".UNIT_0025_EXT := "E-STOP";
+"COMM01_UNIT_EXT".UNIT_0024_EXT := "E-STOP";
 ```
 
 2. Confirma que `DB1001` sea **no optimizada**.
@@ -54,8 +54,8 @@ No hace falta crear un DB nuevo. Usa `DB1001`, que ya es no optimizada:
 Con el paro NC:
 
 ```text
-Liberado   → I0.0 = 1 → DB1001.DBX2.5 = 1
-Presionado → I0.0 = 0 → DB1001.DBX2.5 = 0
+Liberado   → I0.0 = 1 → DB1001.DBX2.4 = 1
+Presionado → I0.0 = 0 → DB1001.DBX2.4 = 0
 ```
 
 > Si en el PLC se usa `NOT "E-STOP"`, el bit queda invertido:
@@ -73,7 +73,7 @@ Presionado → I0.0 = 0 → DB1001.DBX2.5 = 0
 - Tipo de contacto: **NC**
 - Guardar
 
-La app leerá `DB1001.DBX2.5` y ya no dependerá de leer `I0.0` por S7.
+La app leerá `DB1001.DBX2.4` y ya no dependerá de leer `I0.0` por S7.
 
 ## Interfaz real de la app: DB1000 y DB1001
 
@@ -118,8 +118,8 @@ La app elige un solo canal por componente según el máximo de corriente de la r
 |---|---|---|
 | `DB1001.DBX2.1` | Bool | `Measuring` |
 | `DB1001.DBX2.2` | Bool | `Finished` |
-| `DB1001.DBX2.4` | Bool | `Error` (mapeado desde `MEASURE_DB.Error`) |
-| `DB1001.DBX2.5` | Bool | E-stop (mapeado desde `"E-STOP"`) |
+| `DB1001.DBX2.4` | Bool | E-stop (mapeado desde `"E-STOP"`) |
+| `DB1001.DBX2.5` | Bool | `Error` (mapeado desde `MEASURE_DB.Error`) |
 | `DB1001.DBD4` | Real | Resultado FAN |
 | `DB1001.DBD8` | Real | Resultado DOOR |
 | `DB1001.DBD12` | Real | Resultado FRAME |
@@ -131,7 +131,7 @@ La app elige un solo canal por componente según el máximo de corriente de la r
 Para que la app reciba el error de voltaje, agrega en `COMM` (FC1), red 6:
 
 ```pascal
-"COMM01_UNIT_EXT".UNIT_0024_EXT := "MEASURE_DB".Error;
+"COMM01_UNIT_EXT".UNIT_0025_EXT := "MEASURE_DB".Error;
 "COMM01_UNIT_EXT".UNIT_0940_EXT := "MEASURE_DB".Result.VOLTAGE;
 ```
 
