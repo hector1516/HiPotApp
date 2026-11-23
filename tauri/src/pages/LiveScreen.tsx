@@ -308,23 +308,22 @@ export function LiveScreen({
               <span className="live-empty">Sin lectura</span>
             )}
           </div>
-          <div className="live-raw-title">DB1000 / DB1001</div>
+          <div className="live-raw-title">DB100 · PLC puente</div>
           <table className="live-raw-table">
             <tbody>
-              <RawRow label="DB1000.DBD4 · receta" value={raw?.DB1000?.mask} />
-              <RawRow label="DB1000.DBD8 · FAN" value={raw?.DB1000?.fan_time} />
-              <RawRow label="DB1000.DBD12 · DOOR" value={raw?.DB1000?.door_time} />
-              <RawRow label="DB1000.DBD16 · FRAME" value={raw?.DB1000?.frame_time} />
-              <RawRow label="DB1000.DBD86 · DRAIN" value={raw?.DB1000?.drain_time} />
-              <RawRow label="DB1000.DBD90 · DEFROST" value={raw?.DB1000?.defrost_time} />
-              <RawRow label="DB1000.DBD94 · LIGHT" value={raw?.DB1000?.light_time} />
-              <RawRow label="DB1000.DBD98 · tolerancia" value={raw?.DB1000?.tolerance} />
-              <RawRow label="DB1000.DBX2.5 · start" value={raw?.DB1000?.start} />
-              <RawRow label="DB1000.DBX2.6 · stop" value={raw?.DB1000?.stop} />
-              <RawRow label="DB1001.DBX2.1 · measuring" value={raw?.DB1001?.measuring} />
-              <RawRow label="DB1001.DBX2.2 · finished" value={raw?.DB1001?.finished} />
-              <RawRow label="DB1001.DBX2.4 · estop" value={raw?.DB1001?.estop} />
-              <RawRow label="DB1001.DBX2.5 · error" value={raw?.DB1001?.error} />
+              <RawRow label="DB100.IB0 · entradas" value={raw?.DB100?.IB0} />
+              <RawRow label="DB100.IB1 · entradas" value={raw?.DB100?.IB1} />
+              <RawRow label="DB100.IB2 · entradas" value={raw?.DB100?.IB2} />
+              <RawRow label="DB100.IB3 · entradas" value={raw?.DB100?.IB3} />
+              <RawRow label="DB100.QB0 · salidas" value={raw?.DB100?.QB0} />
+              <RawRow label="DB100.QB1 · salidas" value={raw?.DB100?.QB1} />
+              <RawRow label="DB100.QB2 · salidas" value={raw?.DB100?.QB2} />
+              <RawRow label="DB100.QB3 · salidas" value={raw?.DB100?.QB3} />
+              <RawRow label="DB100.IW100 · IA1" value={raw?.DB100?.IW100} />
+              <RawRow label="DB100.IW102 · IA2" value={raw?.DB100?.IW102} />
+              <RawRow label="DB100.IW104 · IA3" value={raw?.DB100?.IW104} />
+              <RawRow label="DB100.IW106 · IA4" value={raw?.DB100?.IW106} />
+              <RawRow label="DB100.IB0.0 · paro" value={raw?.DB100?.estop} />
             </tbody>
           </table>
         </section>

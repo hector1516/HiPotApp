@@ -15,9 +15,9 @@ pub const DEFAULT_CONFIGS: &[(&str, &str)] = &[
     ("estop_input", "I0.0"),
     ("estop_nc", "1"),
     ("estop_source", "DB"),
-    ("estop_db", "1001"),
-    ("estop_offset", "2"),
-    ("estop_bit", "4"),
+    ("estop_db", "100"),
+    ("estop_offset", "0"),
+    ("estop_bit", "0"),
     // Hipot
     ("hipot_port", "COM3"),
     ("hipot_baud", "38400"),

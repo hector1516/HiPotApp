@@ -56,6 +56,13 @@ pub const RES_MEASURING_BIT: i32 = 1;
 pub const RES_FINISHED_BIT: i32 = 2;
 pub const RES_ERROR_BIT: i32 = 5;
 
+// --- PLC puente "tonto" (DB100) ---
+// DB100: IB0..IB3 en 0..3, QB0..QB3 en 4..7, IW100/102/104/106 en 8/10/12/14.
+pub const BRIDGE_DB: i32 = 100;
+pub const BRIDGE_INPUT_OFFSET: i32 = 0;
+pub const BRIDGE_OUTPUT_OFFSET: i32 = 4;
+pub const BRIDGE_ANALOG_OFFSET: i32 = 8;
+
 // --- Mapa I/O ---
 pub const Q_MAP: &[(&str, i32, i32)] = &[
     ("Q0.0", 0, 0), ("Q0.1", 0, 1), ("Q0.2", 0, 2), ("Q0.3", 0, 3),
@@ -467,6 +474,74 @@ pub fn read_raw_monitor(c: &mut PlcClient) -> Value {
         "light": maybe_real(c, RESULT_DB, 90),
     });
     json!({ "DB1000": db1000, "DB1001": db1001 })
+}
+
+/// Lee toda la interfaz DB100 del PLC puente.
+pub fn read_bridge(c: &mut PlcClient) -> Result<Value, String> {
+    let mut inputs = [0u8; 4];
+    c.ag_read(BRIDGE_DB, BRIDGE_INPUT_OFFSET, 4, &mut inputs)
+        .map_err(|e| e.to_string())?;
+    let mut outputs = [0u8; 4];
+    c.ag_read(BRIDGE_DB, BRIDGE_OUTPUT_OFFSET, 4, &mut outputs)
+        .map_err(|e| e.to_string())?;
+    let mut analog = [0u16; 4];
+    for (i, slot) in analog.iter_mut().enumerate() {
+        *slot = read_word(c, BRIDGE_DB, BRIDGE_ANALOG_OFFSET + (i as i32 * 2))?;
+    }
+
+    let mut input_map = BTreeMap::new();
+    for byte in 0..4 {
+        for bit in 0..8 {
+            input_map.insert(
+                format!("I{}.{}", byte, bit),
+                json!((inputs[byte] >> bit) & 1 == 1),
+            );
+        }
+    }
+    let mut output_map = BTreeMap::new();
+    for byte in 0..4 {
+        for bit in 0..8 {
+            output_map.insert(
+                format!("Q{}.{}", byte, bit),
+                json!((outputs[byte] >> bit) & 1 == 1),
+            );
+        }
+    }
+    let mut analog_map = BTreeMap::new();
+    for (i, value) in analog.iter().enumerate() {
+        analog_map.insert(format!("IA{}", i + 1), json!(value));
+    }
+
+    Ok(json!({
+        "connected": true,
+        "bridge": true,
+        "inputs": input_map,
+        "outputs": output_map,
+        "analog": analog_map,
+        "raw_inputs": inputs,
+        "raw_outputs": outputs,
+        "raw_analog": analog,
+        "estop": (inputs[0] & 1) == 1,
+    }))
+}
+
+/// Escribe una salida lógica en QB0..QB3 del PLC puente.
+pub fn write_bridge_output(c: &mut PlcClient, q: &str, value: bool) -> Result<(), String> {
+    let (byte, bit) = parse_q(q)?;
+    if !(0..4).contains(&byte) {
+        return Err(format!("Salida fuera de QB0..QB3: {}", q));
+    }
+    let offset = BRIDGE_OUTPUT_OFFSET + byte;
+    let mut buf = [0u8; 1];
+    c.ag_read(BRIDGE_DB, offset, 1, &mut buf)
+        .map_err(|e| e.to_string())?;
+    if value {
+        buf[0] |= 1 << bit;
+    } else {
+        buf[0] &= !(1 << bit);
+    }
+    c.ag_write(BRIDGE_DB, offset, 1, &buf)
+        .map_err(|e| e.to_string())
 }
 
 pub fn read_results(c: &mut PlcClient) -> Value {

@@ -329,15 +329,15 @@ fn estop_address(config: &serde_json::Value) -> String {
         let db = config
             .get("estop_db")
             .and_then(|v| v.as_str())
-            .unwrap_or("1001");
+            .unwrap_or("100");
         let offset = config
             .get("estop_offset")
             .and_then(|v| v.as_str())
-            .unwrap_or("2");
+            .unwrap_or("0");
         let bit = config
             .get("estop_bit")
             .and_then(|v| v.as_str())
-            .unwrap_or("4");
+            .unwrap_or("0");
         format!("DB{}.DBX{}.{}", db, offset, bit)
     } else {
         config
@@ -356,19 +356,19 @@ fn read_estop_source(
         let db = config
             .get("estop_db")
             .and_then(|v| v.as_str())
-            .unwrap_or("1001")
+            .unwrap_or("100")
             .parse::<i32>()
             .map_err(|_| "estop_db inválido".to_string())?;
         let offset = config
             .get("estop_offset")
             .and_then(|v| v.as_str())
-            .unwrap_or("2")
+            .unwrap_or("0")
             .parse::<i32>()
             .map_err(|_| "estop_offset inválido".to_string())?;
         let bit = config
             .get("estop_bit")
             .and_then(|v| v.as_str())
-            .unwrap_or("4")
+            .unwrap_or("0")
             .parse::<i32>()
             .map_err(|_| "estop_bit inválido".to_string())?;
         let value = plc::read_tag(client, db, offset, "BOOL", bit)?;
@@ -497,23 +497,36 @@ fn plc_io_status() -> serde_json::Value {
     match plc::connect(&cfg, 1500) {
         Ok(mut c) => {
             let read_test = read_estop_source(&mut c, &config);
-            let mut v = plc::read_io(&mut c);
-            if let Some(obj) = v.as_object_mut() {
-                obj.insert("connected".to_string(), serde_json::json!(true));
-                obj.insert("read_ok".to_string(), serde_json::json!(read_test.is_ok()));
-                obj.insert("estop_address".to_string(), serde_json::json!(address));
-                obj.insert(
-                    "estop_raw".to_string(),
-                    serde_json::json!(read_test.as_ref().ok()),
-                );
-                if let Err(e) = &read_test {
-                    obj.insert(
-                        "error".to_string(),
-                        serde_json::json!(format!("Conectó pero no pudo leer {}: {}", address, e)),
-                    );
+            match plc::read_bridge(&mut c) {
+                Ok(mut v) => {
+                    if let Some(obj) = v.as_object_mut() {
+                        obj.insert("enabled".to_string(), serde_json::json!(true));
+                        obj.insert("read_ok".to_string(), serde_json::json!(read_test.is_ok()));
+                        obj.insert("estop_address".to_string(), serde_json::json!(address));
+                        obj.insert(
+                            "estop_raw".to_string(),
+                            serde_json::json!(read_test.as_ref().ok()),
+                        );
+                        if let Err(e) = &read_test {
+                            obj.insert(
+                                "error".to_string(),
+                                serde_json::json!(format!("Conectó pero no pudo leer {}: {}", address, e)),
+                            );
+                        }
+                    }
+                    v
+                }
+                Err(e) => {
+                    let mut v = plc::empty_io();
+                    if let Some(obj) = v.as_object_mut() {
+                        obj.insert("connected".to_string(), serde_json::json!(false));
+                        obj.insert("enabled".to_string(), serde_json::json!(true));
+                        obj.insert("error".to_string(), serde_json::json!(e));
+                        obj.insert("estop_address".to_string(), serde_json::json!(address));
+                    }
+                    v
                 }
             }
-            v
         }
         Err(e) => {
             let mut v = plc::empty_io();
@@ -533,7 +546,7 @@ fn plc_io_write(q: String, value: bool) -> String {
     }
     let cfg = plc_cfg();
     match plc::connect(&cfg, 1500) {
-        Ok(mut c) => match plc::write_q(&mut c, &q, value) {
+        Ok(mut c) => match plc::write_bridge_output(&mut c, &q, value) {
             Ok(_) => "OK".to_string(),
             Err(e) => format!("error: {}", e),
         },
@@ -601,7 +614,26 @@ fn plc_raw_monitor() -> serde_json::Value {
     }
     let cfg = plc_cfg();
     match plc::connect(&cfg, 1500) {
-        Ok(mut c) => plc::read_raw_monitor(&mut c),
+        Ok(mut c) => match plc::read_bridge(&mut c) {
+            Ok(v) => serde_json::json!({
+                "DB100": {
+                    "IB0": v["raw_inputs"][0],
+                    "IB1": v["raw_inputs"][1],
+                    "IB2": v["raw_inputs"][2],
+                    "IB3": v["raw_inputs"][3],
+                    "QB0": v["raw_outputs"][0],
+                    "QB1": v["raw_outputs"][1],
+                    "QB2": v["raw_outputs"][2],
+                    "QB3": v["raw_outputs"][3],
+                    "IW100": v["raw_analog"][0],
+                    "IW102": v["raw_analog"][1],
+                    "IW104": v["raw_analog"][2],
+                    "IW106": v["raw_analog"][3],
+                    "estop": v["estop"]
+                }
+            }),
+            Err(e) => serde_json::json!({ "error": e }),
+        },
         Err(e) => serde_json::json!({ "error": e }),
     }
 }
