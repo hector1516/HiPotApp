@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Gauge } from '../components/Gauge';
+import { GaugeZoomModal, playGaugeTone, type ZoomGauge } from '../components/GaugeZoomModal';
 import { useHipot } from '../hooks/useHipot';
 
 type IoData = {
@@ -21,6 +22,30 @@ type ResultData = {
 };
 
 const COMPONENTS = ['FAN', 'DOOR', 'FRAME', 'DRAIN', 'DEFROST', 'LIGHT'];
+
+const COMPONENT_ADDRESS: Record<string, string> = {
+  FAN: 'DB1001.DBD4',
+  DOOR: 'DB1001.DBD8',
+  FRAME: 'DB1001.DBD12',
+  DRAIN: 'DB1001.DBD16',
+  DEFROST: 'DB1001.DBD86',
+  LIGHT: 'DB1001.DBD90',
+};
+
+function fmtValue(value: any, decimals = 2): string {
+  if (value === null || value === undefined) return '—';
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toFixed(decimals) : '—';
+}
+
+type ZoomTarget = {
+  kind: 'analog' | 'component' | 'hipot';
+  key: string;
+  label: string;
+  min: number;
+  max: number;
+  unit: string;
+};
 
 const ANALOG_GAUGES = [
   { key: 'IA1', label: 'Amplificador 1', min: 0, max: 1, unit: 'A' },
@@ -71,6 +96,7 @@ export function LiveScreen({
   const [io, setIo] = useState<IoData | null>(null);
   const [results, setResults] = useState<ResultData>({});
   const [raw, setRaw] = useState<any>(null);
+  const [zoom, setZoom] = useState<ZoomTarget | null>(null);
   const [hipotLive, setHipotLive] = useState<any>({});
   const [printer, setPrinter] = useState<any>({});
   const [last, setLast] = useState('');
@@ -143,6 +169,89 @@ export function LiveScreen({
   const resultDataReady = Object.keys(results).length > 0;
   const hipotDataReady = !!hipotLive?.raw;
 
+  const zoomValue = !zoom
+    ? 0
+    : zoom.kind === 'analog'
+      ? Number(analog[zoom.key] ?? 0)
+      : zoom.kind === 'component'
+        ? Number(results[zoom.key] ?? 0)
+        : Number(hipotLive[zoom.key] ?? 0);
+  const zoomUnknown = !zoom
+    ? true
+    : zoom.kind === 'analog'
+      ? (!plcOk || !plcDataReady)
+      : zoom.kind === 'component'
+        ? (!plcOk || !resultDataReady)
+        : (!hipotOk || !hipotDataReady);
+
+  let zoomDetails: { label: string; value: string }[] = [];
+  let zoomRelated: { label: string; value: string; unit?: string; active?: boolean }[] = [];
+
+  if (zoom) {
+    if (zoom.kind === 'analog') {
+      zoomDetails = [
+        { label: 'Canal', value: zoom.key },
+        { label: 'Origen', value: 'PLC · entrada analógica' },
+        { label: 'Rango', value: `${zoom.min} – ${zoom.max} ${zoom.unit}` },
+        { label: 'Estado', value: zoomUnknown ? 'Sin lectura' : 'Lectura activa' },
+      ];
+      zoomRelated = ANALOG_GAUGES.map(g => ({
+        label: g.label,
+        value: fmtValue(analog[g.key]),
+        unit: g.unit,
+        active: g.key === zoom.key,
+      }));
+    } else if (zoom.kind === 'component') {
+      zoomDetails = [
+        { label: 'Dirección', value: COMPONENT_ADDRESS[zoom.key] ?? 'DB1001' },
+        { label: 'Medición', value: results.running ? 'Midiendo' : results.complete ? 'Terminado' : 'En espera' },
+        { label: 'Error eléctrico', value: results.error ? 'SÍ' : 'NO' },
+        { label: 'Valor', value: zoomUnknown ? 'Sin lectura' : `${fmtValue(zoomValue)} A` },
+      ];
+      zoomRelated = COMPONENTS.map(name => ({
+        label: name,
+        value: fmtValue(results[name]),
+        unit: 'A',
+        active: name === zoom.key,
+      }));
+    } else {
+      zoomDetails = [
+        { label: 'Conexión', value: hipotOk ? 'Conectado' : 'Sin conexión' },
+        { label: 'Puerto', value: hipot.status?.port ?? '—' },
+        { label: 'Baudios', value: String(hipot.status?.baud ?? '—') },
+        { label: 'Estado', value: hipotLive.status || (phase === 'HIPOT_RUNNING' ? 'En prueba' : '—') },
+        ...(hipotLive.raw ? [{ label: 'Respuesta', value: String(hipotLive.raw) }] : []),
+      ];
+      zoomRelated = [
+        { label: 'Voltaje', value: fmtValue(hipotLive.voltage), unit: 'V', active: zoom.key === 'voltage' },
+        { label: 'Corriente', value: fmtValue(hipotLive.current), unit: 'mA', active: zoom.key === 'current' },
+        { label: 'Duración', value: fmtValue(hipotLive.duration), unit: 's', active: zoom.key === 'duration' },
+      ];
+    }
+  }
+
+  const zoomItem: ZoomGauge | null = zoom
+    ? {
+        label: zoom.label,
+        value: zoomValue,
+        min: zoom.min,
+        max: zoom.max,
+        unit: zoom.unit,
+        unknown: zoomUnknown,
+        details: zoomDetails,
+        related: zoomRelated,
+      }
+    : null;
+
+  const openZoom = (target: ZoomTarget) => {
+    setZoom(target);
+    playGaugeTone('open');
+  };
+  const closeZoom = () => {
+    setZoom(null);
+    playGaugeTone('close');
+  };
+
   return (
     <div className="live-page">
       <div className="live-page-head">
@@ -178,6 +287,7 @@ export function LiveScreen({
                 size={112}
                 unknown={!plcOk || !plcDataReady}
                 flashOnChange
+                onClick={() => openZoom({ kind: 'analog', key: g.key, label: g.label, min: g.min, max: g.max, unit: g.unit })}
               />
             ))}
           </div>
@@ -236,6 +346,7 @@ export function LiveScreen({
                 size={118}
                 unknown={!plcOk || !resultDataReady}
                 flashOnChange
+                onClick={() => openZoom({ kind: 'component', key: name, label: name, min: 0, max: 25, unit: 'A' })}
               />
             ))}
           </div>
@@ -252,9 +363,9 @@ export function LiveScreen({
             <span className={`pill ${hipotOk ? 'on' : 'off'}`}>{hipotOk ? 'Conectado' : 'Sin conexión'}</span>
           </div>
           <div className="live-gauge-grid live-gauge-grid-1">
-            <Gauge label="Voltaje" value={Number(hipotLive.voltage ?? 0)} min={0} max={5000} unit="V" size={124} unknown={!hipotOk || !hipotDataReady} flashOnChange />
-            <Gauge label="Corriente" value={Number(hipotLive.current ?? 0)} min={0} max={20} unit="mA" size={124} unknown={!hipotOk || !hipotDataReady} flashOnChange />
-            <Gauge label="Duración" value={Number(hipotLive.duration ?? 0)} min={0} max={60} unit="s" size={124} unknown={!hipotOk || !hipotDataReady} flashOnChange />
+            <Gauge label="Voltaje" value={Number(hipotLive.voltage ?? 0)} min={0} max={5000} unit="V" size={124} unknown={!hipotOk || !hipotDataReady} flashOnChange onClick={() => openZoom({ kind: 'hipot', key: 'voltage', label: 'Voltaje Hipot', min: 0, max: 5000, unit: 'V' })} />
+            <Gauge label="Corriente" value={Number(hipotLive.current ?? 0)} min={0} max={20} unit="mA" size={124} unknown={!hipotOk || !hipotDataReady} flashOnChange onClick={() => openZoom({ kind: 'hipot', key: 'current', label: 'Corriente Hipot', min: 0, max: 20, unit: 'mA' })} />
+            <Gauge label="Duración" value={Number(hipotLive.duration ?? 0)} min={0} max={60} unit="s" size={124} unknown={!hipotOk || !hipotDataReady} flashOnChange onClick={() => openZoom({ kind: 'hipot', key: 'duration', label: 'Duración Hipot', min: 0, max: 60, unit: 's' })} />
           </div>
           <div className="live-divider" />
           <Metric label="Puerto" value={hipot.status?.port ?? '—'} />
@@ -284,6 +395,8 @@ export function LiveScreen({
           </div>
         </section>
       </div>
+
+      <GaugeZoomModal item={zoomItem} onClose={closeZoom} />
     </div>
   );
 }

@@ -3,8 +3,8 @@ import { motion } from 'framer-motion';
 import { CountUp } from './CountUp';
 
 // Anillo sobrio: trazo fino, colores contenidos.
-export function Gauge({ label, value, min, max, unit = 'A', size = 140, unknown = false, flashOnChange = false }: {
-  label: string; value: number; min: number; max: number; unit?: string; size?: number; unknown?: boolean; flashOnChange?: boolean;
+export function Gauge({ label, value, min, max, unit = 'A', size = 140, unknown = false, flashOnChange = false, onClick }: {
+  label: string; value: number; min: number; max: number; unit?: string; size?: number; unknown?: boolean; flashOnChange?: boolean; onClick?: () => void;
 }) {
   const [flash, setFlash] = useState(false);
   const previous = useRef(value);
@@ -39,7 +39,18 @@ export function Gauge({ label, value, min, max, unit = 'A', size = 140, unknown 
         border: `1px solid ${unknown ? '#cbd5e1' : ok ? '#a8d0b4' : '#e8a0a0'}`,
         boxShadow: flash ? '0 0 0 3px rgba(59,130,246,.18), 0 1px 4px rgba(20,27,38,.06)' : '0 1px 4px rgba(20,27,38,.06)',
         transition: 'background-color .18s ease, box-shadow .18s ease',
+        cursor: onClick ? 'pointer' : undefined,
       }}
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      title={onClick ? `Ampliar ${label}` : undefined}
+      onKeyDown={onClick ? (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onClick();
+        }
+      } : undefined}
     >
       <div style={{ fontWeight: 700, fontSize: 13, color: unknown ? '#64748b' : ok ? '#166534' : '#991b1b' }}>
         {label} {unknown ? '· —' : ok ? '· OK' : '· FUERA'}
