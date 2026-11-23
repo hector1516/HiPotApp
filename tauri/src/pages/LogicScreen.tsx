@@ -45,6 +45,9 @@ type FlowResponse = {
   draft_by?: string;
   published_at?: string;
   published_by?: string;
+  previous_version?: string;
+  previous_at?: string;
+  previous_by?: string;
   test_running?: boolean;
 };
 
@@ -286,6 +289,23 @@ export function LogicScreen({
     setMsg('Valores predeterminados cargados. Guarde o publique para aplicarlos.');
   };
 
+  const rollback = async () => {
+    setBusy(true);
+    setMsg('');
+    try {
+      const r = await invoke<string>('logic_flow_rollback', {
+        user: adminBatch || 'ADMIN',
+      });
+      if (r !== 'saved') throw new Error(r);
+      await loadFlow(true);
+      setMsg('Se restauró la publicación anterior.');
+    } catch (e: any) {
+      setMsg(`No se revirtió: ${String(e?.message ?? e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const duration = Math.max(0, Number(current?.duration_ms ?? 0));
   const elapsed = current && startedAt.current ? performance.now() - startedAt.current : 0;
   const remaining = duration > 0 ? Math.max(0, duration - elapsed) / 1000 : null;
@@ -420,6 +440,10 @@ export function LogicScreen({
               {busy ? 'Publicando…' : 'Publicar lógica'}
             </button>
             <button className="btn" onClick={restoreDefaults} disabled={busy || running}>Restaurar predeterminados</button>
+            <button className="btn" onClick={rollback} disabled={busy || running || !flowData?.previous_version}
+              title={flowData?.previous_version ? `Volver a la publicación v${flowData.previous_version}` : 'No hay publicación anterior'}>
+              Revertir publicación anterior
+            </button>
             <button className="btn" onClick={exitEdit} disabled={busy}>Salir de edición</button>
           </div>
         </section>

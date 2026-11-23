@@ -154,3 +154,6 @@ producci?n hasta probar en banco.
 - **Publicar** valida el borrador y lo copia a la configuraci?n publicada; el
   pr?ximo ciclo usa esa versi?n. Registra `logic_flow_publish` en `app_logs`.
 - No se puede guardar ni publicar con una secuencia en curso.
+- Cada publicaci?n guarda la versi?n anterior en `logic_flow_previous_*`.
+  **Revertir publicaci?n anterior** restaura esa versi?n y deja el cambio en
+  `app_logs` (`logic_flow_rollback`).

@@ -5,7 +5,7 @@
 //! salidas se resuelven contra el mapa configurable de salidas.
 
 use crate::calibration::{AnalogCalibration, CHANNEL_NAMES};
-use crate::logic_flow::LogicFlow;
+use crate::logic_flow::{ComponentStep, LogicFlow};
 use crate::output_map::OutputMap;
 use crate::plc::{self, PlcClient};
 use serde_json::{json, Value};
@@ -49,6 +49,18 @@ fn component_output(name: &str) -> Option<&'static str> {
         "DEFROST" => Some("HEATERS"),
         "LIGHT" => Some("LIGHT"),
         _ => None,
+    }
+}
+
+fn component_time_seconds(step: &ComponentStep, logic: &LogicFlow, recipe_time: f64) -> f64 {
+    if step.test_time_ms > 0 {
+        step.test_time_ms as f64 / 1000.0
+    } else if logic.default_test_time_ms > 0 {
+        logic.default_test_time_ms as f64 / 1000.0
+    } else if recipe_time > 0.0 {
+        recipe_time
+    } else {
+        10.0
     }
 }
 
@@ -384,15 +396,7 @@ pub fn run_electrical(
             }),
         );
 
-        let test_time = if step.test_time_ms > 0 {
-            step.test_time_ms as f64 / 1000.0
-        } else if opts.logic.default_test_time_ms > 0 {
-            opts.logic.default_test_time_ms as f64 / 1000.0
-        } else if opts.test_time > 0.0 {
-            opts.test_time
-        } else {
-            10.0
-        };
+        let test_time = component_time_seconds(step, &opts.logic, opts.test_time);
         emit_logic(
             app,
             "MIDIENDO",
@@ -520,6 +524,22 @@ mod tests {
 
     fn calibrated(channels: Value) -> AnalogCalibration {
         AnalogCalibration::validate_payload(&json!({ "channels": channels })).unwrap()
+    }
+
+    #[test]
+    fn component_time_precedence() {
+        let mut flow = LogicFlow::defaults();
+        flow.default_test_time_ms = 5000;
+        let step = flow.components[0].clone();
+        assert!((component_time_seconds(&step, &flow, 10.0) - 5.0).abs() < 1e-9);
+
+        let mut specific = step.clone();
+        specific.test_time_ms = 3000;
+        assert!((component_time_seconds(&specific, &flow, 10.0) - 3.0).abs() < 1e-9);
+
+        flow.default_test_time_ms = 0;
+        assert!((component_time_seconds(&step, &flow, 10.0) - 10.0).abs() < 1e-9);
+        assert!((component_time_seconds(&step, &flow, 0.0) - 10.0).abs() < 1e-9);
     }
 
     #[test]

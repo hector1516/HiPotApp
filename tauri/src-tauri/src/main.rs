@@ -395,6 +395,9 @@ fn logic_flow_get() -> serde_json::Value {
         "draft_by": config_text(&config, "logic_flow_draft_by"),
         "published_at": config_text(&config, "logic_flow_published_at"),
         "published_by": config_text(&config, "logic_flow_published_by"),
+        "previous_version": config_text(&config, "logic_flow_previous_version"),
+        "previous_at": config_text(&config, "logic_flow_previous_at"),
+        "previous_by": config_text(&config, "logic_flow_previous_by"),
         "test_running": TEST_RUNNING.load(Ordering::SeqCst),
     })
 }
@@ -462,7 +465,12 @@ fn logic_flow_publish(user: String) -> String {
         user.trim().to_string()
     };
     let stored = draft.storage_json();
+    let previous = config_text(&config, "logic_flow_published");
     let result = set_config(serde_json::json!({
+        "logic_flow_previous_published": previous,
+        "logic_flow_previous_version": config_text(&config, "logic_flow_published_version"),
+        "logic_flow_previous_at": config_text(&config, "logic_flow_published_at"),
+        "logic_flow_previous_by": config_text(&config, "logic_flow_published_by"),
         "logic_flow_published": stored,
         "logic_flow_published_version": version.to_string(),
         "logic_flow_published_at": now,
@@ -474,6 +482,58 @@ fn logic_flow_publish(user: String) -> String {
             "PLC",
             "logic_flow_publish",
             Some(&format!("Lógica v{} publicada por {}", version, user)),
+            None,
+            Some(&stored),
+            None,
+            None,
+            true,
+            None,
+        );
+    }
+    result
+}
+
+#[tauri::command]
+fn logic_flow_rollback(user: String) -> String {
+    if TEST_RUNNING.load(Ordering::SeqCst) {
+        return "error: No se puede revertir lógica con una secuencia en curso".to_string();
+    }
+    let config = get_config();
+    let previous_text = config_text(&config, "logic_flow_previous_published");
+    if previous_text.trim().is_empty() {
+        return "error: No hay una publicación anterior para revertir".to_string();
+    }
+    let previous = logic_flow::LogicFlow::from_config_key(&config, "logic_flow_previous_published");
+    if let Err(e) = previous.validate() {
+        return format!("error: La publicación anterior no es válida: {}", e);
+    }
+    let version = calibration::next_version(&config_text(&config, "logic_flow_published_version"));
+    let now = chrono::Local::now()
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string();
+    let user = if user.trim().is_empty() {
+        "ADMIN".to_string()
+    } else {
+        user.trim().to_string()
+    };
+    let current = config_text(&config, "logic_flow_published");
+    let stored = previous.storage_json();
+    let result = set_config(serde_json::json!({
+        "logic_flow_previous_published": current,
+        "logic_flow_previous_version": config_text(&config, "logic_flow_published_version"),
+        "logic_flow_previous_at": config_text(&config, "logic_flow_published_at"),
+        "logic_flow_previous_by": config_text(&config, "logic_flow_published_by"),
+        "logic_flow_published": stored,
+        "logic_flow_published_version": version.to_string(),
+        "logic_flow_published_at": now,
+        "logic_flow_published_by": user,
+    }));
+    if result == "saved" {
+        let _ = db::repo::log_add(
+            "INFO",
+            "PLC",
+            "logic_flow_rollback",
+            Some(&format!("Lógica revertida a la publicación anterior por {}", user)),
             None,
             Some(&stored),
             None,
@@ -2082,6 +2142,7 @@ fn main() {
             logic_flow_get,
             logic_flow_save_draft,
             logic_flow_publish,
+            logic_flow_rollback,
             test_running,
             plc_set_mode,
             plc_get_mode,
