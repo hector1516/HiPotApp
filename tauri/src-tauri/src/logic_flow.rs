@@ -143,8 +143,11 @@ impl LogicFlow {
                 return Err(format!("Falta el componente: {}", name));
             }
         }
-        if !self.components.iter().any(|step| step.enabled) {
-            return Err("Debe haber al menos un componente habilitado".to_string());
+        if let Some(step) = self.components.iter().find(|step| !step.enabled) {
+            return Err(format!(
+                "{}: los componentes se habilitan o deshabilitan en la receta, no en el flujo",
+                step.name
+            ));
         }
         Ok(())
     }
@@ -261,7 +264,7 @@ mod tests {
     fn validates_reorder_and_times() {
         let payload = flow_with(json!([
             component("LIGHT", true, 3000),
-            component("FAN", false, 0),
+            component("FAN", true, 0),
             component("DOOR", true, 0),
             component("FRAME", true, 0),
             component("DRAIN", true, 0),
@@ -270,7 +273,7 @@ mod tests {
         let flow = LogicFlow::validate_payload(&payload).unwrap();
         assert_eq!(flow.components[0].name, "LIGHT");
         assert_eq!(flow.components[0].test_time_ms, 3000);
-        assert!(!flow.components[1].enabled);
+        assert!(flow.components[1].enabled);
     }
 
     #[test]
@@ -303,17 +306,17 @@ mod tests {
     }
 
     #[test]
-    fn rejects_flow_without_enabled_components() {
+    fn rejects_disabling_components_in_the_flow() {
         let payload = flow_with(json!([
             component("FAN", false, 0),
-            component("DOOR", false, 0),
-            component("FRAME", false, 0),
-            component("DRAIN", false, 0),
-            component("DEFROST", false, 0),
-            component("LIGHT", false, 0)
+            component("DOOR", true, 0),
+            component("FRAME", true, 0),
+            component("DRAIN", true, 0),
+            component("DEFROST", true, 0),
+            component("LIGHT", true, 0)
         ]));
         let err = LogicFlow::validate_payload(&payload).unwrap_err();
-        assert!(err.contains("habilitado"), "{}", err);
+        assert!(err.contains("receta"), "{}", err);
     }
 
     #[test]
@@ -373,7 +376,7 @@ mod tests {
     fn storage_round_trip_preserves_flow() {
         let payload = flow_with(json!([
             component("LIGHT", true, 3000),
-            component("FAN", false, 0),
+            component("FAN", true, 0),
             component("DOOR", true, 0),
             component("FRAME", true, 0),
             component("DRAIN", true, 0),
@@ -384,6 +387,6 @@ mod tests {
         let back = LogicFlow::from_config(&cfg);
         assert_eq!(back.components[0].name, "LIGHT");
         assert_eq!(back.components[0].test_time_ms, 3000);
-        assert!(!back.components[1].enabled);
+        assert!(back.components[1].enabled);
     }
 }

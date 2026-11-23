@@ -400,7 +400,6 @@ export function LogicScreen({
                 <thead>
                   <tr style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'left' }}>
                     <th style={{ padding: '4px 6px' }}>Orden</th>
-                    <th style={{ padding: '4px 6px' }}>Activo</th>
                     <th style={{ padding: '4px 6px' }}>Componente</th>
                     <th style={{ padding: '4px 6px' }}>Tiempo (ms)</th>
                   </tr>
@@ -411,10 +410,6 @@ export function LogicScreen({
                       <td style={{ padding: '4px 6px', whiteSpace: 'nowrap' }}>
                         <button className="btn" style={{ minHeight: 28, padding: '0 7px' }} disabled={index === 0} onClick={() => moveComponent(index, -1)}>↑</button>
                         <button className="btn" style={{ minHeight: 28, padding: '0 7px', marginLeft: 3 }} disabled={index === draft.components.length - 1} onClick={() => moveComponent(index, 1)}>↓</button>
-                      </td>
-                      <td style={{ padding: '4px 6px' }}>
-                        <input type="checkbox" checked={step.enabled}
-                          onChange={e => setComponent(index, { enabled: e.target.checked })} />
                       </td>
                       <td className="mono" style={{ padding: '4px 6px', fontWeight: 700 }}>{step.name}</td>
                       <td style={{ padding: '4px 6px' }}>
@@ -427,7 +422,8 @@ export function LogicScreen({
                 </tbody>
               </table>
               <div style={{ marginTop: 6, fontSize: 11, color: 'var(--muted)' }}>
-                0 ms significa usar el tiempo de receta. El orden se aplica al próximo ciclo publicado.
+                0 ms significa usar el tiempo de receta. La receta decide qué componentes se prueban;
+                el flujo solo ordena y ajusta sus tiempos. Se aplica al próximo ciclo publicado.
               </div>
             </div>
           </div>
