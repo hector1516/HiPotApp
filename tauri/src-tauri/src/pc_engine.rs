@@ -12,6 +12,10 @@ use serde_json::{json, Value};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
+/// Ciclo de supervisión de la PC: el paro y las condiciones se revisan cada
+/// 100 ms durante las esperas de la secuencia.
+pub const CONTROL_PERIOD_MS: u64 = 100;
+
 #[derive(Clone, Debug)]
 pub struct SequenceOptions {
     pub voltage: f64,
@@ -151,7 +155,7 @@ fn sleep_with_estop(client: &mut PlcClient, total: Duration, nc: bool) -> Result
             return Err("Paro de emergencia activo".to_string());
         }
         let remaining = total.saturating_sub(start.elapsed());
-        std::thread::sleep(remaining.min(Duration::from_millis(100)));
+        std::thread::sleep(remaining.min(Duration::from_millis(CONTROL_PERIOD_MS)));
     }
     Ok(())
 }
