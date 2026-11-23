@@ -51,7 +51,7 @@ const ANALOG_GAUGES = [
   { key: 'IA1', label: 'Amplificador 1', min: 0, max: 1, unit: 'A' },
   { key: 'IA2', label: 'Amplificador 2', min: 0, max: 10, unit: 'A' },
   { key: 'IA3', label: 'Amplificador 3', min: 0, max: 20, unit: 'A' },
-  { key: 'IA4', label: 'Voltaje de línea', min: 0, max: 250, unit: 'V' },
+  { key: 'IA4', label: 'Voltaje de línea', min: 0, max: 220, unit: 'V' },
 ];
 
 function statusClass(on: boolean | null | undefined) {
@@ -166,7 +166,7 @@ export function LiveScreen({
   const plcOk = io?.connected === true && io?.read_ok !== false;
   const hipotOk = hipot.connected === true;
   const plcDataReady = !!io && Object.keys(io.outputs ?? {}).length > 0;
-  const resultDataReady = Object.keys(results).length > 0;
+  const resultDataReady = Object.keys(results).length > 0 && !results.error;
   const hipotDataReady = !!hipotLive?.raw;
 
   const zoomValue = !zoom

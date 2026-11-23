@@ -432,56 +432,11 @@ pub fn stop(c: &mut PlcClient) -> Result<(), String> {
     write_bool(c, RECIPE_DB, OFF_START_STOP, false, STOP_BIT)
 }
 
-fn maybe_bool(c: &mut PlcClient, db: i32, offset: i32, bit: i32) -> Value {
-    match read_bool(c, db, offset, bit) {
-        Ok(v) => json!(v),
-        Err(_) => Value::Null,
-    }
-}
-
-fn maybe_real(c: &mut PlcClient, db: i32, offset: i32) -> Value {
-    match read_real(c, db, offset) {
-        Ok(v) => json!(v),
-        Err(_) => Value::Null,
-    }
-}
-
-/// Lectura cruda de la interfaz de la app, sin depender de nombres lógicos.
-/// Sirve para mostrar direcciones y valores reales en la pantalla Live.
-pub fn read_raw_monitor(c: &mut PlcClient) -> Value {
-    let db1000 = json!({
-        "start": maybe_bool(c, RECIPE_DB, OFF_START_STOP, START_BIT),
-        "stop": maybe_bool(c, RECIPE_DB, OFF_START_STOP, STOP_BIT),
-        "mask": maybe_real(c, RECIPE_DB, OFF_RECIPE_MASK),
-        "fan_time": maybe_real(c, RECIPE_DB, 8),
-        "door_time": maybe_real(c, RECIPE_DB, 12),
-        "frame_time": maybe_real(c, RECIPE_DB, 16),
-        "drain_time": maybe_real(c, RECIPE_DB, 86),
-        "defrost_time": maybe_real(c, RECIPE_DB, 90),
-        "light_time": maybe_real(c, RECIPE_DB, 94),
-        "tolerance": maybe_real(c, RECIPE_DB, OFF_TOLERANCE),
-    });
-    let db1001 = json!({
-        "measuring": maybe_bool(c, RESULT_DB, OFF_RESULT_STATUS, RES_MEASURING_BIT),
-        "finished": maybe_bool(c, RESULT_DB, OFF_RESULT_STATUS, RES_FINISHED_BIT),
-        "estop": maybe_bool(c, RESULT_DB, OFF_RESULT_STATUS, 4),
-        "error": maybe_bool(c, RESULT_DB, OFF_RESULT_STATUS, RES_ERROR_BIT),
-        "fan": maybe_real(c, RESULT_DB, 4),
-        "door": maybe_real(c, RESULT_DB, 8),
-        "frame": maybe_real(c, RESULT_DB, 12),
-        "drain": maybe_real(c, RESULT_DB, 16),
-        "defrost": maybe_real(c, RESULT_DB, 86),
-        "light": maybe_real(c, RESULT_DB, 90),
-    });
-    json!({ "DB1000": db1000, "DB1001": db1001 })
-}
-
-/// Lee toda la interfaz DB100 del PLC puente.
 pub fn read_bridge(c: &mut PlcClient) -> Result<Value, String> {
-    let mut inputs = [0u8; 4];
+    let mut inputs = vec![0u8; 4];
     c.ag_read(BRIDGE_DB, BRIDGE_INPUT_OFFSET, 4, &mut inputs)
         .map_err(|e| e.to_string())?;
-    let mut outputs = [0u8; 4];
+    let mut outputs = vec![0u8; 4];
     c.ag_read(BRIDGE_DB, BRIDGE_OUTPUT_OFFSET, 4, &mut outputs)
         .map_err(|e| e.to_string())?;
     let mut analog = [0u16; 4];
@@ -508,8 +463,12 @@ pub fn read_bridge(c: &mut PlcClient) -> Result<Value, String> {
         }
     }
     let mut analog_map = BTreeMap::new();
+    let analog_full_scale = [1.0_f64, 10.0, 20.0, 220.0];
     for (i, value) in analog.iter().enumerate() {
-        analog_map.insert(format!("IA{}", i + 1), json!(value));
+        analog_map.insert(
+            format!("IA{}", i + 1),
+            json!((*value as f64 / 27648.0) * analog_full_scale[i]),
+        );
     }
 
     Ok(json!({
@@ -532,7 +491,7 @@ pub fn write_bridge_output(c: &mut PlcClient, q: &str, value: bool) -> Result<()
         return Err(format!("Salida fuera de QB0..QB3: {}", q));
     }
     let offset = BRIDGE_OUTPUT_OFFSET + byte;
-    let mut buf = [0u8; 1];
+    let mut buf = vec![0u8; 1];
     c.ag_read(BRIDGE_DB, offset, 1, &mut buf)
         .map_err(|e| e.to_string())?;
     if value {
@@ -540,11 +499,16 @@ pub fn write_bridge_output(c: &mut PlcClient, q: &str, value: bool) -> Result<()
     } else {
         buf[0] &= !(1 << bit);
     }
-    c.ag_write(BRIDGE_DB, offset, 1, &buf)
+    c.ag_write(BRIDGE_DB, offset, 1, &mut buf)
         .map_err(|e| e.to_string())
 }
 
 pub fn read_results(c: &mut PlcClient) -> Value {
+    // En el PLC puente DB100 ya no existe DB1001. Si no se puede leer el
+    // estado, la app debe mostrar "sin lectura" en vez de resultados 0.0.
+    if read_bool(c, RESULT_DB, OFF_RESULT_STATUS, RES_FINISHED_BIT).is_err() {
+        return json!({ "error": "DB1001 no disponible en el PLC puente DB100", "bridge": true });
+    }
     let mut out = BTreeMap::new();
     for (name, off) in RES_OFFSETS {
         out.insert((*name).to_string(), json!(read_real(c, RESULT_DB, *off).unwrap_or(0.0)));

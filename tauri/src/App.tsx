@@ -581,7 +581,7 @@ export default function App() {
           <span className="pill warn" style={{ fontSize: 11 }}>Paro de emergencia no disponible</span>
         )}
         <span className="spacer" />
-        <span style={{ color: 'var(--muted-2)', fontSize: 11 }}>Offline-first · Windows 11 · v1.0.47 · Ctrl+Shift+K GodMode · Ctrl+Shift+M Manual</span>
+        <span style={{ color: 'var(--muted-2)', fontSize: 11 }}>Offline-first · Windows 11 · v1.1.0 · Ctrl+Shift+K GodMode · Ctrl+Shift+M Manual</span>
       </footer>
 
       <ReprintPopup open={showReprint} onClose={() => setShowReprint(false)} />

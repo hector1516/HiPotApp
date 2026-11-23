@@ -5,6 +5,7 @@
 mod config_io;
 mod db;
 mod hipot;
+mod pc_engine;
 mod plc;
 
 use tauri::{Emitter, Manager};
@@ -933,125 +934,50 @@ fn run_test_cycle(
     // --- Prueba eléctrica (solo si Hipot pasó) ---
     let _ = app.emit("test-phase", "PLC_RUNNING");
     if config_flag("plc_enabled") {
-    let cfg = plc_cfg();
-    match plc::connect(&cfg, 2000) {
-        Ok(mut client) => {
-            if let Err(e) = plc::send_recipe(&mut client, voltage, &components, hipot_time) {
-                errors.push(format!("PLC receta: {}", e));
-            }
-            let _ = plc::set_mode(&mut client, 1);
-            if let Err(e) = plc::start(&mut client) {
-                errors.push(format!("PLC start: {}", e));
-            }
-
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
-            loop {
-                let results = plc::read_results(&mut client);
-                let mut snapshot = serde_json::Map::new();
-                if let Some(arr) = components.as_array() {
-                    for comp in arr {
-                        let name = comp
-                            .get("name")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_uppercase();
-                        if name.is_empty() {
-                            continue;
+        let cfg = plc_cfg();
+        match plc::connect(&cfg, 2000) {
+            Ok(mut client) => {
+                let config = get_config();
+                let estop_nc = config
+                    .get("estop_nc")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("1")
+                    != "0";
+                let opts = pc_engine::SequenceOptions {
+                    voltage,
+                    test_time: hipot_time,
+                    estop_nc,
+                };
+                match pc_engine::run_electrical(&app, &mut client, &components, &opts) {
+                    Ok(result) => {
+                        plc_pass = result.pass;
+                        plc_component_values = result.values;
+                        plc_values = serde_json::json!({
+                            "pass": result.pass,
+                            "bridge": true,
+                            "readings": result.readings,
+                        });
+                        if !result.errors.is_empty() {
+                            errors.extend(result.errors.clone());
                         }
-                        if let Some(value) = results.get(&name) {
-                            snapshot.insert(name, value.clone());
+                        let _ = save_plc_result(execution_id, plc_pass, result.readings);
+                    }
+                    Err(e) => {
+                        errors.push(format!("Secuencia PC: {}", e));
+                        let _ = hipot_test("RESET".to_string());
+                        for q in ["Q0.0", "Q0.1", "Q0.2", "Q0.3", "Q0.4", "Q0.5", "Q0.6", "Q0.7",
+                                  "Q1.0", "Q1.1", "Q2.0"] {
+                            let _ = plc::write_bridge_output(&mut client, q, false);
                         }
+                        let _ = save_plc_result(execution_id, false, serde_json::json!([]));
                     }
                 }
-                if !snapshot.is_empty() {
-                    let _ = app.emit("test-values", serde_json::Value::Object(snapshot));
-                }
-                let complete = results
-                    .get("complete")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                if complete {
-                    plc_values = results;
-                    break;
-                }
-                if std::time::Instant::now() >= deadline {
-                    errors.push("PLC: timeout esperando Test_Complete".to_string());
-                    plc_values = results;
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(500));
             }
-
-            let mut readings = Vec::new();
-            if let Some(arr) = components.as_array() {
-                for comp in arr {
-                    let name = comp
-                        .get("name")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_uppercase();
-                    if name.is_empty() {
-                        continue;
-                    }
-                    if !comp.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true) {
-                        continue;
-                    }
-                    let min = comp.get("min").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                    let max = comp.get("max").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                    let value = plc_values
-                        .get(&name)
-                        .and_then(|v| v.as_f64())
-                        .unwrap_or(0.0);
-                    let ok = value >= min && value <= max;
-                    readings.push(serde_json::json!({
-                        "component": name,
-                        "voltage": voltage.to_string(),
-                        "tag": name,
-                        "value": value,
-                        "min": min,
-                        "max": max,
-                        "pass": ok,
-                    }));
-                }
+            Err(e) => {
+                errors.push(format!("PLC no conectado: {}", e));
+                let _ = save_plc_result(execution_id, false, serde_json::json!([]));
             }
-
-            // El PLC real no tiene un bit Test_Pass: se evalúa con los
-            // resultados de corriente contra los límites de la receta.
-            let finished = plc_values
-                .get("complete")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            let plc_error = plc_values
-                .get("error")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            let all_ok = !readings.is_empty()
-                && readings
-                    .iter()
-                    .all(|r| r.get("pass").and_then(|v| v.as_bool()).unwrap_or(false));
-            plc_pass = finished && !plc_error && all_ok;
-            if let Some(obj) = plc_values.as_object_mut() {
-                obj.insert("pass".to_string(), serde_json::json!(plc_pass));
-            }
-
-            let mut component_values = serde_json::Map::new();
-            for reading in &readings {
-                if let Some(name) = reading.get("component").and_then(|v| v.as_str()) {
-                    let value = reading
-                        .get("value")
-                        .cloned()
-                        .unwrap_or(serde_json::json!(0.0));
-                    component_values.insert(name.to_string(), value);
-                }
-            }
-            plc_component_values = serde_json::Value::Object(component_values);
-            let _ = save_plc_result(execution_id, plc_pass, serde_json::json!(readings));
         }
-        Err(e) => {
-            errors.push(format!("PLC no conectado: {}", e));
-            let _ = save_plc_result(execution_id, false, serde_json::json!([]));
-        }
-    }
     } else {
         errors.push("PLC no habilitado. Actívelo en Configuración → PLC.".to_string());
         let _ = save_plc_result(execution_id, false, serde_json::json!([]));

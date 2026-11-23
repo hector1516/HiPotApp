@@ -1302,7 +1302,7 @@ function SystemTab() {
           Usa <b>DB100.IB0</b>, bit <b>0</b>: el PLC puente copia ahí la entrada del paro.
           La copia debe ser directa: liberado = 1, presionado = 0; en la app selecciona <b>NC</b>.
           Si el PLC usa <b>NOT "E-STOP"</b>, selecciona <b>NO</b>.
-          El error de voltaje está en <b>DB1001.DBX2.5</b>.
+          El PLC puente copia el estado del paro en DB100.IB0, bit 0.
         </div>
       </div>
       <div className="card" style={{ marginBottom: 10 }}>

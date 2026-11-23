@@ -48,3 +48,5 @@ relevant.txt
 manual_content.txt
 extract.ps1
 *.spec
+
+.superpowers/
