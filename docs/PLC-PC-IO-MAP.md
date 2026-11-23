@@ -138,3 +138,19 @@ Agregar a `DB100`:
 Sigue pendiente agregar a `DB100` el heartbeat/watchdog y exportar `FC1`/`OB1`.
 Sin watchdog, una PC colgada puede dejar salidas energizadas. No liberar a
 producci?n hasta probar en banco.
+
+## Editor restringido de l?gica (v1.1.0)
+
+- Pantalla **L?gica ? Modo edici?n** (solo administrador, secuencia detenida).
+- Configuraci?n: `logic_flow_draft` / `logic_flow_published` (JSON),
+  `logic_flow_draft_version`, `logic_flow_published_version` y marcas de
+  fecha/usuario.
+- El editor permite: tiempo de estabilizaci?n, tiempo por defecto por componente,
+  tolerancia de voltaje, parada al primer fallo, orden de componentes y tiempo
+  individual por componente (0 = usar tiempo de receta).
+- Las condiciones (paro, calibraci?n, voltaje) y las acciones (salidas) son
+  predefinidas. Las salidas se asignan en **Configuraci?n ? Salidas**.
+- **Guardar borrador** incrementa la versi?n del borrador.
+- **Publicar** valida el borrador y lo copia a la configuraci?n publicada; el
+  pr?ximo ciclo usa esa versi?n. Registra `logic_flow_publish` en `app_logs`.
+- No se puede guardar ni publicar con una secuencia en curso.
