@@ -5,13 +5,12 @@
 //! salidas se resuelven contra el mapa configurable de salidas.
 
 use crate::calibration::{AnalogCalibration, CHANNEL_NAMES};
+use crate::logic_flow::LogicFlow;
 use crate::output_map::OutputMap;
 use crate::plc::{self, PlcClient};
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
-
-const VOLTAGE_TOLERANCE: f64 = 0.05;
 
 #[derive(Clone, Debug)]
 pub struct SequenceOptions {
@@ -20,6 +19,7 @@ pub struct SequenceOptions {
     pub estop_nc: bool,
     pub calibration: AnalogCalibration,
     pub output_map: OutputMap,
+    pub logic: LogicFlow,
 }
 
 #[derive(Clone, Debug)]
@@ -52,9 +52,9 @@ fn component_output(name: &str) -> Option<&'static str> {
     }
 }
 
-fn voltage_in_tolerance(measured: f64, expected: f64) -> bool {
-    measured >= expected * (1.0 - VOLTAGE_TOLERANCE)
-        && measured <= expected * (1.0 + VOLTAGE_TOLERANCE)
+fn voltage_in_tolerance(measured: f64, expected: f64, tolerance_pct: f64) -> bool {
+    let tolerance = tolerance_pct / 100.0;
+    measured >= expected * (1.0 - tolerance) && measured <= expected * (1.0 + tolerance)
 }
 
 fn range_for(max_current: f64) -> (&'static str, &'static str, f64) {
@@ -181,6 +181,16 @@ pub fn run_electrical(
         );
         return Err(format!("Mapa de salidas inválido: {}", e));
     }
+    if let Err(e) = opts.logic.validate() {
+        emit_logic(
+            app,
+            "PREPARACION",
+            "Preparar salidas",
+            "fail",
+            json!({ "message": format!("Flujo de lógica inválido: {}", e) }),
+        );
+        return Err(format!("Flujo de lógica inválido: {}", e));
+    }
 
     output_off_all(client, &opts.output_map);
     if estop_active(client, opts.estop_nc)? {
@@ -230,8 +240,8 @@ pub fn run_electrical(
         }),
     );
 
-    // Estabilización de voltaje: 2.4 s, como el PLC anterior.
-    let stabilize_ms = 2400u64;
+    // Estabilización de voltaje: valor publicado por el editor de lógica.
+    let stabilize_ms = opts.logic.stabilize_ms;
     emit_logic(
         app,
         "ESTABILIZAR",
@@ -245,7 +255,11 @@ pub fn run_electrical(
         .calibration
         .to_eng("IA4", v_raw)
         .ok_or_else(|| "Canal IA4 sin calibración válida".to_string())?;
-    let voltage_ok = voltage_in_tolerance(measured_voltage, expected_voltage);
+    let voltage_ok = voltage_in_tolerance(
+        measured_voltage,
+        expected_voltage,
+        opts.logic.voltage_tolerance_pct,
+    );
     emit_logic(
         app,
         "MEDIR_VOLTAJE",
@@ -299,15 +313,23 @@ pub fn run_electrical(
         });
     }
 
-    for comp in components.as_array().cloned().unwrap_or_default() {
-        let name = comp
-            .get("name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_uppercase();
-        if name.is_empty() || !comp.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true) {
+    let recipe_components = components.as_array().cloned().unwrap_or_default();
+    for step in &opts.logic.components {
+        if !step.enabled {
             continue;
         }
+        let Some(comp) = recipe_components.iter().find(|comp| {
+            comp.get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .eq_ignore_ascii_case(&step.name)
+        }) else {
+            continue;
+        };
+        if !comp.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true) {
+            continue;
+        }
+        let name = step.name.clone();
         let Some(output) = component_output(&name) else {
             errors.push(format!("Componente sin salida configurada: {}", name));
             continue;
@@ -362,7 +384,15 @@ pub fn run_electrical(
             }),
         );
 
-        let test_time = if opts.test_time > 0.0 { opts.test_time } else { 10.0 };
+        let test_time = if step.test_time_ms > 0 {
+            step.test_time_ms as f64 / 1000.0
+        } else if opts.logic.default_test_time_ms > 0 {
+            opts.logic.default_test_time_ms as f64 / 1000.0
+        } else if opts.test_time > 0.0 {
+            opts.test_time
+        } else {
+            10.0
+        };
         emit_logic(
             app,
             "MIDIENDO",
@@ -404,7 +434,7 @@ pub fn run_electrical(
         plc::write_bridge_output(client, range_output, false)?;
         plc::write_bridge_output(client, output, false)?;
         component_results.push(ComponentResult {
-            name,
+            name: name.clone(),
             value,
             raw,
             min,
@@ -412,6 +442,10 @@ pub fn run_electrical(
             pass,
             range,
         });
+        if !pass && opts.logic.stop_on_fail {
+            errors.push(format!("{} fuera de rango; secuencia detenida", name));
+            break;
+        }
     }
 
     plc::write_bridge_output(client, opts.output_map.q("KM2_120")?, false)?;
@@ -489,13 +523,14 @@ mod tests {
     }
 
     #[test]
-    fn voltage_tolerance_is_five_percent() {
-        assert!(voltage_in_tolerance(120.0, 120.0));
-        assert!(voltage_in_tolerance(126.0, 120.0));
-        assert!(!voltage_in_tolerance(127.0, 120.0));
-        assert!(!voltage_in_tolerance(0.0, 220.0));
-        assert!(voltage_in_tolerance(210.0, 220.0));
-        assert!(!voltage_in_tolerance(208.0, 220.0));
+    fn voltage_tolerance_uses_configured_percent() {
+        assert!(voltage_in_tolerance(120.0, 120.0, 5.0));
+        assert!(voltage_in_tolerance(126.0, 120.0, 5.0));
+        assert!(!voltage_in_tolerance(127.0, 120.0, 5.0));
+        assert!(!voltage_in_tolerance(0.0, 220.0, 5.0));
+        assert!(voltage_in_tolerance(210.0, 220.0, 5.0));
+        assert!(!voltage_in_tolerance(208.0, 220.0, 5.0));
+        assert!(voltage_in_tolerance(126.0, 120.0, 7.0));
     }
 
     #[test]

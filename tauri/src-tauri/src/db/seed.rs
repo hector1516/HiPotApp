@@ -31,6 +31,21 @@ pub const DEFAULT_CONFIGS: &[(&str, &str)] = &[
     ("output_map_version", "0"),
     ("output_map_updated_at", ""),
     ("output_map_updated_by", ""),
+    // Flujo de lógica restringido (borrador y publicado)
+    (
+        "logic_flow_published",
+        r#"{"stabilize_ms":2400,"default_test_time_ms":0,"voltage_tolerance_pct":5.0,"stop_on_fail":true,"components":[{"name":"FAN","enabled":true,"test_time_ms":0},{"name":"DOOR","enabled":true,"test_time_ms":0},{"name":"FRAME","enabled":true,"test_time_ms":0},{"name":"DRAIN","enabled":true,"test_time_ms":0},{"name":"DEFROST","enabled":true,"test_time_ms":0},{"name":"LIGHT","enabled":true,"test_time_ms":0}]}"#,
+    ),
+    ("logic_flow_published_version", "0"),
+    ("logic_flow_published_at", ""),
+    ("logic_flow_published_by", ""),
+    (
+        "logic_flow_draft",
+        r#"{"stabilize_ms":2400,"default_test_time_ms":0,"voltage_tolerance_pct":5.0,"stop_on_fail":true,"components":[{"name":"FAN","enabled":true,"test_time_ms":0},{"name":"DOOR","enabled":true,"test_time_ms":0},{"name":"FRAME","enabled":true,"test_time_ms":0},{"name":"DRAIN","enabled":true,"test_time_ms":0},{"name":"DEFROST","enabled":true,"test_time_ms":0},{"name":"LIGHT","enabled":true,"test_time_ms":0}]}"#,
+    ),
+    ("logic_flow_draft_version", "0"),
+    ("logic_flow_draft_at", ""),
+    ("logic_flow_draft_by", ""),
     // Hipot
     ("hipot_port", "COM3"),
     ("hipot_baud", "38400"),
@@ -128,6 +143,12 @@ mod tests {
             Some("0")
         );
         assert!(crate::db::config::get(&conn, "output_map").is_some());
+        assert_eq!(
+            crate::db::config::get(&conn, "logic_flow_published_version").as_deref(),
+            Some("0")
+        );
+        assert!(crate::db::config::get(&conn, "logic_flow_published").is_some());
+        assert!(crate::db::config::get(&conn, "logic_flow_draft").is_some());
         let admins: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM users WHERE username='ADMIN'",

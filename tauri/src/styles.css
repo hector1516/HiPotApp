@@ -1623,3 +1623,23 @@ body.kb-open .admin-content {
   .logic-layout { grid-template-columns: 1fr; }
   .logic-flow { max-height: none; }
 }
+
+/* --- Editor restringido de lógica --- */
+.logic-editor-title {
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.logic-editor-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+.logic-editor-field .input { width: 100%; }

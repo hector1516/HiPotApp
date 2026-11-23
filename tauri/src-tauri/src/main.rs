@@ -6,6 +6,7 @@ mod calibration;
 mod config_io;
 mod db;
 mod hipot;
+mod logic_flow;
 mod output_map;
 mod pc_engine;
 mod plc;
@@ -358,6 +359,121 @@ fn output_map_save(payload: serde_json::Value, user: String) -> String {
             "PLC",
             "output_map_save",
             Some(&detail),
+            None,
+            Some(&stored),
+            None,
+            None,
+            true,
+            None,
+        );
+    }
+    result
+}
+
+// --- Flujo de lógica restringido ---
+
+fn config_text(config: &serde_json::Value, key: &str) -> String {
+    config
+        .get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+#[tauri::command]
+fn logic_flow_get() -> serde_json::Value {
+    let config = get_config();
+    let draft = logic_flow::LogicFlow::from_config_key(&config, "logic_flow_draft");
+    let published = logic_flow::LogicFlow::from_config(&config);
+    serde_json::json!({
+        "draft": draft.to_json(),
+        "published": published.to_json(),
+        "defaults": logic_flow::LogicFlow::defaults().to_json(),
+        "draft_version": config_text(&config, "logic_flow_draft_version"),
+        "published_version": config_text(&config, "logic_flow_published_version"),
+        "draft_at": config_text(&config, "logic_flow_draft_at"),
+        "draft_by": config_text(&config, "logic_flow_draft_by"),
+        "published_at": config_text(&config, "logic_flow_published_at"),
+        "published_by": config_text(&config, "logic_flow_published_by"),
+        "test_running": TEST_RUNNING.load(Ordering::SeqCst),
+    })
+}
+
+#[tauri::command]
+fn logic_flow_save_draft(payload: serde_json::Value, user: String) -> String {
+    if TEST_RUNNING.load(Ordering::SeqCst) {
+        return "error: No se puede editar la lógica con una secuencia en curso".to_string();
+    }
+    let flow = match logic_flow::LogicFlow::validate_payload(&payload) {
+        Ok(flow) => flow,
+        Err(e) => return format!("error: {}", e),
+    };
+    let config = get_config();
+    let version = calibration::next_version(&config_text(&config, "logic_flow_draft_version"));
+    let now = chrono::Local::now()
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string();
+    let user = if user.trim().is_empty() {
+        "ADMIN".to_string()
+    } else {
+        user.trim().to_string()
+    };
+    let stored = flow.storage_json();
+    let result = set_config(serde_json::json!({
+        "logic_flow_draft": stored,
+        "logic_flow_draft_version": version.to_string(),
+        "logic_flow_draft_at": now,
+        "logic_flow_draft_by": user,
+    }));
+    if result == "saved" {
+        let _ = db::repo::log_add(
+            "INFO",
+            "PLC",
+            "logic_flow_save_draft",
+            Some(&format!("Borrador de lógica v{} guardado por {}", version, user)),
+            None,
+            Some(&stored),
+            None,
+            None,
+            true,
+            None,
+        );
+    }
+    result
+}
+
+#[tauri::command]
+fn logic_flow_publish(user: String) -> String {
+    if TEST_RUNNING.load(Ordering::SeqCst) {
+        return "error: No se puede publicar lógica con una secuencia en curso".to_string();
+    }
+    let config = get_config();
+    let draft = logic_flow::LogicFlow::from_config_key(&config, "logic_flow_draft");
+    if let Err(e) = draft.validate() {
+        return format!("error: {}", e);
+    }
+    let version = calibration::next_version(&config_text(&config, "logic_flow_published_version"));
+    let now = chrono::Local::now()
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string();
+    let user = if user.trim().is_empty() {
+        "ADMIN".to_string()
+    } else {
+        user.trim().to_string()
+    };
+    let stored = draft.storage_json();
+    let result = set_config(serde_json::json!({
+        "logic_flow_published": stored,
+        "logic_flow_published_version": version.to_string(),
+        "logic_flow_published_at": now,
+        "logic_flow_published_by": user,
+    }));
+    if result == "saved" {
+        let _ = db::repo::log_add(
+            "INFO",
+            "PLC",
+            "logic_flow_publish",
+            Some(&format!("Lógica v{} publicada por {}", version, user)),
             None,
             Some(&stored),
             None,
@@ -1215,6 +1331,7 @@ fn run_test_cycle(
                     estop_nc,
                     calibration: calibration::AnalogCalibration::from_config(&config),
                     output_map: output_map.clone(),
+                    logic: logic_flow::LogicFlow::from_config(&config),
                 };
                 match pc_engine::run_electrical(&app, &mut client, &components, &opts) {
                     Ok(result) => {
@@ -1962,6 +2079,9 @@ fn main() {
             calibration_save,
             output_map_get,
             output_map_save,
+            logic_flow_get,
+            logic_flow_save_draft,
+            logic_flow_publish,
             test_running,
             plc_set_mode,
             plc_get_mode,
