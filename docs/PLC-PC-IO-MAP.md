@@ -148,6 +148,9 @@ producci?n hasta probar en banco.
 - El editor permite: tiempo de estabilizaci?n, tiempo por defecto por componente,
   tolerancia de voltaje, parada al primer fallo, orden de componentes y tiempo
   individual por componente (0 = usar tiempo de receta).
+- La receta decide qu? componentes se prueban; el flujo no puede deshabilitarlos.
+  El flujo solo ordena y ajusta sus tiempos. Una receta con componente habilitado
+  siempre se prueba.
 - Las condiciones (paro, calibraci?n, voltaje) y las acciones (salidas) son
   predefinidas. Las salidas se asignan en **Configuraci?n ? Salidas**.
 - **Guardar borrador** incrementa la versi?n del borrador.
