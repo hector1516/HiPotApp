@@ -6,13 +6,31 @@ mod calibration;
 mod config_io;
 mod db;
 mod hipot;
+mod output_map;
 mod pc_engine;
 mod plc;
 
 use tauri::{Emitter, Manager};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 static CONFIG_CACHE: OnceLock<Mutex<serde_json::Value>> = OnceLock::new();
+static TEST_RUNNING: AtomicBool = AtomicBool::new(false);
+
+struct TestRunningGuard;
+
+impl TestRunningGuard {
+    fn new() -> Self {
+        TEST_RUNNING.store(true, Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for TestRunningGuard {
+    fn drop(&mut self) {
+        TEST_RUNNING.store(false, Ordering::SeqCst);
+    }
+}
 
 fn default_config_json() -> serde_json::Value {
     let mut map = serde_json::Map::new();
@@ -242,6 +260,103 @@ fn calibration_save(payload: serde_json::Value, user: String) -> String {
             "INFO",
             "PLC",
             "calibration_save",
+            Some(&detail),
+            None,
+            Some(&stored),
+            None,
+            None,
+            true,
+            None,
+        );
+    }
+    result
+}
+
+// --- Mapa configurable de salidas ---
+
+#[tauri::command]
+fn test_running() -> bool {
+    TEST_RUNNING.load(Ordering::SeqCst)
+}
+
+#[tauri::command]
+fn output_map_get() -> serde_json::Value {
+    let config = get_config();
+    let map = output_map::OutputMap::from_config(&config);
+    let mut out = map.to_json();
+    if let Some(obj) = out.as_object_mut() {
+        obj.insert(
+            "version".to_string(),
+            serde_json::json!(config
+                .get("output_map_version")
+                .and_then(|v| v.as_str())
+                .unwrap_or("0")),
+        );
+        obj.insert(
+            "updated_at".to_string(),
+            serde_json::json!(config
+                .get("output_map_updated_at")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")),
+        );
+        obj.insert(
+            "updated_by".to_string(),
+            serde_json::json!(config
+                .get("output_map_updated_by")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")),
+        );
+        obj.insert("valid".to_string(), serde_json::json!(map.validate().is_ok()));
+        obj.insert(
+            "logical_outputs".to_string(),
+            serde_json::json!(output_map::LOGICAL_OUTPUTS
+                .iter()
+                .map(|(key, label, default)| serde_json::json!({
+                    "key": key, "label": label, "default": default
+                }))
+                .collect::<Vec<_>>()),
+        );
+    }
+    out
+}
+
+#[tauri::command]
+fn output_map_save(payload: serde_json::Value, user: String) -> String {
+    if TEST_RUNNING.load(Ordering::SeqCst) {
+        return "error: No se puede editar el mapa con una secuencia en curso".to_string();
+    }
+    let map = match output_map::OutputMap::validate_payload(&payload) {
+        Ok(map) => map,
+        Err(e) => return format!("error: {}", e),
+    };
+    let config = get_config();
+    let version = calibration::next_version(
+        config
+            .get("output_map_version")
+            .and_then(|v| v.as_str())
+            .unwrap_or("0"),
+    );
+    let now = chrono::Local::now()
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string();
+    let user = if user.trim().is_empty() {
+        "ADMIN".to_string()
+    } else {
+        user.trim().to_string()
+    };
+    let stored = map.storage_json();
+    let result = set_config(serde_json::json!({
+        "output_map": stored,
+        "output_map_version": version.to_string(),
+        "output_map_updated_at": now,
+        "output_map_updated_by": user,
+    }));
+    if result == "saved" {
+        let detail = format!("Mapa de salidas v{} guardado por {}", version, user);
+        let _ = db::repo::log_add(
+            "INFO",
+            "PLC",
+            "output_map_save",
             Some(&detail),
             None,
             Some(&stored),
@@ -934,6 +1049,7 @@ fn run_test_cycle(
     voltage: f64,
     components: serde_json::Value,
 ) -> serde_json::Value {
+    let _running = TestRunningGuard::new();
     let started = std::time::Instant::now();
     let mut errors: Vec<String> = Vec::new();
     let mut hipot_parsed = serde_json::json!({});
@@ -1051,11 +1167,13 @@ fn run_test_cycle(
                     .and_then(|v| v.as_str())
                     .unwrap_or("1")
                     != "0";
+                let output_map = output_map::OutputMap::from_config(&config);
                 let opts = pc_engine::SequenceOptions {
                     voltage,
                     test_time: hipot_time,
                     estop_nc,
                     calibration: calibration::AnalogCalibration::from_config(&config),
+                    output_map: output_map.clone(),
                 };
                 match pc_engine::run_electrical(&app, &mut client, &components, &opts) {
                     Ok(result) => {
@@ -1074,9 +1192,12 @@ fn run_test_cycle(
                     Err(e) => {
                         errors.push(format!("Secuencia PC: {}", e));
                         let _ = hipot_test("RESET".to_string());
-                        for q in ["Q0.0", "Q0.1", "Q0.2", "Q0.3", "Q0.4", "Q0.5", "Q0.6", "Q0.7",
-                                  "Q1.0", "Q1.1", "Q2.0"] {
-                            let _ = plc::write_bridge_output(&mut client, q, false);
+                        let mut addresses = output_map.all_addresses();
+                        addresses.extend(output_map::OutputMap::defaults().all_addresses());
+                        addresses.sort();
+                        addresses.dedup();
+                        for q in addresses {
+                            let _ = plc::write_bridge_output(&mut client, &q, false);
                         }
                         let _ = save_plc_result(execution_id, false, serde_json::json!([]));
                     }
@@ -1787,6 +1908,9 @@ fn main() {
             plc_raw_monitor,
             calibration_get,
             calibration_save,
+            output_map_get,
+            output_map_save,
+            test_running,
             plc_set_mode,
             plc_get_mode,
             plc_test_component,

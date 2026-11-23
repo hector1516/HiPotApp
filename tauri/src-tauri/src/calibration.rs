@@ -8,7 +8,6 @@ use serde_json::{json, Map, Value};
 
 pub const ADC_FULL_SCALE: f64 = 27648.0;
 pub const CHANNEL_NAMES: [&str; 4] = ["IA1", "IA2", "IA3", "IA4"];
-pub const DEFAULT_FULL_SCALE: [f64; 4] = [1.0, 10.0, 20.0, 220.0];
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ChannelCalibration {

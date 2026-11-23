@@ -1,10 +1,11 @@
 //! Motor de secuencia eléctrica en la PC sobre el PLC puente DB100.
 //!
 //! El PLC solo copia E/S. Toda la secuencia, rangos, tiempos y evaluación
-//! se ejecutan aquí. Las analógicas se convierten provisionalmente con
-//! fondo de escala; la pantalla de calibración las ajustará después.
+//! se ejecutan aquí. Las analógicas usan la calibración de dos puntos y las
+//! salidas se resuelven contra el mapa configurable de salidas.
 
 use crate::calibration::{AnalogCalibration, CHANNEL_NAMES};
+use crate::output_map::OutputMap;
 use crate::plc::{self, PlcClient};
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
@@ -18,6 +19,7 @@ pub struct SequenceOptions {
     pub test_time: f64,
     pub estop_nc: bool,
     pub calibration: AnalogCalibration,
+    pub output_map: OutputMap,
 }
 
 #[derive(Clone, Debug)]
@@ -40,23 +42,23 @@ struct ComponentResult {
 
 fn component_output(name: &str) -> Option<&'static str> {
     match name {
-        "FAN" => Some("Q0.5"),
-        "DOOR" => Some("Q1.0"),
-        "FRAME" => Some("Q0.7"),
-        "DRAIN" => Some("Q1.1"),
-        "DEFROST" => Some("Q2.0"),
-        "LIGHT" => Some("Q0.6"),
+        "FAN" => Some("FAN"),
+        "DOOR" => Some("DOOR"),
+        "FRAME" => Some("FRAME"),
+        "DRAIN" => Some("DRAIN"),
+        "DEFROST" => Some("HEATERS"),
+        "LIGHT" => Some("LIGHT"),
         _ => None,
     }
 }
 
 fn range_for(max_current: f64) -> (&'static str, &'static str, f64) {
     if max_current <= 1.0 {
-        ("A", "Q0.3", 1.0)
+        ("A", "RANGE_1A", 1.0)
     } else if max_current <= 10.0 {
-        ("B", "Q0.4", 10.0)
+        ("B", "RANGE_10A", 10.0)
     } else {
-        ("C", "Q0.2", 20.0)
+        ("C", "RANGE_20A", 20.0)
     }
 }
 
@@ -95,10 +97,9 @@ fn missing_calibrations(cal: &AnalogCalibration, components: &Value) -> Vec<Stri
         .collect()
 }
 
-fn output_off_all(client: &mut PlcClient) {
-    for q in ["Q0.0", "Q0.1", "Q0.2", "Q0.3", "Q0.4", "Q0.5", "Q0.6", "Q0.7",
-              "Q1.0", "Q1.1", "Q2.0"] {
-        let _ = plc::write_bridge_output(client, q, false);
+fn output_off_all(client: &mut PlcClient, map: &OutputMap) {
+    for q in map.all_addresses() {
+        let _ = plc::write_bridge_output(client, &q, false);
     }
 }
 
@@ -150,9 +151,13 @@ pub fn run_electrical(
     let mut errors: Vec<String> = Vec::new();
     let mut component_results: Vec<ComponentResult> = Vec::new();
 
-    output_off_all(client);
+    opts.output_map
+        .validate()
+        .map_err(|e| format!("Mapa de salidas inválido: {}", e))?;
+
+    output_off_all(client, &opts.output_map);
     if estop_active(client, opts.estop_nc)? {
-        output_off_all(client);
+        output_off_all(client, &opts.output_map);
         return Err("Paro de emergencia activo antes de iniciar la secuencia".to_string());
     }
 
@@ -166,8 +171,10 @@ pub fn run_electrical(
 
     // Selección de voltaje. El PLC antiguo usaba KM2=120 y KM1=220.
     let use_120 = opts.voltage < 150.0;
-    plc::write_bridge_output(client, "Q0.0", use_120)?;
-    plc::write_bridge_output(client, "Q0.1", !use_120)?;
+    let km2 = opts.output_map.q("KM2_120")?;
+    let km1 = opts.output_map.q("KM1_220")?;
+    plc::write_bridge_output(client, km2, use_120)?;
+    plc::write_bridge_output(client, km1, !use_120)?;
     let expected_voltage = if use_120 { 120.0 } else { 220.0 };
 
     // Estabilización de voltaje: 2.4 s, como el PLC anterior.
@@ -195,7 +202,9 @@ pub fn run_electrical(
         };
         let min = comp.get("min").and_then(|v| v.as_f64()).unwrap_or(0.0);
         let max = comp.get("max").and_then(|v| v.as_f64()).unwrap_or(0.0);
-        let (range, range_output, _full_scale) = range_for(max);
+        let (range, range_key, _full_scale) = range_for(max);
+        let range_output = opts.output_map.q(range_key)?;
+        let output = opts.output_map.q(output)?;
         let channel = match range {
             "A" => "IA1",
             "B" => "IA2",
@@ -203,7 +212,7 @@ pub fn run_electrical(
         };
 
         if estop_active(client, opts.estop_nc)? {
-            output_off_all(client);
+            output_off_all(client, &opts.output_map);
             return Err("Paro de emergencia activo durante la secuencia".to_string());
         }
 
@@ -236,8 +245,8 @@ pub fn run_electrical(
         });
     }
 
-    plc::write_bridge_output(client, "Q0.0", false)?;
-    plc::write_bridge_output(client, "Q0.1", false)?;
+    plc::write_bridge_output(client, opts.output_map.q("KM2_120")?, false)?;
+    plc::write_bridge_output(client, opts.output_map.q("KM1_220")?, false)?;
 
     let mut values = serde_json::Map::new();
     let mut readings = Vec::new();
@@ -295,11 +304,19 @@ mod tests {
 
     #[test]
     fn selects_ranges_by_max_current() {
-        assert_eq!(range_for(1.0), ("A", "Q0.3", 1.0));
-        assert_eq!(range_for(0.8), ("A", "Q0.3", 1.0));
-        assert_eq!(range_for(10.0), ("B", "Q0.4", 10.0));
-        assert_eq!(range_for(20.0), ("C", "Q0.2", 20.0));
-        assert_eq!(range_for(25.0), ("C", "Q0.2", 20.0));
+        assert_eq!(range_for(1.0), ("A", "RANGE_1A", 1.0));
+        assert_eq!(range_for(0.8), ("A", "RANGE_1A", 1.0));
+        assert_eq!(range_for(10.0), ("B", "RANGE_10A", 10.0));
+        assert_eq!(range_for(20.0), ("C", "RANGE_20A", 20.0));
+        assert_eq!(range_for(25.0), ("C", "RANGE_20A", 20.0));
+    }
+
+    #[test]
+    fn maps_components_to_logical_outputs() {
+        assert_eq!(component_output("FAN"), Some("FAN"));
+        assert_eq!(component_output("DEFROST"), Some("HEATERS"));
+        assert_eq!(component_output("LIGHT"), Some("LIGHT"));
+        assert_eq!(component_output("UNKNOWN"), None);
     }
 
     #[test]

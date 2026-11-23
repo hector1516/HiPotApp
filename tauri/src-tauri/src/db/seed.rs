@@ -23,6 +23,14 @@ pub const DEFAULT_CONFIGS: &[(&str, &str)] = &[
     ("analog_calibration_version", "0"),
     ("analog_calibration_updated_at", ""),
     ("analog_calibration_updated_by", ""),
+    // Mapa de salidas lógicas ↔ bits Q (precarga de las salidas actuales)
+    (
+        "output_map",
+        r#"{"outputs":{"KM2_120":"Q0.0","KM1_220":"Q0.1","RANGE_20A":"Q0.2","RANGE_1A":"Q0.3","RANGE_10A":"Q0.4","FAN":"Q0.5","LIGHT":"Q0.6","FRAME":"Q0.7","DOOR":"Q1.0","DRAIN":"Q1.1","HEATERS":"Q2.0"}}"#,
+    ),
+    ("output_map_version", "0"),
+    ("output_map_updated_at", ""),
+    ("output_map_updated_by", ""),
     // Hipot
     ("hipot_port", "COM3"),
     ("hipot_baud", "38400"),
@@ -115,6 +123,11 @@ mod tests {
             Some("0")
         );
         assert!(crate::db::config::get(&conn, "analog_calibration").is_some());
+        assert_eq!(
+            crate::db::config::get(&conn, "output_map_version").as_deref(),
+            Some("0")
+        );
+        assert!(crate::db::config::get(&conn, "output_map").is_some());
         let admins: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM users WHERE username='ADMIN'",

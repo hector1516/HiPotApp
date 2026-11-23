@@ -8,12 +8,12 @@ import { LabelEditor, LObj, objsToTemplate, templateToObjs } from '../components
 import { askConfirm, notify } from '../components/Feedback';
 import { SafetyNote } from '../components/SafetyNote';
 
-const TABS = ['Usuarios', 'Recetas', 'PLC', 'Calibración', 'Hipot', 'BD', 'Etiquetas', 'Logs', 'IO', 'Manual', 'Sistema'] as const;
+const TABS = ['Usuarios', 'Recetas', 'PLC', 'Calibración', 'Salidas', 'Hipot', 'BD', 'Etiquetas', 'Logs', 'IO', 'Manual', 'Sistema'] as const;
 type Tab = (typeof TABS)[number];
 
 const NAV_GROUPS: { label: string; tabs: Tab[] }[] = [
   { label: 'Operación', tabs: ['Recetas', 'Etiquetas'] },
-  { label: 'Hardware', tabs: ['PLC', 'Calibración', 'IO', 'Hipot', 'Manual'] },
+  { label: 'Hardware', tabs: ['PLC', 'Calibración', 'Salidas', 'IO', 'Hipot', 'Manual'] },
   { label: 'Datos', tabs: ['BD'] },
   { label: 'Sistema', tabs: ['Usuarios', 'Logs', 'Sistema'] },
 ];
@@ -94,6 +94,7 @@ export function AdminPanel({ onBack, adminBatch }: { onBack: () => void; adminBa
           {tab === 'Recetas' && <RecipesTab adminBatch={adminBatch} />}
           {tab === 'PLC' && <PlcTab />}
           {tab === 'Calibración' && <CalibrationTab adminBatch={adminBatch} />}
+          {tab === 'Salidas' && <OutputMapTab adminBatch={adminBatch} />}
           {tab === 'Hipot' && <HipotTab />}
           {tab === 'BD' && <DbTab />}
           {tab === 'Etiquetas' && <LabelsTab />}
@@ -933,6 +934,190 @@ function CalibrationTab({ adminBatch }: { adminBatch?: string }) {
       </div>
     </div>
   );
+}
+
+type OutputMapData = {
+  outputs: Record<string, string>;
+  version?: string | number;
+  updated_at?: string;
+  updated_by?: string;
+  valid?: boolean;
+  logical_outputs?: { key: string; label: string; default: string }[];
+};
+
+const Q_OPTIONS = Array.from({ length: 4 }, (_, byte) =>
+  Array.from({ length: 8 }, (_, bit) => `Q${byte}.${bit}`),
+).flat();
+
+const FALLBACK_LOGICAL_OUTPUTS = [
+  { key: 'KM2_120', label: 'KM2 · 120 V', default: 'Q0.0' },
+  { key: 'KM1_220', label: 'KM1 · 220 V', default: 'Q0.1' },
+  { key: 'RANGE_20A', label: 'K2/A4 · rango 0–20 A', default: 'Q0.2' },
+  { key: 'RANGE_1A', label: 'K8/A2 · rango 0–1 A', default: 'Q0.3' },
+  { key: 'RANGE_10A', label: 'K9/A3 · rango 0–10 A', default: 'Q0.4' },
+  { key: 'FAN', label: 'FAN', default: 'Q0.5' },
+  { key: 'LIGHT', label: 'LIGHT', default: 'Q0.6' },
+  { key: 'FRAME', label: 'FRAME', default: 'Q0.7' },
+  { key: 'DOOR', label: 'DOOR', default: 'Q1.0' },
+  { key: 'DRAIN', label: 'DRAIN', default: 'Q1.1' },
+  { key: 'HEATERS', label: 'HEATERS / DEFROST', default: 'Q2.0' },
+];
+
+function OutputMapTab({ adminBatch }: { adminBatch?: string }) {
+  const [map, setMap] = useState<OutputMapData | null>(null);
+  const [msg, setMsg] = useState('');
+  const [running, setRunning] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const load = async () => {
+    try {
+      const r = await invoke<OutputMapData>('output_map_get');
+      const logical = r.logical_outputs?.length ? r.logical_outputs : FALLBACK_LOGICAL_OUTPUTS;
+      const outputs: Record<string, string> = {};
+      for (const item of logical) {
+        outputs[item.key] = r.outputs?.[item.key] || item.default;
+      }
+      setMap({ ...r, outputs, logical_outputs: logical });
+    } catch (e: any) {
+      setMsg(`Error al cargar mapa: ${String(e?.message ?? e)}`);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    const tick = async () => {
+      try {
+        setRunning(await invoke<boolean>('test_running'));
+      } catch {
+        // Si no se puede leer, se conserva el estado anterior.
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 1200);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const setOutput = (key: string, q: string) => {
+    setMap(prev => prev ? { ...prev, outputs: { ...prev.outputs, [key]: q } } : prev);
+  };
+
+  const counts: Record<string, string[]> = {};
+  if (map) {
+    for (const [key, q] of Object.entries(map.outputs)) {
+      counts[q] = [...(counts[q] || []), key];
+    }
+  }
+  const duplicates = Object.entries(counts).filter(([, keys]) => keys.length > 1);
+
+  const restoreDefaults = () => {
+    if (!map) return;
+    const outputs: Record<string, string> = {};
+    for (const item of map.logical_outputs?.length ? map.logical_outputs : FALLBACK_LOGICAL_OUTPUTS) {
+      outputs[item.key] = item.default;
+    }
+    setMap({ ...map, outputs });
+    setMsg('Valores actuales precargados. Guarde para aplicarlos.');
+  };
+
+  const save = async () => {
+    if (!map) return;
+    setBusy(true);
+    setMsg('');
+    try {
+      const r = await invoke<string>('output_map_save', {
+        payload: { outputs: map.outputs },
+        user: adminBatch || 'ADMIN',
+      });
+      if (r !== 'saved') throw new Error(r);
+      await load();
+      setMsg('Mapa de salidas guardado y versionado.');
+    } catch (e: any) {
+      setMsg(`No se guardó: ${String(e?.message ?? e)}`);
+    }
+    setBusy(false);
+  };
+
+  const logical = map?.logical_outputs?.length ? map.logical_outputs : FALLBACK_LOGICAL_OUTPUTS;
+
+  return (
+    <div style={{ minWidth: 0 }}>
+      <h2 className="page-title" style={{ marginBottom: 14 }}>Mapa de salidas lógicas ↔ PLC</h2>
+      {msg && <div className="toast-err" style={{ marginBottom: 10 }}>{msg}</div>}
+
+      <div className="card" style={{ marginBottom: 12 }}>
+        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span className={`dot ${running ? 'bad' : 'ok'}`} />
+          <b>{running ? 'Secuencia en curso' : 'Secuencia detenida'}</b>
+          <span className="spacer" />
+          <span className="pill">Versión {String(map?.version ?? '0')}</span>
+          {map?.updated_at && <span style={{ fontSize: 12, color: 'var(--muted)' }}>Actualizado {map.updated_at} por {map.updated_by || 'ADMIN'}</span>}
+        </div>
+        <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>
+          Cada salida lógica se traduce al bit Q configurado. No se permiten bits duplicados.
+          El mapa solo se puede editar con la secuencia detenida; el siguiente ciclo usa la nueva versión.
+          Si una salida queda sin mapear, la secuencia no inicia.
+        </div>
+        {running && (
+          <div style={{ marginTop: 8, color: 'var(--bad)', fontWeight: 700, fontSize: 12 }}>
+            Hay una secuencia en curso. Espere a que termine o deténgala antes de editar.
+          </div>
+        )}
+        {duplicates.length > 0 && (
+          <div style={{ marginTop: 8, color: 'var(--bad)', fontWeight: 700, fontSize: 12 }}>
+            Bits duplicados: {duplicates.map(([q, keys]) => `${q} (${keys.join(', ')})`).join(' · ')}
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ textAlign: 'left', fontSize: 12, color: 'var(--muted)' }}>
+              <th style={{ padding: '6px 8px' }}>Salida lógica</th>
+              <th style={{ padding: '6px 8px' }}>Uso</th>
+              <th style={{ padding: '6px 8px' }}>Bit PLC</th>
+            </tr>
+          </thead>
+          <tbody>
+            {logical.map(item => {
+              const value = map?.outputs?.[item.key] ?? item.default;
+              const duplicated = (counts[value] || []).length > 1;
+              return (
+                <tr key={item.key} style={{ borderTop: '1px solid var(--line)' }}>
+                  <td className="mono" style={{ padding: '7px 8px', fontWeight: 700 }}>{item.key}</td>
+                  <td style={{ padding: '7px 8px', fontSize: 12 }}>{item.label}</td>
+                  <td style={{ padding: '7px 8px' }}>
+                    <select
+                      className="input"
+                      value={value}
+                      disabled={running || busy}
+                      onChange={e => setOutput(item.key, e.target.value)}
+                      style={{ width: 110, borderColor: duplicated ? 'var(--bad)' : undefined }}
+                    >
+                      {!Q_OPTIONS.includes(value) && <option value={value}>{value}</option>}
+                      {Q_OPTIONS.map(q => <option key={q} value={q}>{q}</option>)}
+                    </select>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+        <button className="btn primary" onClick={save} disabled={runtimeBlocked(running, busy, duplicates.length)}>
+          {busy ? 'Guardando…' : 'Guardar mapa'}
+        </button>
+        <button className="btn" onClick={restoreDefaults} disabled={running || busy}>Restaurar valores actuales</button>
+        <button className="btn" onClick={load} disabled={busy}>Recargar</button>
+      </div>
+    </div>
+  );
+}
+
+function runtimeBlocked(running: boolean, busy: boolean, duplicates: number): boolean {
+  return running || busy || duplicates > 0;
 }
 
 function HipotTab() {
