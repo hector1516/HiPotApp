@@ -376,7 +376,7 @@ button, input, select, textarea { font-family: inherit; }
   min-height: 0;
 }
 .live-gauge-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.live-gauge-grid-1 { grid-template-columns: 1fr; justify-items: stretch; }
+.live-gauge-grid-1 { grid-template-columns: repeat(3, minmax(0, 1fr)); justify-items: center; align-content: start; }
 .live-gauge-grid .live-block, .live-gauge-grid > div { max-width: 100%; }
 .live-gauge-grid .live-block { box-shadow: none; }
 .live-gauge-grid > div > div { margin: 0 auto; }
@@ -398,6 +398,31 @@ button, input, select, textarea { font-family: inherit; }
   letter-spacing: .12em;
   text-transform: uppercase;
   color: var(--muted);
+}
+.live-raw-title {
+  margin-top: 6px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.live-raw-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 9px;
+  line-height: 1.25;
+}
+.live-raw-table td {
+  padding: 1px 2px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+}
+.live-raw-table td:last-child {
+  text-align: right;
+  color: var(--text);
+  font-weight: 700;
+  white-space: nowrap;
 }
 .live-metric {
   display: flex;
@@ -447,6 +472,9 @@ button, input, select, textarea { font-family: inherit; }
   .live-page-head p { display: none; }
   .live-block { padding: 7px; }
   .live-gauge-grid { gap: 3px; }
+}
+@media (max-width: 1500px) {
+  .live-block-hipot .live-gauge-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 1100px) {
   .live-dashboard { grid-template-columns: 1fr 1fr; }

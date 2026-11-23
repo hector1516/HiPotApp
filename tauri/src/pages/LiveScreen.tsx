@@ -42,6 +42,22 @@ function Metric({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+function RawRow({ label, value }: { label: string; value: any }) {
+  const text = value === null || value === undefined
+    ? '—'
+    : typeof value === 'boolean'
+      ? (value ? '1' : '0')
+      : typeof value === 'number'
+        ? (Number.isInteger(value) ? String(value) : value.toFixed(2))
+        : String(value);
+  return (
+    <tr>
+      <td>{label}</td>
+      <td className="mono">{text}</td>
+    </tr>
+  );
+}
+
 export function LiveScreen({
   onBack,
   hardwareReady = true,
@@ -54,6 +70,7 @@ export function LiveScreen({
   const hipot = useHipot(hardwareReady);
   const [io, setIo] = useState<IoData | null>(null);
   const [results, setResults] = useState<ResultData>({});
+  const [raw, setRaw] = useState<any>(null);
   const [hipotLive, setHipotLive] = useState<any>({});
   const [printer, setPrinter] = useState<any>({});
   const [last, setLast] = useState('');
@@ -69,13 +86,15 @@ export function LiveScreen({
     const tick = async () => {
       if (busy) return;
       busy = true;
-      const [ioRes, resultRes] = await Promise.allSettled([
+      const [ioRes, resultRes, rawRes] = await Promise.allSettled([
         invoke<IoData>('plc_io_status'),
         invoke<ResultData>('plc_read_results'),
+        invoke<any>('plc_raw_monitor'),
       ]);
       if (!stopped) {
         if (ioRes.status === 'fulfilled') setIo(ioRes.value);
         if (resultRes.status === 'fulfilled') setResults(resultRes.value || {});
+        if (rawRes.status === 'fulfilled') setRaw(rawRes.value || null);
         setLast(new Date().toLocaleTimeString());
       }
       busy = false;
@@ -179,6 +198,25 @@ export function LiveScreen({
               <span className="live-empty">Sin lectura</span>
             )}
           </div>
+          <div className="live-raw-title">DB1000 / DB1001</div>
+          <table className="live-raw-table">
+            <tbody>
+              <RawRow label="DB1000.DBD4 · receta" value={raw?.DB1000?.mask} />
+              <RawRow label="DB1000.DBD8 · FAN" value={raw?.DB1000?.fan_time} />
+              <RawRow label="DB1000.DBD12 · DOOR" value={raw?.DB1000?.door_time} />
+              <RawRow label="DB1000.DBD16 · FRAME" value={raw?.DB1000?.frame_time} />
+              <RawRow label="DB1000.DBD86 · DRAIN" value={raw?.DB1000?.drain_time} />
+              <RawRow label="DB1000.DBD90 · DEFROST" value={raw?.DB1000?.defrost_time} />
+              <RawRow label="DB1000.DBD94 · LIGHT" value={raw?.DB1000?.light_time} />
+              <RawRow label="DB1000.DBD98 · tolerancia" value={raw?.DB1000?.tolerance} />
+              <RawRow label="DB1000.DBX2.5 · start" value={raw?.DB1000?.start} />
+              <RawRow label="DB1000.DBX2.6 · stop" value={raw?.DB1000?.stop} />
+              <RawRow label="DB1001.DBX2.1 · measuring" value={raw?.DB1001?.measuring} />
+              <RawRow label="DB1001.DBX2.2 · finished" value={raw?.DB1001?.finished} />
+              <RawRow label="DB1001.DBX2.4 · estop" value={raw?.DB1001?.estop} />
+              <RawRow label="DB1001.DBX2.5 · error" value={raw?.DB1001?.error} />
+            </tbody>
+          </table>
         </section>
 
         <section className="live-block live-block-components">
@@ -214,9 +252,9 @@ export function LiveScreen({
             <span className={`pill ${hipotOk ? 'on' : 'off'}`}>{hipotOk ? 'Conectado' : 'Sin conexión'}</span>
           </div>
           <div className="live-gauge-grid live-gauge-grid-1">
-            <Gauge label="Voltaje" value={Number(hipotLive.voltage ?? 0)} min={0} max={5000} unit="V" size={92} unknown={!hipotOk || !hipotDataReady} flashOnChange />
-            <Gauge label="Corriente" value={Number(hipotLive.current ?? 0)} min={0} max={20} unit="mA" size={92} unknown={!hipotOk || !hipotDataReady} flashOnChange />
-            <Gauge label="Duración" value={Number(hipotLive.duration ?? 0)} min={0} max={60} unit="s" size={92} unknown={!hipotOk || !hipotDataReady} flashOnChange />
+            <Gauge label="Voltaje" value={Number(hipotLive.voltage ?? 0)} min={0} max={5000} unit="V" size={124} unknown={!hipotOk || !hipotDataReady} flashOnChange />
+            <Gauge label="Corriente" value={Number(hipotLive.current ?? 0)} min={0} max={20} unit="mA" size={124} unknown={!hipotOk || !hipotDataReady} flashOnChange />
+            <Gauge label="Duración" value={Number(hipotLive.duration ?? 0)} min={0} max={60} unit="s" size={124} unknown={!hipotOk || !hipotDataReady} flashOnChange />
           </div>
           <div className="live-divider" />
           <Metric label="Puerto" value={hipot.status?.port ?? '—'} />

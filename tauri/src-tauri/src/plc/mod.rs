@@ -425,6 +425,50 @@ pub fn stop(c: &mut PlcClient) -> Result<(), String> {
     write_bool(c, RECIPE_DB, OFF_START_STOP, false, STOP_BIT)
 }
 
+fn maybe_bool(c: &mut PlcClient, db: i32, offset: i32, bit: i32) -> Value {
+    match read_bool(c, db, offset, bit) {
+        Ok(v) => json!(v),
+        Err(_) => Value::Null,
+    }
+}
+
+fn maybe_real(c: &mut PlcClient, db: i32, offset: i32) -> Value {
+    match read_real(c, db, offset) {
+        Ok(v) => json!(v),
+        Err(_) => Value::Null,
+    }
+}
+
+/// Lectura cruda de la interfaz de la app, sin depender de nombres lógicos.
+/// Sirve para mostrar direcciones y valores reales en la pantalla Live.
+pub fn read_raw_monitor(c: &mut PlcClient) -> Value {
+    let db1000 = json!({
+        "start": maybe_bool(c, RECIPE_DB, OFF_START_STOP, START_BIT),
+        "stop": maybe_bool(c, RECIPE_DB, OFF_START_STOP, STOP_BIT),
+        "mask": maybe_real(c, RECIPE_DB, OFF_RECIPE_MASK),
+        "fan_time": maybe_real(c, RECIPE_DB, 8),
+        "door_time": maybe_real(c, RECIPE_DB, 12),
+        "frame_time": maybe_real(c, RECIPE_DB, 16),
+        "drain_time": maybe_real(c, RECIPE_DB, 86),
+        "defrost_time": maybe_real(c, RECIPE_DB, 90),
+        "light_time": maybe_real(c, RECIPE_DB, 94),
+        "tolerance": maybe_real(c, RECIPE_DB, OFF_TOLERANCE),
+    });
+    let db1001 = json!({
+        "measuring": maybe_bool(c, RESULT_DB, OFF_RESULT_STATUS, RES_MEASURING_BIT),
+        "finished": maybe_bool(c, RESULT_DB, OFF_RESULT_STATUS, RES_FINISHED_BIT),
+        "estop": maybe_bool(c, RESULT_DB, OFF_RESULT_STATUS, 4),
+        "error": maybe_bool(c, RESULT_DB, OFF_RESULT_STATUS, RES_ERROR_BIT),
+        "fan": maybe_real(c, RESULT_DB, 4),
+        "door": maybe_real(c, RESULT_DB, 8),
+        "frame": maybe_real(c, RESULT_DB, 12),
+        "drain": maybe_real(c, RESULT_DB, 16),
+        "defrost": maybe_real(c, RESULT_DB, 86),
+        "light": maybe_real(c, RESULT_DB, 90),
+    });
+    json!({ "DB1000": db1000, "DB1001": db1001 })
+}
+
 pub fn read_results(c: &mut PlcClient) -> Value {
     let mut out = BTreeMap::new();
     for (name, off) in RES_OFFSETS {

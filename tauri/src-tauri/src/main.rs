@@ -593,6 +593,20 @@ fn plc_read_results() -> serde_json::Value {
 }
 
 #[tauri::command]
+fn plc_raw_monitor() -> serde_json::Value {
+    if !config_flag("plc_enabled") {
+        return serde_json::json!({
+            "error": "PLC no habilitado. Actívelo en Configuración → PLC."
+        });
+    }
+    let cfg = plc_cfg();
+    match plc::connect(&cfg, 1500) {
+        Ok(mut c) => plc::read_raw_monitor(&mut c),
+        Err(e) => serde_json::json!({ "error": e }),
+    }
+}
+
+#[tauri::command]
 fn plc_set_mode(mode: i64) -> serde_json::Value {
     let cfg = plc_cfg();
     match plc::connect(&cfg, 1500) {
@@ -1703,6 +1717,7 @@ fn main() {
             plc_start,
             plc_stop,
             plc_read_results,
+            plc_raw_monitor,
             plc_set_mode,
             plc_get_mode,
             plc_test_component,
