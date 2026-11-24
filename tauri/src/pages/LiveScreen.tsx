@@ -95,9 +95,16 @@ export function LiveScreen({
   const [printer, setPrinter] = useState<any>({});
   const [last, setLast] = useState('');
   const [pcValues, setPcValues] = useState<Record<string, number>>({});
+  const [viewport, setViewport] = useState({ w: window.innerWidth, h: window.innerHeight });
 
   useEffect(() => {
     invoke<any>('get_config').then(c => setPrinter(c || {})).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const onResize = () => setViewport({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
   }, []);
 
   useEffect(() => {
@@ -180,7 +187,10 @@ export function LiveScreen({
   const hipotOk = hipot.connected === true;
   const plcDataReady = !!io && Object.keys(io.outputs ?? {}).length > 0;
   const resultDataReady = Object.keys(results).length > 0 && !results.error;
-  const hipotDataReady = !!hipotLive?.raw;
+  const hipotDataReady = !!hipotLive && (
+    (typeof hipotLive.raw === 'string' && hipotLive.raw.length > 0)
+    || ['voltage', 'current', 'duration'].some(key => typeof hipotLive[key] === 'number')
+  );
   const componentDataReady = resultDataReady || Object.keys(pcValues).length > 0;
 
   const analogReady = (key: string) =>
@@ -188,6 +198,12 @@ export function LiveScreen({
   const componentValue = (name: string) => pcValues[name] ?? results[name];
   const componentReady = (name: string) => componentDataReady && typeof componentValue(name) === 'number';
   const calibratedCount = ANALOG_GAUGES.filter(g => analogCalibrated[g.key] === true).length;
+
+  // Tamaños fluidos: compactos en 720p/768p, grandes en 1080p.
+  const compactHeight = viewport.h < 850;
+  const analogSize = viewport.h < 760 ? 68 : compactHeight ? 96 : viewport.h < 1000 ? 126 : 170;
+  const componentSize = viewport.h < 760 ? 88 : compactHeight ? 104 : viewport.h < 1000 ? 128 : 200;
+  const hipotSize = viewport.h < 760 ? 74 : compactHeight ? 88 : viewport.h < 1000 ? 98 : 150;
 
   const zoomValue = !zoom
     ? 0
@@ -221,7 +237,7 @@ export function LiveScreen({
       ];
       zoomRelated = ANALOG_GAUGES.map(g => ({
         label: g.label,
-        value: analogReady(g.key) ? fmtValue(analog[g.key]) : '—',
+        value: analogReady(g.key) ? fmtValue(analog[g.key], 3) : '—',
         unit: g.unit,
         active: g.key === zoom.key,
       }));
@@ -234,7 +250,7 @@ export function LiveScreen({
       ];
       zoomRelated = COMPONENTS.map(name => ({
         label: name,
-        value: componentReady(name) ? fmtValue(componentValue(name)) : '—',
+        value: componentReady(name) ? fmtValue(componentValue(name), 3) : '—',
         unit: 'A',
         active: name === zoom.key,
       }));
@@ -300,16 +316,16 @@ export function LiveScreen({
             <span className={`pill ${plcOk ? 'on' : 'off'}`}>{plcOk ? 'En línea' : 'Sin lectura'}</span>
             {plcOk && <span className={`pill ${calibratedCount === 4 ? 'on' : 'warn'}`}>{calibratedCount}/4 calibradas</span>}
           </div>
-          <div className="live-gauge-grid">
+          <div className="live-gauge-grid live-gauge-grid-analog">
             {ANALOG_GAUGES.map(g => (
               <Gauge
                 key={g.key}
-                label={g.label}
+                label={compactHeight ? g.key : g.label}
                 value={Number(analog[g.key] ?? 0)}
                 min={g.min}
                 max={g.max}
                 unit={g.unit}
-                size={112}
+                size={analogSize}
                 unknown={!analogReady(g.key)}
                 flashOnChange
                 onClick={() => openZoom({ kind: 'analog', key: g.key, label: g.label, min: g.min, max: g.max, unit: g.unit })}
@@ -334,8 +350,9 @@ export function LiveScreen({
             )}
           </div>
           <div className="live-raw-title">DB100 · PLC puente</div>
-          <table className="live-raw-table">
-            <tbody>
+          <div className="live-raw-scroll">
+            <table className="live-raw-table">
+              <tbody>
               <RawRow label="DB100.IB0 · entradas" value={raw?.DB100?.IB0} />
               <RawRow label="DB100.IB1 · entradas" value={raw?.DB100?.IB1} />
               <RawRow label="DB100.IB2 · entradas" value={raw?.DB100?.IB2} />
@@ -348,9 +365,10 @@ export function LiveScreen({
               <RawRow label="DB100.IW102 · IA2" value={raw?.DB100?.IW102} />
               <RawRow label="DB100.IW104 · IA3" value={raw?.DB100?.IW104} />
               <RawRow label="DB100.IW106 · IA4" value={raw?.DB100?.IW106} />
-              <RawRow label="DB100.IB0.0 · paro" value={raw?.DB100?.estop} />
-            </tbody>
-          </table>
+                <RawRow label="DB100.IB0.0 · paro" value={raw?.DB100?.estop} />
+              </tbody>
+            </table>
+          </div>
         </section>
 
         <section className="live-block live-block-components">
@@ -367,7 +385,7 @@ export function LiveScreen({
                 min={0}
                 max={25}
                 unit="A"
-                size={118}
+                size={componentSize}
                 unknown={!componentReady(name)}
                 flashOnChange
                 onClick={() => openZoom({ kind: 'component', key: name, label: name, min: 0, max: 25, unit: 'A' })}
@@ -387,15 +405,22 @@ export function LiveScreen({
             <span className={`pill ${hipotOk ? 'on' : 'off'}`}>{hipotOk ? 'Conectado' : 'Sin conexión'}</span>
           </div>
           <div className="live-gauge-grid live-gauge-grid-1">
-            <Gauge label="Voltaje" value={Number(hipotLive.voltage ?? 0)} min={0} max={5000} unit="V" size={124} unknown={!hipotOk || !hipotDataReady} flashOnChange onClick={() => openZoom({ kind: 'hipot', key: 'voltage', label: 'Voltaje Hipot', min: 0, max: 5000, unit: 'V' })} />
-            <Gauge label="Corriente" value={Number(hipotLive.current ?? 0)} min={0} max={20} unit="mA" size={124} unknown={!hipotOk || !hipotDataReady} flashOnChange onClick={() => openZoom({ kind: 'hipot', key: 'current', label: 'Corriente Hipot', min: 0, max: 20, unit: 'mA' })} />
-            <Gauge label="Duración" value={Number(hipotLive.duration ?? 0)} min={0} max={60} unit="s" size={124} unknown={!hipotOk || !hipotDataReady} flashOnChange onClick={() => openZoom({ kind: 'hipot', key: 'duration', label: 'Duración Hipot', min: 0, max: 60, unit: 's' })} />
+            <Gauge label="Voltaje" value={Number(hipotLive.voltage ?? 0)} min={0} max={5000} unit="V" size={hipotSize} unknown={!hipotOk || !hipotDataReady} flashOnChange onClick={() => openZoom({ kind: 'hipot', key: 'voltage', label: 'Voltaje Hipot', min: 0, max: 5000, unit: 'V' })} />
+            <Gauge label="Corriente" value={Number(hipotLive.current ?? 0)} min={0} max={20} unit="mA" size={hipotSize} unknown={!hipotOk || !hipotDataReady} flashOnChange onClick={() => openZoom({ kind: 'hipot', key: 'current', label: 'Corriente Hipot', min: 0, max: 20, unit: 'mA' })} />
+            <Gauge label="Duración" value={Number(hipotLive.duration ?? 0)} min={0} max={60} unit="s" size={hipotSize} unknown={!hipotOk || !hipotDataReady} flashOnChange onClick={() => openZoom({ kind: 'hipot', key: 'duration', label: 'Duración Hipot', min: 0, max: 60, unit: 's' })} />
           </div>
-          <div className="live-divider" />
-          <Metric label="Puerto" value={hipot.status?.port ?? '—'} />
-          <Metric label="Baudios" value={hipot.status?.baud ?? '—'} />
-          <Metric label="Estado" value={hipotLive.status || (phase === 'HIPOT_RUNNING' ? 'En prueba' : '—')} />
-          {hipotLive.raw && <div className="live-raw mono">{hipotLive.raw}</div>}
+          <div className="live-hipot-summary">
+            <div className="live-hipot-summary-label">ÚLTIMO ENSAYO</div>
+            <div className={`live-hipot-summary-value ${!hipotDataReady ? 'unknown' : /PASS|OK|BUENO/i.test(hipotLive.status || '') ? 'ok' : /FAIL|BAD|MALO/i.test(hipotLive.status || '') ? 'bad' : ''}`}>
+              {!hipotDataReady ? 'SIN LECTURA' : (hipotLive.status || (phase === 'HIPOT_RUNNING' ? 'EN PRUEBA' : '—'))}
+            </div>
+            <div className="live-hipot-summary-meta">
+              <span>Puerto <b>{hipot.status?.port ?? '—'}</b></span>
+              <span>Baudios <b>{hipot.status?.baud ?? '—'}</b></span>
+              <span>Duración <b>{fmtValue(hipotLive.duration)} s</b></span>
+            </div>
+            {hipotLive.raw && <div className="live-raw mono">{hipotLive.raw}</div>}
+          </div>
         </section>
 
         <section className="live-block live-block-system">
